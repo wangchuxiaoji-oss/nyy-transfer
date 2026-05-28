@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NYY Logo - #16 Variants</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #111; color: #fff; font-family: -apple-system, system-ui, sans-serif; padding: 48px 24px; }
+h1 { text-align: center; margin-bottom: 48px; font-weight: 200; font-size: 24px; color: #666; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; max-width: 1100px; margin: 0 auto; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 20px; padding: 48px 32px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.card:hover { border-color: #FF8A3D44; }
+.card svg { width: 240px; height: 120px; }
+.card p { margin-top: 20px; color: #555; font-size: 12px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<h1>#16 OUTLINE STACK + 3D ROTATION</h1>
+<div class="grid">
+
+<!-- A: Slight Y-axis tilt -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyA" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(40,18) skewY(-3)">
+    <use href="#nyyA" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.12" transform="translate(12,12)"/>
+    <use href="#nyyA" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.25" transform="translate(8,8)"/>
+    <use href="#nyyA" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.45" transform="translate(4,4)"/>
+    <use href="#nyyA" fill="none" stroke="#FF8A3D" stroke-width="2"/>
+  </g>
+</svg>
+<p>A - Slight Y Tilt</p>
+</div>
+
+<!-- B: Stronger perspective with scale -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyB" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(35,15)">
+    <use href="#nyyB" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.1" transform="translate(14,12) scale(0.96) skewX(3) skewY(-2)"/>
+    <use href="#nyyB" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.2" transform="translate(10,8) scale(0.97) skewX(2) skewY(-1.5)"/>
+    <use href="#nyyB" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.4" transform="translate(5,4) scale(0.985) skewX(1) skewY(-0.8)"/>
+    <use href="#nyyB" fill="none" stroke="#FF8A3D" stroke-width="2" opacity="1"/>
+  </g>
+</svg>
+<p>B - Perspective + Scale</p>
+</div>
+
+<!-- C: Rotated with fan-out shadows -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyC" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(40,12)">
+    <use href="#nyyC" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.1" transform="rotate(2,110,48) translate(10,10)"/>
+    <use href="#nyyC" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.2" transform="rotate(1.2,110,48) translate(6,6)"/>
+    <use href="#nyyC" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.4" transform="rotate(0.5,110,48) translate(3,3)"/>
+    <use href="#nyyC" fill="none" stroke="#FF8A3D" stroke-width="2" opacity="1"/>
+  </g>
+</svg>
+<p>C - Rotational Fan</p>
+</div>
+
+<!-- D: X-axis tilt (looking up) -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyD" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(40,20) skewX(-4)">
+    <use href="#nyyD" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.1" transform="translate(0,14) scale(1,0.92)"/>
+    <use href="#nyyD" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.22" transform="translate(0,9) scale(1,0.95)"/>
+    <use href="#nyyD" fill="none" stroke="#FF8A3D" stroke-width="1.3" opacity="0.45" transform="translate(0,4) scale(1,0.98)"/>
+    <use href="#nyyD" fill="none" stroke="#FF8A3D" stroke-width="2" opacity="1"/>
+  </g>
+</svg>
+<p>D - X-Axis Tilt (Looking Up)</p>
+</div>
+
+<!-- E: Combined skew + offset echo (deeper) -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyE" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(30,10)">
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="0.6" opacity="0.08" transform="translate(18,16) skewY(-4) scale(0.95)"/>
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.14" transform="translate(14,12) skewY(-3) scale(0.96)"/>
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.22" transform="translate(10,8) skewY(-2) scale(0.97)"/>
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(6,5) skewY(-1) scale(0.985)"/>
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="1.5" opacity="0.55" transform="translate(3,2.5) skewY(-0.5)"/>
+    <use href="#nyyE" fill="none" stroke="#FF8A3D" stroke-width="2.2" opacity="1"/>
+  </g>
+</svg>
+<p>E - Deep Perspective (6 layers)</p>
+</div>
+
+<!-- F: Converging to center -->
+<div class="card">
+<svg viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyyF" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z M150,15 L161,15 L176,44 L191,15 L202,15 L182,52 L182,80 L170,80 L170,52 Z"/>
+  </defs>
+  <g transform="translate(35,10)">
+    <use href="#nyyF" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.12" transform="translate(110,48) scale(1.12) translate(-110,-48)"/>
+    <use href="#nyyF" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.25" transform="translate(110,48) scale(1.06) translate(-110,-48)"/>
+    <use href="#nyyF" fill="none" stroke="#FF8A3D" stroke-width="1.5" opacity="0.5" transform="translate(110,48) scale(1.02) translate(-110,-48)"/>
+    <use href="#nyyF" fill="none" stroke="#FF8A3D" stroke-width="2.2" opacity="1"/>
+  </g>
+</svg>
+<p>F - Converging Zoom</p>
+</div>
+
+</div>
+</body>
+</html>

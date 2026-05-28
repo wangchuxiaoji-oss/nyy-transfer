@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 140" width="480" height="140" role="img" aria-label="拿呀呀 wordmark">
+  <title>拿呀呀</title>
+  <defs>
+    <linearGradient id="ink3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3A241B"/>
+      <stop offset="100%" stop-color="#2A1810"/>
+    </linearGradient>
+  </defs>
+
+  <g font-family="-apple-system, 'PingFang SC', 'Source Han Sans', 'Microsoft YaHei', sans-serif" font-weight="800" fill="url(#ink3)">
+    <text x="0" y="100" font-size="100" letter-spacing="-2">拿呀呀</text>
+  </g>
+  <!-- 末尾点缀小橘点 -->
+  <circle cx="346" cy="92" r="9" fill="#FF8A3D"/>
+</svg>

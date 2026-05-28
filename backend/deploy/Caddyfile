@@ -1,0 +1,49 @@
+# Caddyfile · nyy.app（生产模板）
+#
+# 部署：放到 /etc/caddy/Caddyfile，`sudo systemctl reload caddy`
+# Caddy 会自动签发 Let's Encrypt 证书。
+#
+# 路由策略：
+#   /api/*       → FastAPI（127.0.0.1:8000）
+#   /admin/*     → FastAPI（同上，未来可拆）
+#   /healthz     → FastAPI
+#   /readyz      → FastAPI
+#   /            → Next.js 静态导出（/var/www/nyy）
+#
+# 注意：6 位 base62 短码会落到根路径，由 Next.js 路由 `[code]/page.tsx` 处理；
+# 系统保留前缀（/api /admin /healthz /readyz /pricing /terms /privacy /dmca）
+# 不与 6 位短码冲突，由 Caddy 优先匹配。
+
+nyy.app, www.nyy.app {
+    encode zstd gzip
+
+    # 健康 / 就绪
+    @meta path /healthz /readyz
+    handle @meta {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # API + 管理后台 → FastAPI
+    @backend path /api/* /admin/*
+    handle @backend {
+        reverse_proxy 127.0.0.1:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # 其余（落地页 / 短码 / 静态）→ Next.js 静态导出
+    handle {
+        root * /var/www/nyy
+        try_files {path} {path}.html {path}/index.html /index.html
+        file_server
+    }
+
+    log {
+        output file /var/log/caddy/nyy.log {
+            roll_size 50mb
+            roll_keep 7
+        }
+        format json
+    }
+}

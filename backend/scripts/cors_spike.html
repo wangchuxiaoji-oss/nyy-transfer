@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>nyy · CORS spike</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 880px; margin: 32px auto; padding: 0 16px; color: #2a1810; }
+  h1 { color: #ff8a3d; letter-spacing: -0.02em; }
+  fieldset { border: 1px solid #f1e9dd; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; }
+  legend { color: #7a6a5f; padding: 0 6px; }
+  input[type=text] { width: 480px; padding: 6px 10px; border: 1px solid #f1e9dd; border-radius: 8px; font-family: monospace; }
+  button { background: #ff8a3d; color: white; border: 0; border-radius: 999px;
+           padding: 10px 20px; font-weight: 700; cursor: pointer; }
+  button:hover { background: #e36a1f; }
+  pre { background: #fff8f1; border: 1px solid #f1e9dd; border-radius: 12px; padding: 14px;
+        white-space: pre-wrap; word-break: break-all; max-height: 420px; overflow: auto;
+        font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+  .ok { color: #3e9d6a; }
+  .err { color: #d04a3a; }
+  .step { margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>nyy · CORS spike</h1>
+<p>验证浏览器能否直接 POST 到豆包 TOS。请在 Chrome 打开本页（DevTools Network 面板留意 OPTIONS / POST）。</p>
+
+<fieldset>
+  <legend>Spike server</legend>
+  <div class="step">
+    <label>Sign endpoint:
+      <input id="sign-url" type="text" value="http://127.0.0.1:9290/sign?file_size=8&file_ext=bin" />
+    </label>
+  </div>
+  <div class="step">
+    <button id="run">Run spike</button>
+    <span id="status"></span>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Result</legend>
+  <pre id="out">(尚未运行)</pre>
+</fieldset>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const out = $("out");
+const status = $("status");
+
+function log(line, cls) {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = line + "\n";
+  out.appendChild(span);
+}
+
+$("run").addEventListener("click", async () => {
+  out.textContent = "";
+  status.textContent = "running...";
+  status.className = "";
+
+  // Step 1: 调本地 spike server 拿 upload_url
+  const signUrl = $("sign-url").value.trim();
+  let signed;
+  try {
+    log(`[1] GET ${signUrl}`);
+    const r = await fetch(signUrl);
+    if (!r.ok) {
+      log(`    HTTP ${r.status}: ${await r.text()}`, "err");
+      status.textContent = "sign failed";
+      status.className = "err";
+      return;
+    }
+    signed = await r.json();
+    log(`    OK upload_url=${signed.upload_url}`, "ok");
+    log(`    store_uri=${signed.store_uri}`);
+  } catch (e) {
+    log(`    fetch error: ${e}`, "err");
+    status.textContent = "sign error";
+    status.className = "err";
+    return;
+  }
+
+  // Step 2: 浏览器直接 POST 到 TOS
+  // 注意：用 8 字节假数据；CRC32 必须匹配，spike 用固定 dummy "AAAAAAAA" -> CRC32 见下面常量
+  const dummy = new Uint8Array([0x6E, 0x79, 0x79, 0x73, 0x70, 0x69, 0x6B, 0x65]); // "nyyspike" 8 字节
+  // CRC32 of "nyyspike" precomputed via zlib.crc32(b'nyyspike') -> 0xdc044986
+  const crc32Hex = "dc044986";
+
+  log(`[2] POST ${signed.upload_url} (8 bytes)`);
+  try {
+    const t0 = performance.now();
+    const r = await fetch(signed.upload_url, {
+      method: "POST",
+      headers: {
+        "Authorization": signed.authorization,
+        "Content-CRC32": crc32Hex,
+      },
+      body: dummy,
+    });
+    const ms = (performance.now() - t0).toFixed(0);
+    log(`    HTTP ${r.status} in ${ms}ms`);
+    let body;
+    try { body = await r.text(); } catch { body = "(no body)"; }
+    log(`    body: ${body.slice(0, 400)}`);
+    if (r.ok) {
+      log(`✅ CORS allowed: 浏览器直传可行`, "ok");
+      status.textContent = "OK";
+      status.className = "ok";
+    } else {
+      log(`⚠️ HTTP ${r.status} 不一定是 CORS 问题，可能是 TOS 业务错误`, "err");
+      status.textContent = `http ${r.status}`;
+      status.className = "err";
+    }
+  } catch (e) {
+    log(`❌ fetch 抛异常：${e}`, "err");
+    log(`   通常意味着 CORS 预检失败或网络拒绝，看 DevTools Network 面板的 OPTIONS 状态`, "err");
+    status.textContent = "blocked";
+    status.className = "err";
+  }
+});
+</script>
+</body>
+</html>

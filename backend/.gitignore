@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.session.json
+.doubao_session.json
+
+# Build / dist
+build/
+dist/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# DB / logs
+*.db
+*.sqlite*
+*.log
+logs/
+
+# Local backups
+backups/
+*.dump
+*.gpg
+
+# Local docker volumes
+var/
+

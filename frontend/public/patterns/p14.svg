@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="160" fill="none" stroke="#c4956a" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- vertical strip: icons stacked vertically -->
+  <!-- upload -->
+  <path d="M45 20v-10m-4 4l4-4 4 4"/>
+  <!-- file -->
+  <path d="M30 40h10l5 5v12a2 2 0 0 1-2 2H30a2 2 0 0 1-2-2V42a2 2 0 0 1 2-2z"/>
+  <path d="M40 40v5h5"/>
+  <!-- nyy -->
+  <text x="28" y="80" font-family="monospace" font-size="13" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <!-- cloud -->
+  <path d="M30 105a5 5 0 0 1 0-10h.5a7 7 0 0 1 13 3 4.5 4.5 0 0 1-2 7H30z"/>
+  <!-- share -->
+  <circle cx="40" cy="125" r="2.5"/><circle cx="52" cy="118" r="2.5"/><circle cx="52" cy="132" r="2.5"/>
+  <line x1="42" y1="124" x2="50" y2="119"/><line x1="42" y1="126" x2="50" y2="131"/>
+  <!-- download -->
+  <path d="M45 145v10m-3-3l3 3 3-3"/>
+</svg>

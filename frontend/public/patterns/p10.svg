@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" fill="none" stroke="#c4956a" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- wide panoramic strip with all icons in a line -->
+  <!-- file -->
+  <path d="M15 35h9l5 5v12a2 2 0 0 1-2 2H15a2 2 0 0 1-2-2V37a2 2 0 0 1 2-2z"/>
+  <path d="M24 35v5h5"/><path d="M18 46h8M18 50h5"/>
+  <!-- upload -->
+  <path d="M55 52v-16m-4 4l4-4 4 4"/>
+  <!-- nyy brand -->
+  <text x="78" y="48" font-family="monospace" font-size="15" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <!-- cloud with arrow -->
+  <path d="M120 45a6 6 0 0 1 0-12h.5a8 8 0 0 1 15 4 5 5 0 0 1-2.5 8H120z"/>
+  <path d="M131 38v-6m-2.5 2.5l2.5-2.5 2.5 2.5"/>
+  <!-- share -->
+  <circle cx="165" cy="40" r="3"/><circle cx="178" cy="32" r="3"/><circle cx="178" cy="48" r="3"/>
+  <line x1="168" y1="39" x2="175" y2="33"/><line x1="168" y1="41" x2="175" y2="47"/>
+  <!-- lock -->
+  <rect x="200" y="38" width="11" height="13" rx="2"/><path d="M203 38v-4a5 5 0 0 1 10 0v4"/>
+  <!-- bottom row: folder, qr, download, link, dot -->
+  <path d="M20 80h10a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 30 90H17a1.5 1.5 0 0 1-1.5-1.5V81.5A1.5 1.5 0 0 1 17 80h1.5l1.5-2h3z"/>
+  <rect x="55" y="76" width="13" height="13" rx="1.5"/><rect x="57.5" y="78.5" width="4" height="4" fill="#c4956a" stroke="none"/><rect x="63" y="78.5" width="4" height="4" fill="#c4956a" stroke="none"/><rect x="57.5" y="84" width="4" height="4" fill="#c4956a" stroke="none"/>
+  <path d="M100 76v14m-3-3l3 3 3-3"/>
+  <path d="M130 82a4 4 0 0 1 5.5 0l2 2a4 4 0 0 1 0 5.5m-3.5-3.5a4 4 0 0 0-5.5 0l-2 2a4 4 0 0 0 0 5.5"/>
+  <circle cx="175" cy="83" r="4" fill="#c4956a" stroke="none" opacity="0.3"/>
+  <text x="195" y="88" font-family="monospace" font-size="9" fill="#c4956a" stroke="none" opacity="0.6">.app</text>
+</svg>

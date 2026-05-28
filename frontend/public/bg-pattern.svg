@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" fill="none" stroke="#9a7b5a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- file -->
+  <path d="M14 6h8l6 6v14a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>
+  <polyline points="22 6 22 12 28 12"/>
+  <!-- upload arrow -->
+  <path d="M70 28v-8m0 0l-4 4m4-4l4 4"/>
+  <rect x="62" y="28" width="16" height="4" rx="1"/>
+  <!-- cloud -->
+  <path d="M92 100a6 6 0 0 1 0-12h1a8 8 0 0 1 15 4 5 5 0 0 1-2 10H92z"/>
+  <!-- link -->
+  <path d="M18 72a5 5 0 0 1 7 0l2 2a5 5 0 0 1 0 7m-4-4a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 0 7l2 2"/>
+  <!-- folder -->
+  <path d="M72 68h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H68a2 2 0 0 1-2-2V70a2 2 0 0 1 2-2h2l2-2h4l2 2z"/>
+  <!-- share/send -->
+  <circle cx="44" cy="100" r="3"/>
+  <circle cx="56" cy="94" r="3"/>
+  <circle cx="56" cy="106" r="3"/>
+  <line x1="46.5" y1="101.5" x2="53.5" y2="104.5"/>
+  <line x1="46.5" y1="98.5" x2="53.5" y2="95.5"/>
+</svg>

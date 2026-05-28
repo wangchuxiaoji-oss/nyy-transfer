@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"/>
+<title>nyy.app Background Pattern - 20 Variants</title>
+<style>
+* { margin:0; box-sizing:border-box; }
+body { font-family:system-ui,sans-serif; background:#1a1a1a; color:#eee; padding:24px; }
+h1 { text-align:center; margin-bottom:8px; font-size:1.4rem; }
+p.sub { text-align:center; margin-bottom:24px; color:#888; font-size:0.85rem; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(380px,1fr)); gap:20px; }
+.card { border-radius:16px; overflow:hidden; border:1px solid #333; }
+.card-header { padding:10px 16px; background:#222; font-size:0.85rem; font-weight:600; display:flex; justify-content:space-between; }
+.card-header span { color:#888; font-weight:400; font-size:0.75rem; }
+.preview { position:relative; height:240px; }
+.pattern { position:absolute; inset:0; pointer-events:none; }
+.controls { text-align:center; margin:20px 0; }
+.controls button { padding:8px 20px; border-radius:8px; border:none; cursor:pointer;
+  background:#FF8A3D; color:#fff; font-weight:600; margin:0 6px; }
+.controls button.active { background:#d96a1f; }
+</style>
+</head>
+<body>
+<h1>nyy.app - Logo + File Icons Pattern (20 Variants)</h1>
+<p class="sub">拿呀² logo (complete) + Lucide file-transfer icons, all #FF8A3D, random rotation</p>
+<div class="controls">
+  <button onclick="setMode('light')" id="btn-light">Light Mode</button>
+  <button onclick="setMode('dark')" id="btn-dark" class="active">Dark Mode</button>
+</div>
+<div class="grid" id="grid"></div>
+<script>
+const variants = [
+  { name:'01 - 480px / 7% (current)', file:'bg.svg', size:'480px', opacity:0.07, desc:'Default applied to site now' },
+  { name:'02 - 400px / 7%', file:'bg.svg', size:'400px', opacity:0.07, desc:'Denser' },
+  { name:'03 - 350px / 7%', file:'bg.svg', size:'350px', opacity:0.07, desc:'Very dense' },
+  { name:'04 - 300px / 6%', file:'bg.svg', size:'300px', opacity:0.06, desc:'Wallpaper-dense, softer' },
+  { name:'05 - 550px / 7%', file:'bg.svg', size:'550px', opacity:0.07, desc:'More breathing room' },
+  { name:'06 - 480px / 10%', file:'bg.svg', size:'480px', opacity:0.10, desc:'Same density, bolder' },
+  { name:'07 - 480px / 5%', file:'bg.svg', size:'480px', opacity:0.05, desc:'Same density, subtler' },
+  { name:'08 - 400px / 9%', file:'bg.svg', size:'400px', opacity:0.09, desc:'Dense + punchy' },
+  { name:'09 - 350px / 5%', file:'bg.svg', size:'350px', opacity:0.05, desc:'Very dense but faint' },
+  { name:'10 - 450px / 8%', file:'bg.svg', size:'450px', opacity:0.08, desc:'Slightly tighter + visible' },
+  { name:'11 - 500px / 6%', file:'bg.svg', size:'500px', opacity:0.06, desc:'Balanced spacious' },
+  { name:'12 - 420px / 7%', file:'bg.svg', size:'420px', opacity:0.07, desc:'Compact balanced' },
+  { name:'13 - 380px / 8%', file:'bg.svg', size:'380px', opacity:0.08, desc:'Tight + clear' },
+  { name:'14 - 480px / 12%', file:'bg.svg', size:'480px', opacity:0.12, desc:'Very visible, decorative' },
+  { name:'15 - 320px / 6%', file:'bg.svg', size:'320px', opacity:0.06, desc:'Dense wallpaper, soft' },
+  { name:'16 - 450px / 6%', file:'bg.svg', size:'450px', opacity:0.06, desc:'Slightly tight, elegant' },
+  { name:'17 - 400px / 5%', file:'bg.svg', size:'400px', opacity:0.05, desc:'Dense but ghostly' },
+  { name:'18 - 500px / 9%', file:'bg.svg', size:'500px', opacity:0.09, desc:'Spacious + bold' },
+  { name:'19 - 350px / 9%', file:'bg.svg', size:'350px', opacity:0.09, desc:'Very dense + punchy' },
+  { name:'20 - 430px / 7.5%', file:'bg.svg', size:'430px', opacity:0.075, desc:'Sweet spot candidate' },
+];
+let mode = 'dark';
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  variants.forEach(p => {
+    const bg = mode === 'light' ? '#fefcf9' : '#121212';
+    const op = mode === 'light' ? p.opacity : p.opacity * 0.72;
+    grid.innerHTML += `<div class="card">
+      <div class="card-header">${p.name}<span>${p.desc}</span></div>
+      <div class="preview" style="background:${bg}">
+        <div class="pattern" style="background-image:url('/patterns/${p.file}');background-size:${p.size};opacity:${op}"></div>
+      </div>
+    </div>`;
+  });
+}
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-light').className = m==='light'?'active':'';
+  document.getElementById('btn-dark').className = m==='dark'?'active':'';
+  render();
+}
+render();
+</script>
+</body>
+</html>

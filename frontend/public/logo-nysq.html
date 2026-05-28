@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NYY → NY²</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #fff; font-family: -apple-system, system-ui, sans-serif; padding: 48px 24px; }
+h1 { text-align: center; margin-bottom: 8px; font-weight: 200; font-size: 22px; color: #555; letter-spacing: 2px; }
+.sub { text-align: center; color: #333; font-size: 13px; margin-bottom: 48px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px; max-width: 1200px; margin: 0 auto; }
+.card { background: #141414; border: 1px solid #222; border-radius: 20px; padding: 48px 28px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.card:hover { border-color: #FF8A3D55; }
+.card svg { width: 260px; height: 130px; }
+.card p { margin-top: 18px; color: #555; font-size: 11px; letter-spacing: 1.5px; }
+.tags { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.tag { font-size: 10px; background: #222; color: #666; padding: 2px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>NY² — Y 的二次方</h1>
+<p class="sub">基于 V3#1 Outline Stack + 轻微视角</p>
+<div class="grid">
+
+<!-- A: N + Y + ² superscript -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="n" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="y" d="M0,65 L0,0 L10,0 L26,30 L42,0 L53,0 L32,38 L32,65 L21,65 L21,38 Z"/>
+    <path id="sup2" d="M56,5 C56,-5 70,-12 76,-5 C82,2 70,12 56,15 L78,15 L78,2"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <!-- Echo layers -->
+    <use href="#n" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#y" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#sup2" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#n" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#y" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#sup2" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <!-- Main -->
+    <use href="#n" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#y" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#sup2" fill="none" stroke="#FF8A3D" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
+<p>A N + Y + ²</p>
+<div class="tags"><span class="tag">classic superscript</span></div>
+</div>
+
+<!-- B: ² integrated into Y's right arm -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nB" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="yB" d="M0,65 L0,0 L12,0 L28,30 L42,0 L48,0 L30,38 L30,65 L18,65 L18,38 Z"/>
+    <path id="sup2B" d="M48,0 C48,-14 68,-20 76,-10 C84,-2 72,10 48,14 L80,14 L80,-2"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <use href="#nB" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yB" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#sup2B" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#nB" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yB" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#sup2B" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#nB" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#yB" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#sup2B" fill="none" stroke="#FF8A3D" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
+<p>B ² floating at top-right</p>
+<div class="tags"><span class="tag">superscript offset</span></div>
+</div>
+
+<!-- C: Y² where 2 replaces right arm -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nC" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="yC" d="M0,65 L0,0 L12,0 L28,30 L44,0"/><!-- Y left half -->
+    <path id="y2C" d="M44,0 C44,-18 66,-26 76,-14 C86,-2 72,12 44,18 C44,18 72,12 72,4 C72,-2 62,-4 52,0"/><!-- Y right arm stylized as 2 -->
+    <path id="yLeg" d="M28,30 L28,65 L16,65 L16,30"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <use href="#nC" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yC" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#y2C" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yLeg" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#nC" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yC" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#y2C" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yLeg" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#nC" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#yC" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#y2C" fill="none" stroke="#FF8A3D" stroke-width="2.5" stroke-linecap="round"/>
+    <use href="#yLeg" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+  </g>
+</svg>
+<p>C ² = right arm of Y</p>
+<div class="tags"><span class="tag">integrated</span></div>
+</div>
+
+<!-- D: Bold Y² with large 2 -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nD" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="yD" d="M0,65 L0,0 L12,0 L28,30 L44,0 M28,30 L28,65 L16,65 L16,30"/>
+    <!-- Large 2, slightly overlapping Y -->
+    <path id="big2" d="M45,-2 C45,-16 62,-24 72,-16 C82,-8 72,6 52,12 L78,12 L78,-2"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <use href="#nD" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yD" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#big2" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#nD" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yD" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#big2" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#nD" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#yD" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#big2" fill="none" stroke="#FF8A3D" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
+<p>D Large ² overlapping Y</p>
+<div class="tags"><span class="tag">bold 2</span></div>
+</div>
+
+<!-- E: N + Y with dot and "2" -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nE" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="yE" d="M0,65 L0,0 L12,0 L28,30 L44,0 M28,30 L28,65 L16,65 L16,30"/>
+    <path id="dot2" d="M48,-15 L60,-15 M54,-15 L54,-5 M48,-2 C48,-8 60,-12 60,-5 C60,2 50,5 46,2"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <use href="#nE" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yE" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#dot2" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#nE" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yE" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#dot2" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#nE" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#yE" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#dot2" fill="none" stroke="#FF8A3D" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>
+<p>E Y · 2</p>
+<div class="tags"><span class="tag">dot + 2</span></div>
+</div>
+
+<!-- F: Y² with 2 below, like subscript -->
+<div class="card">
+<svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nF" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z"/>
+    <path id="yF" d="M0,65 L0,0 L10,0 L26,30 L42,0 L48,0 L32,38 L32,65 L21,65 L21,38 Z"/>
+    <path id="sub2" d="M40,68 L56,68 M48,68 L48,78 M40,80 C40,72 52,72 56,78 C60,84 48,88 42,86"/>
+  </defs>
+  <g transform="translate(35,20) skewY(-3)">
+    <use href="#nF" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#yF" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#sub2" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.15" transform="translate(8,8)"/>
+    <use href="#nF" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#yF" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#sub2" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.35" transform="translate(4,4)"/>
+    <use href="#nF" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#yF" fill="none" stroke="#FF8A3D" stroke-width="2.2"/>
+    <use href="#sub2" fill="none" stroke="#FF8A3D" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>
+<p>F Y₂</p>
+<div class="tags"><span class="tag">subscript 2</span></div>
+</div>
+
+</div>
+</body>
+</html>

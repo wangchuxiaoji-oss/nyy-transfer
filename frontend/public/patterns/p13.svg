@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="130" height="130" fill="none" stroke="#c4956a" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- circular arrangement around nyy center -->
+  <!-- center brand -->
+  <circle cx="65" cy="65" r="20" stroke-dasharray="3 4" opacity="0.4"/>
+  <text x="49" y="70" font-family="monospace" font-size="13" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <!-- icons on the circle perimeter -->
+  <!-- top: upload -->
+  <path d="M65 18v-8m-3 3l3-3 3 3"/>
+  <!-- right: file -->
+  <path d="M100 55h7l3 3v8a1.5 1.5 0 0 1-1.5 1.5H100a1.5 1.5 0 0 1-1.5-1.5V56.5a1.5 1.5 0 0 1 1.5-1.5z"/>
+  <path d="M107 55v3h3"/>
+  <!-- bottom: cloud -->
+  <path d="M55 108a4 4 0 0 1 0-8h.5a5.5 5.5 0 0 1 10.5 2.5 3.5 3.5 0 0 1-1.5 5.5H55z"/>
+  <!-- left: folder -->
+  <path d="M15 58h8a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 23 66.5H13a1.5 1.5 0 0 1-1.5-1.5V59.5A1.5 1.5 0 0 1 13 58h1l1-1.5h2z"/>
+  <!-- diagonal corners: share, lock -->
+  <circle cx="105" cy="105" r="2"/><circle cx="115" cy="98" r="2"/><circle cx="115" cy="112" r="2"/>
+  <line x1="107" y1="104" x2="113" y2="99"/><line x1="107" y1="106" x2="113" y2="111"/>
+  <rect x="15" y="15" width="8" height="10" rx="1.5"/><path d="M17 15v-3a3 3 0 0 1 6 0v3"/>
+</svg>

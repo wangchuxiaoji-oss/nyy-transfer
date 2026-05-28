@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" fill="none" stroke="#c4956a" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- isometric/3D style icons -->
+  <!-- 3D file -->
+  <g transform="translate(15,15)">
+    <path d="M0 8l15-8 15 8v20l-15 8-15-8z" opacity="0.6"/>
+    <path d="M0 8l15 8 15-8"/><path d="M15 16v20"/>
+  </g>
+  <!-- nyy on angle -->
+  <text x="60" y="25" font-family="monospace" font-size="10" font-weight="bold" fill="#c4956a" stroke="none" transform="skewX(-10)">nyy</text>
+  <!-- upload cube -->
+  <g transform="translate(60,55)">
+    <path d="M15 5v-5m-3 2l3-3 3 3"/>
+    <rect x="5" y="8" width="20" height="14" rx="2" opacity="0.5"/>
+  </g>
+  <!-- cloud small -->
+  <path d="M10 75a4 4 0 0 1 0-8h.5a5.5 5.5 0 0 1 10.5 2.5 3.5 3.5 0 0 1-1.5 5.5H10z"/>
+</svg>

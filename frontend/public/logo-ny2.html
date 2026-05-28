@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NYY Logo - NY Squared</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #111; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 48px 24px; }
+h1 { text-align: center; margin-bottom: 10px; font-weight: 200; font-size: 24px; color: #666; }
+.sub { text-align: center; color: #444; font-size: 13px; margin-bottom: 42px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; max-width: 1100px; margin: 0 auto; }
+.card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 20px; padding: 54px 32px 34px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.card:hover { border-color: #FF8A3D44; }
+.card svg { width: 300px; height: 140px; }
+.card p { margin-top: 18px; color: #555; font-size: 12px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<h1>NY² - Based on V3 #1</h1>
+<p class="sub">保留 V3#1 的 outline stack 和轻微 skew，只把 YY 改为 Y 的二次方</p>
+
+<div class="grid">
+
+<!-- A: direct NY squared -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyA" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoA" d="M148,20 C148,12 154,7 163,7 C172,7 178,12 178,20 C178,27 173,32 165,38 L151,48 L179,48"/>
+  </defs>
+  <g transform="translate(50,18) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyA"/><use href="#twoA"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyA"/><use href="#twoA"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyA"/><use href="#twoA"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyA"/><use href="#twoA"/></g>
+  </g>
+</svg>
+<p>A - Smaller Superscript</p>
+</div>
+
+<!-- A2: even smaller exponent -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyA2" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoA2" d="M149,19 C149,12 154,8 162,8 C170,8 175,13 175,19 C175,25 171,30 164,35 L152,43 L176,43"/>
+  </defs>
+  <g transform="translate(50,18) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyA2"/><use href="#twoA2"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyA2"/><use href="#twoA2"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyA2"/><use href="#twoA2"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyA2"/><use href="#twoA2"/></g>
+  </g>
+</svg>
+<p>A2 - Tiny Superscript</p>
+</div>
+
+<!-- A3: smallest exponent -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyA3" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoA3" d="M150,18 C150,12 154,9 160,9 C167,9 171,13 171,18 C171,23 168,27 162,31 L153,38 L172,38"/>
+  </defs>
+  <g transform="translate(50,18) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyA3"/><use href="#twoA3"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyA3"/><use href="#twoA3"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyA3"/><use href="#twoA3"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyA3"/><use href="#twoA3"/></g>
+  </g>
+</svg>
+<p>A3 - Smaller Superscript</p>
+</div>
+
+<!-- B: tighter exponent -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyB" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoB" d="M142,22 C142,12 149,6 159,6 C170,6 176,13 176,22 C176,29 171,35 162,41 L146,52 L177,52"/>
+  </defs>
+  <g transform="translate(54,18) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyB"/><use href="#twoB"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyB"/><use href="#twoB"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyB"/><use href="#twoB"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyB"/><use href="#twoB"/></g>
+  </g>
+</svg>
+<p>B - Tighter Superscript</p>
+</div>
+
+<!-- C: larger exponent -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyC" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoC" d="M147,27 C147,13 157,5 170,5 C184,5 193,14 193,27 C193,37 185,44 174,52 L152,68 L195,68"/>
+  </defs>
+  <g transform="translate(44,16) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyC"/><use href="#twoC"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyC"/><use href="#twoC"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyC"/><use href="#twoC"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyC"/><use href="#twoC"/></g>
+  </g>
+</svg>
+<p>C - Larger Exponent</p>
+</div>
+
+<!-- D: exponent slightly detached -->
+<div class="card">
+<svg viewBox="0 0 300 130" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="nyD" d="M20,80 L20,15 L30,15 L58,60 L58,15 L68,15 L68,80 L58,80 L30,35 L30,80 Z M85,15 L96,15 L111,44 L126,15 L137,15 L117,52 L117,80 L105,80 L105,52 Z"/>
+    <path id="twoD" d="M156,21 C156,11 163,5 173,5 C184,5 191,12 191,21 C191,29 185,35 176,42 L160,53 L192,53"/>
+  </defs>
+  <g transform="translate(42,18) skewY(-3)" fill="none" stroke="#FF8A3D" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.12" stroke-width="1" transform="translate(12,12)"><use href="#nyD"/><use href="#twoD"/></g>
+    <g opacity="0.25" stroke-width="1" transform="translate(8,8)"><use href="#nyD"/><use href="#twoD"/></g>
+    <g opacity="0.45" stroke-width="1.2" transform="translate(4,4)"><use href="#nyD"/><use href="#twoD"/></g>
+    <g opacity="1" stroke-width="2"><use href="#nyD"/><use href="#twoD"/></g>
+  </g>
+</svg>
+<p>D - Detached Superscript</p>
+</div>
+
+</div>
+</body>
+</html>

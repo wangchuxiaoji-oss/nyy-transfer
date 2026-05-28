@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NYY - V3#1 Big Angle Variants</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #fff; font-family: -apple-system, system-ui, sans-serif; padding: 48px 24px; }
+h1 { text-align: center; margin-bottom: 12px; font-weight: 200; font-size: 22px; color: #555; letter-spacing: 2px; }
+.sub { text-align: center; color: #333; font-size: 13px; margin-bottom: 48px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px; max-width: 1200px; margin: 0 auto; }
+.card { background: #141414; border: 1px solid #222; border-radius: 20px; padding: 48px 28px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.card:hover { border-color: #FF8A3D55; }
+.card svg { width: 280px; height: 140px; }
+.card p { margin-top: 18px; color: #555; font-size: 11px; letter-spacing: 1.5px; }
+.tags { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.tag { font-size: 10px; background: #222; color: #666; padding: 2px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>NY.YY — BASE: #16 OUTLINE STACK</h1>
+<p class="sub">大角度透视 + 创意变体</p>
+<div class="grid">
+
+<!-- 1: Aggressive skewY -20°, deep layers -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny1" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(55,22)">
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="0.4" opacity="0.06" transform="skewY(-20) translate(35,30) scale(0.78)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="0.5" opacity="0.1" transform="skewY(-16) translate(28,24) scale(0.82)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="0.6" opacity="0.15" transform="skewY(-12) translate(21,18) scale(0.86)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.22" transform="skewY(-8) translate(14,12) scale(0.9)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.35" transform="skewY(-5) translate(8,7) scale(0.94)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="1.3" opacity="0.5" transform="skewY(-2.5) translate(3,3) scale(0.97)"/>
+    <use href="#ny1" fill="none" stroke="#FF8A3D" stroke-width="2.2" opacity="1"/>
+  </g>
+</svg>
+<p>1 -20° Deep Stack</p>
+<div class="tags"><span class="tag">7 layers</span><span class="tag">skewY -20°</span></div>
+</div>
+
+<!-- 2: skewY + skewX combined, large -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny2" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(48,18)">
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="0.4" opacity="0.06" transform="skewY(-25) skewX(8) translate(38,36) scale(0.74)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="0.55" opacity="0.1" transform="skewY(-20) skewX(6) translate(30,28) scale(0.78)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="0.7" opacity="0.16" transform="skewY(-15) skewX(4) translate(22,20) scale(0.83)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="0.9" opacity="0.25" transform="skewY(-10) skewX(2.5) translate(14,12) scale(0.88)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="1.1" opacity="0.38" transform="skewY(-6) skewX(1) translate(7,6) scale(0.93)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="1.5" opacity="0.55" transform="skewY(-2.5) translate(2,2) scale(0.97)"/>
+    <use href="#ny2" fill="none" stroke="#FF8A3D" stroke-width="2.5" opacity="1"/>
+  </g>
+</svg>
+<p>2 skewY -25° + skewX 8°</p>
+<div class="tags"><span class="tag">7 layers</span><span class="tag">dual skew</span></div>
+</div>
+
+<!-- 3: Extreme scale disparity front-to-back -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny3" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(70,30)">
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="0.3" opacity="0.04" transform="skewY(-22) skewX(6) translate(42,38) scale(0.7)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="0.4" opacity="0.08" transform="skewY(-18) skewX(5) translate(34,30) scale(0.75)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="0.55" opacity="0.14" transform="skewY(-14) skewX(4) translate(26,22) scale(0.8)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="0.7" opacity="0.22" transform="skewY(-10) skewX(3) translate(18,15) scale(0.86)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.35" transform="skewY(-6) skewX(1.5) translate(10,8) scale(0.92)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="1.5" opacity="0.55" transform="skewY(-3) translate(4,3) scale(0.96)"/>
+    <use href="#ny3" fill="none" stroke="#FF8A3D" stroke-width="2.8" opacity="1"/>
+  </g>
+</svg>
+<p>3 Extreme Scale Disparity</p>
+<div class="tags"><span class="tag">0.7→1.0</span><span class="tag">8 layers</span></div>
+</div>
+
+<!-- 4: Rotation + skew hybrid -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny4" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(50,18)">
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="0.4" opacity="0.06" transform="rotate(-12,93,32) skewY(-8) translate(16,22) scale(0.85)"/>
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="0.6" opacity="0.12" transform="rotate(-9,93,32) skewY(-6) translate(12,16) scale(0.88)"/>
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.2" transform="rotate(-6,93,32) skewY(-4) translate(8,11) scale(0.92)"/>
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.32" transform="rotate(-3.5,93,32) skewY(-2) translate(5,6) scale(0.95)"/>
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="1.3" opacity="0.48" transform="rotate(-1.5,93,32) translate(2,2) scale(0.98)"/>
+    <use href="#ny4" fill="none" stroke="#FF8A3D" stroke-width="2.2" opacity="1"/>
+  </g>
+</svg>
+<p>4 Rotate -12° + skew</p>
+<div class="tags"><span class="tag">6 layers</span><span class="tag">hybrid</span></div>
+</div>
+
+<!-- 5: Filled shadow blocks -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny5" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+    <filter id="blur5"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <g transform="translate(50,20)">
+    <use href="#ny5" fill="#FF8A3D" filter="url(#blur5)" opacity="0.08" transform="skewY(-18) translate(28,24) scale(0.8)"/>
+    <use href="#ny5" fill="#FF8A3D" opacity="0.04" transform="skewY(-18) translate(28,24) scale(0.8)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="0.5" opacity="0.08" transform="skewY(-14) translate(22,18) scale(0.84)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="0.7" opacity="0.14" transform="skewY(-10) translate(16,13) scale(0.88)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="0.9" opacity="0.22" transform="skewY(-7) translate(10,8) scale(0.92)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.36" transform="skewY(-4) translate(5,4) scale(0.95)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="1.6" opacity="0.55" transform="skewY(-1.5) translate(2,1) scale(0.98)"/>
+    <use href="#ny5" fill="none" stroke="#FF8A3D" stroke-width="2.5" opacity="1"/>
+  </g>
+</svg>
+<p>5 Filled + Blur Shadow</p>
+<div class="tags"><span class="tag">8 layers</span><span class="tag">blur fill</span></div>
+</div>
+
+<!-- 6: Gradient stroke echo -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g6" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF5500"/>
+      <stop offset="100%" stop-color="#FFB080"/>
+    </linearGradient>
+    <path id="ny6" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(48,15)">
+    <use href="#ny6" fill="none" stroke="#FF5500" stroke-width="0.5" opacity="0.1" transform="skewY(-22) translate(36,30) scale(0.76)"/>
+    <use href="#ny6" fill="none" stroke="#FF6600" stroke-width="0.7" opacity="0.18" transform="skewY(-17) translate(28,22) scale(0.81)"/>
+    <use href="#ny6" fill="none" stroke="#FF7722" stroke-width="0.9" opacity="0.28" transform="skewY(-12) translate(20,15) scale(0.86)"/>
+    <use href="#ny6" fill="none" stroke="#FF8A3D" stroke-width="1.2" opacity="0.4" transform="skewY(-7) translate(12,9) scale(0.91)"/>
+    <use href="#ny6" fill="none" stroke="#FF9E55" stroke-width="1.5" opacity="0.55" transform="skewY(-3) translate(5,3) scale(0.96)"/>
+    <use href="#ny6" fill="none" stroke="url(#g6)" stroke-width="2.5" opacity="1"/>
+  </g>
+</svg>
+<p>6 Color Gradient Echo</p>
+<div class="tags"><span class="tag">6 layers</span><span class="tag">color shift</span></div>
+</div>
+
+<!-- 7: Positive skew + negative Y -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny7" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(60,22)">
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="0.5" opacity="0.06" transform="skewY(15) skewX(-5) translate(30,28) scale(0.8)"/>
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="0.65" opacity="0.12" transform="skewY(12) skewX(-4) translate(24,22) scale(0.84)"/>
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="0.8" opacity="0.2" transform="skewY(9) skewX(-3) translate(18,16) scale(0.88)"/>
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.3" transform="skewY(6) skewX(-2) translate(12,10) scale(0.92)"/>
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="1.3" opacity="0.45" transform="skewY(3) skewX(-1) translate(6,5) scale(0.96)"/>
+    <use href="#ny7" fill="none" stroke="#FF8A3D" stroke-width="2.2" opacity="1"/>
+  </g>
+</svg>
+<p>7 Inverted Perspective</p>
+<div class="tags"><span class="tag">skewY +15°</span><span class="tag">6 layers</span></div>
+</div>
+
+<!-- 8: Extreme thin-thick contrast -->
+<div class="card">
+<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="ny8" d="M0,65 L0,0 L10,0 L40,48 L40,0 L50,0 L50,65 L40,65 L10,17 L10,65 Z M65,0 L76,0 L92,30 L108,0 L119,0 L98,38 L98,65 L86,65 L86,38 Z M132,0 L143,0 L159,30 L175,0 L186,0 L165,38 L165,65 L153,65 L153,38 Z"/>
+  </defs>
+  <g transform="translate(65,25)">
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="0.2" opacity="0.05" transform="skewY(-22) skewX(7) translate(40,36) scale(0.72)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="0.3" opacity="0.1" transform="skewY(-18) skewX(5) translate(32,28) scale(0.76)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="0.5" opacity="0.16" transform="skewY(-14) skewX(3) translate(24,20) scale(0.82)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="0.7" opacity="0.24" transform="skewY(-10) skewX(2) translate(16,13) scale(0.87)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="1" opacity="0.36" transform="skewY(-6) skewX(1) translate(9,7) scale(0.92)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="1.5" opacity="0.52" transform="skewY(-3) translate(4,3) scale(0.96)"/>
+    <use href="#ny8" fill="none" stroke="#FF8A3D" stroke-width="3.5" opacity="1"/>
+  </g>
+</svg>
+<p>8 Thin→Bold Contrast</p>
+<div class="tags"><span class="tag">0.2→3.5px</span><span class="tag">7 layers</span></div>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+# 本地开发用 docker-compose
+#
+# 启动：docker compose -f docker-compose.dev.yml --env-file .env.docker up -d
+# 停止：docker compose -f docker-compose.dev.yml down
+# 数据：./var/pgdata、./var/redisdata 持久化在仓库（已 .gitignore）
+#
+# 端口：
+#   Postgres -> 127.0.0.1:5432
+#   Redis    -> 127.0.0.1:6379
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nyy-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nyy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nyy}
+      POSTGRES_DB: ${POSTGRES_DB:-nyy}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ./var/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nyy} -d ${POSTGRES_DB:-nyy}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: nyy-redis-dev
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./var/redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

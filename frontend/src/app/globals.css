@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #fefcf9;
+  --foreground: #2a1810;
+  --card: #ffffff;
+  --card-foreground: #2a1810;
+  --border: #f9ead4;
+  --muted: #f5f0ea;
+  --muted-foreground: #7a6855;
+}
+
+.dark {
+  --background: #121212;
+  --foreground: #f0ebe5;
+  --card: #1e1e1e;
+  --card-foreground: #f0ebe5;
+  --border: #2e2e2e;
+  --muted: #1a1a1a;
+  --muted-foreground: #a09080;
+}
+
+html {
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+html::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge */
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@layer components {
+  .type-display {
+    @apply text-2xl font-semibold leading-tight tracking-tight sm:text-3xl;
+  }
+
+  .type-title {
+    @apply text-xl font-semibold leading-tight tracking-tight;
+  }
+
+  .type-section {
+    @apply text-lg font-semibold leading-snug;
+  }
+
+  .type-body {
+    @apply text-base leading-6;
+  }
+
+  .type-body-strong {
+    @apply text-base font-medium leading-6;
+  }
+
+  .type-body-sm {
+    @apply text-sm leading-5;
+  }
+
+  .type-label {
+    @apply text-sm font-medium leading-5;
+  }
+
+  .type-action {
+    @apply text-sm font-medium leading-5;
+  }
+
+  .type-caption {
+    @apply text-xs leading-4;
+  }
+
+  .type-file-name {
+    @apply text-base leading-6;
+  }
+
+  .type-file-meta {
+    @apply text-sm leading-5;
+  }
+
+  .btn-primary {
+    @apply min-h-[44px] rounded-xl bg-gradient-to-br from-[#FF8A3D] to-[#e0652a] px-5 text-sm font-semibold text-white shadow-[0_2px_12px_rgba(255,138,61,0.35)] transition-all hover:shadow-[0_4px_20px_rgba(255,138,61,0.45)] hover:brightness-110 active:scale-[0.97] disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed;
+  }
+
+  .glass-card {
+    position: relative;
+    border-radius: 2rem;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+  }
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    inset: -20px;
+    background-image: url('/patterns/bg.svg');
+    background-size: 1200px 1200px;
+    opacity: 0.12;
+    filter: blur(12px);
+    z-index: 0;
+    pointer-events: none;
+  }
+  .glass-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .dark .glass-card {
+    background: rgba(26, 26, 26, 0.82);
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  }
+  .dark .glass-card::before {
+    opacity: 0.06;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .bg-icon-pattern {
+    background-image: url('/patterns/bg.svg');
+    background-repeat: repeat;
+    background-size: 1200px 1200px;
+    opacity: 0.15;
+  }
+  .dark .bg-icon-pattern {
+    opacity: 0.10;
+  }
+}

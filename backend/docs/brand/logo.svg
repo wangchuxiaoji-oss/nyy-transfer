@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" width="720" height="200" role="img" aria-label="拿呀呀 nyy.app">
+  <title>拿呀呀 · nyy.app</title>
+  <defs>
+    <radialGradient id="bg2" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#FFE3B0"/>
+      <stop offset="55%" stop-color="#FFC9A0"/>
+      <stop offset="100%" stop-color="#FF8A3D"/>
+    </radialGradient>
+    <linearGradient id="file2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD9A8"/>
+      <stop offset="100%" stop-color="#FFB36E"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3A241B"/>
+      <stop offset="100%" stop-color="#2A1810"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 吉祥物头像（左侧） -->
+  <g transform="translate(20 20) scale(0.625)">
+    <circle cx="128" cy="128" r="120" fill="url(#bg2)" stroke="#E36A1F" stroke-width="6"/>
+    <path d="M118 36 Q124 22 132 30 Q138 18 146 28 Q150 36 142 40 Z"
+          fill="#E36A1F" stroke="#2A1810" stroke-width="3" stroke-linejoin="round"/>
+    <ellipse cx="128" cy="108" rx="62" ry="58" fill="#FFEBC5" stroke="#2A1810" stroke-width="5"/>
+    <ellipse cx="92" cy="120" rx="10" ry="6" fill="#FFB497" opacity="0.85"/>
+    <ellipse cx="164" cy="120" rx="10" ry="6" fill="#FFB497" opacity="0.85"/>
+    <circle cx="106" cy="104" r="6" fill="#2A1810"/>
+    <circle cx="150" cy="104" r="6" fill="#2A1810"/>
+    <circle cx="108" cy="102" r="2" fill="#FFFFFF"/>
+    <circle cx="152" cy="102" r="2" fill="#FFFFFF"/>
+    <path d="M116 128 Q128 138 140 128" fill="none" stroke="#2A1810" stroke-width="4" stroke-linecap="round"/>
+    <path d="M62 178 Q60 158 78 156 Q92 154 96 168 L100 196 Z"
+          fill="#FFEBC5" stroke="#2A1810" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M194 178 Q196 158 178 156 Q164 154 160 168 L156 196 Z"
+          fill="#FFEBC5" stroke="#2A1810" stroke-width="5" stroke-linejoin="round"/>
+    <g transform="translate(80 168)">
+      <rect x="0" y="0" width="96" height="60" rx="10" ry="10" fill="url(#file2)" stroke="#2A1810" stroke-width="5"/>
+      <path d="M0 12 Q0 0 12 0 L36 0 L46 10 L96 10" fill="none" stroke="#2A1810" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M48 44 L48 22 M40 30 L48 22 L56 30" fill="none" stroke="#2A1810" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+
+  <!-- 中文字标 -->
+  <g transform="translate(200 0)" font-family="-apple-system, 'PingFang SC', 'Source Han Sans', 'Microsoft YaHei', sans-serif" font-weight="800" fill="url(#ink)">
+    <text x="0" y="120" font-size="110" letter-spacing="-2">拿呀呀</text>
+    <!-- 域名小标 -->
+    <text x="6" y="170" font-size="28" font-family="'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace" font-weight="500" fill="#7A6A5F" letter-spacing="2">nyy.app</text>
+    <!-- 装饰小圆点 -->
+    <circle cx="356" cy="160" r="6" fill="#FF8A3D"/>
+  </g>
+</svg>

@@ -1,0 +1,41 @@
+# 后端依赖（v1 骨架）
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# DB
+sqlalchemy[asyncio]==2.0.36
+alembic==1.13.3
+asyncpg==0.30.0
+psycopg[binary]==3.2.3
+
+# 缓存 / 限流 / 队列
+redis==5.2.0
+slowapi==0.1.9
+
+# 调度
+apscheduler==3.10.4
+
+# 安全
+argon2-cffi==23.1.0
+itsdangerous==2.2.0
+pyjwt==2.9.0
+
+# 邮件发送
+aiosmtplib==3.0.2
+
+# HTTP 客户端
+httpx==0.27.2
+
+# 邮件 / 模板
+jinja2==3.1.4
+
+# 日志
+structlog==24.4.0
+
+# 测试
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx[http2]==0.27.2

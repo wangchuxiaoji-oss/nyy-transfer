@@ -1,0 +1,53 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.session.json
+.doubao_session.json
+
+# Runtime data / local volumes
+pgdata/
+redisdata/
+var/
+logs/
+*.log
+*.db
+*.sqlite*
+
+# Legacy duplicate frontend copy
+backend/frontend/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Build / dist
+build/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local backups
+backups/
+*.dump
+*.gpg

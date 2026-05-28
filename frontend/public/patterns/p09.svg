@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="none" stroke="#c4956a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+  <!-- minimal: just file + upload arrow + nyy, very small tile -->
+  <path d="M12 10h8l4 4v10a1.5 1.5 0 0 1-1.5 1.5H12a1.5 1.5 0 0 1-1.5-1.5V11.5A1.5 1.5 0 0 1 12 10z"/>
+  <path d="M20 10v4h4"/>
+  <path d="M55 25v-12m-3 3l3-3 3 3"/>
+  <text x="25" y="58" font-family="monospace" font-size="11" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <circle cx="62" cy="58" r="2" fill="#c4956a" stroke="none" opacity="0.5"/>
+</svg>

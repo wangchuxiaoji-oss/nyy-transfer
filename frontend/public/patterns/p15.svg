@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" fill="none" stroke="#c4956a" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- brick/offset pattern: alternating rows -->
+  <!-- row 1 -->
+  <path d="M15 20h7l3 3v8a1 1 0 0 1-1 1H15a1 1 0 0 1-1-1V21a1 1 0 0 1 1-1z"/>
+  <path d="M22 20v3h3"/>
+  <path d="M65 25v-8m-3 3l3-3 3 3"/>
+  <text x="95" y="27" font-family="monospace" font-size="10" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <path d="M140 25a4 4 0 0 1 0-8h.5a5 5 0 0 1 9.5 2.5 3 3 0 0 1-1.5 5.5H140z"/>
+  <!-- row 2 offset -->
+  <circle cx="35" cy="65" r="2"/><circle cx="45" cy="59" r="2"/><circle cx="45" cy="71" r="2"/>
+  <line x1="37" y1="64" x2="43" y2="60"/><line x1="37" y1="66" x2="43" y2="70"/>
+  <path d="M85 55h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H82a1 1 0 0 1-1-1V56a1 1 0 0 1 1-1h1.5l1-1.5h2z"/>
+  <rect x="125" y="55" width="8" height="10" rx="1.5"/><path d="M127 55v-3a3 3 0 0 1 6 0v3"/>
+  <!-- row 3 -->
+  <path d="M15 105h7l3 3v8a1 1 0 0 1-1 1H15a1 1 0 0 1-1-1V106a1 1 0 0 1 1-1z"/>
+  <path d="M22 105v3h3"/>
+  <path d="M65 110v-8m-3 3l3-3 3 3"/>
+  <text x="95" y="112" font-family="monospace" font-size="10" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <path d="M140 110a4 4 0 0 1 0-8h.5a5 5 0 0 1 9.5 2.5 3 3 0 0 1-1.5 5.5H140z"/>
+  <!-- row 4 offset -->
+  <circle cx="35" cy="150" r="2"/><circle cx="45" cy="144" r="2"/><circle cx="45" cy="156" r="2"/>
+  <line x1="37" y1="149" x2="43" y2="145"/><line x1="37" y1="151" x2="43" y2="155"/>
+  <path d="M85 140h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H82a1 1 0 0 1-1-1V141a1 1 0 0 1 1-1h1.5l1-1.5h2z"/>
+  <rect x="125" y="140" width="8" height="10" rx="1.5"/><path d="M127 140v-3a3 3 0 0 1 6 0v3"/>
+</svg>

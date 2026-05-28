@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" fill="none" stroke="#c4956a" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- diagonal arrangement top-left to bottom-right -->
+  <!-- upload -->
+  <path d="M20 35v-10m-4 4l4-4 4 4"/>
+  <!-- nyy -->
+  <text x="42" y="22" font-family="monospace" font-size="10" font-weight="bold" fill="#c4956a" stroke="none" transform="rotate(-15 42 22)">nyy</text>
+  <!-- file -->
+  <path d="M80 10h7l4 4v9a1.5 1.5 0 0 1-1.5 1.5H80A1.5 1.5 0 0 1 78.5 23V11.5A1.5 1.5 0 0 1 80 10z"/>
+  <path d="M87 10v4h4"/>
+  <!-- cloud -->
+  <path d="M15 70a5 5 0 0 1 0-10h.5a6.5 6.5 0 0 1 12.5 3 4 4 0 0 1-2 7H15z"/>
+  <!-- share -->
+  <circle cx="65" cy="60" r="2"/><circle cx="75" cy="53" r="2"/><circle cx="75" cy="67" r="2"/>
+  <line x1="67" y1="59" x2="73" y2="54"/><line x1="67" y1="61" x2="73" y2="66"/>
+  <!-- folder -->
+  <path d="M85 75h10a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 95 85H82a1.5 1.5 0 0 1-1.5-1.5V76.5A1.5 1.5 0 0 1 82 75h1.5l1-1.5h2.5z"/>
+  <!-- link -->
+  <path d="M30 100a4 4 0 0 1 5.5 0l2 2a4 4 0 0 1 0 5.5m-3-3a4 4 0 0 0-5.5 0l-2 2a4 4 0 0 0 0 5.5"/>
+  <!-- dot accent -->
+  <circle cx="100" cy="105" r="3" fill="#c4956a" stroke="none" opacity="0.4"/>
+</svg>

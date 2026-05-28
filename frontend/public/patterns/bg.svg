@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" fill="none" stroke="#FF8A3D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <path id="W" d="M1.9140625 -6.4599609375H31.9921875V-9.3310546875H6.8359375V-14.2529296875H31.9921875V-17.1240234375Q20.029296875 -16.9873046875 6.2890625 -16.9189453125Q5.60546875 -19.8583984375 4.921875 -22.5244140625Q40.126953125 -22.3193359375 62.890625 -23.4130859375L63.916015625 -17.8759765625Q53.73046875 -17.5341796875 41.2890625 -17.2607421875V-14.2529296875H63.30078125V-9.3310546875H41.2890625V-6.4599609375H68.0859375V-0.7177734375H41.2890625V-0.5126953125Q41.15234375 7.8955078125 33.22265625 8.7841796875Q28.984375 9.1259765625 19.27734375 9.1259765625Q18.45703125 4.3408203125 17.705078125 1.4013671875Q25.29296875 1.7431640625 27.822265625 1.6748046875Q31.240234375 1.5380859375 31.85546875 -0.7177734375H1.9140625ZM43.818359375 -58.1396484375 41.494140625 -56.2939453125Q51.953125 -48.9111328125 69.1796875 -45.5615234375Q68.0859375 -43.5107421875 66.103515625 -37.7685546875Q57.900390625 -39.7509765625 51.1328125 -42.5537109375V-41.5966796875H19.6875V-42.8955078125Q13.193359375 -40.0244140625 4.853515625 -37.3583984375Q2.802734375 -41.9384765625 1.09375 -45.0146484375Q21.46484375 -49.5947265625 30.625 -58.1396484375ZM11.552734375 -38.7939453125H58.447265625V-25.0537109375H11.552734375ZM49.833984375 -30.2490234375V-33.5986328125H20.166015625V-30.2490234375ZM34.931640625 -51.6455078125Q30.830078125 -48.6376953125 27.275390625 -46.6552734375H42.65625Q38.896484375 -48.8427734375 34.931640625 -51.6455078125Z M109.443359375 -31.8896484375H120.927734375V-45.6982421875H98.4375V-54.3115234375H138.49609375V-45.6982421875H130.224609375V-31.8896484375H138.49609375V-23.4130859375H130.224609375V-2.8369140625Q130.224609375 2.2900390625 128.0712890625 5.0244140625Q125.91796875 7.7587890625 122.14111328125 8.134765625Q118.3642578125 8.5107421875 111.083984375 8.5107421875Q110.1953125 3.4521484375 109.033203125 -0.8544921875Q113.7158203125 -0.3076171875 116.962890625 -0.3076171875Q120.927734375 -0.3076171875 120.927734375 -4.6142578125V-19.2431640625Q111.8359375 -4.8193359375 96.318359375 4.8193359375Q93.720703125 1.1962890625 90.302734375 -2.4951171875Q92.2509765625 -3.5888671875 94.0966796875 -4.7509765625H82.3046875V0.2392578125H73.96484375V-53.2861328125H96.044921875V-6.015625Q106.77734375 -13.26171875 113.955078125 -23.4130859375H98.232421875L102.8125 -43.2373046875H111.904296875ZM87.841796875 -13.3642578125V-44.6728515625H82.3046875V-13.3642578125Z"/>
+    <path id="S" d="M153.625 -45.15234375H161.32421875V-42.0H149.25390625V-43.34765625Q149.25390625 -44.765625 149.775390625 -45.9375Q150.296875 -47.109375 151.2109375 -48.123046875Q152.125 -49.13671875 154.046875 -50.49609375Q155.8046875 -51.80859375 156.5078125 -52.822265625Q157.2109375 -53.8359375 157.2109375 -54.97265625Q157.2109375 -57.421875 154.5390625 -57.421875Q152.1953125 -57.421875 150.0625 -55.546875V-58.921875Q152.44140625 -60.45703125 155.40625 -60.45703125Q158.125 -60.45703125 159.70703125 -59.068359375Q161.2890625 -57.6796875 161.2890625 -55.2421875Q161.2890625 -53.8828125 160.83203125 -52.787109375Q160.375 -51.69140625 159.5078125 -50.73046875Q158.640625 -49.76953125 156.73046875 -48.421875Q154.890625 -47.109375 154.2578125 -46.39453125Q153.625 -45.6796875 153.625 -45.15234375Z"/>
+    <g id="ic-file"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></g>
+    <g id="ic-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></g>
+    <g id="ic-cloud"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></g>
+    <g id="ic-folder"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+    <g id="ic-link"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g>
+    <g id="ic-share"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></g>
+    <g id="ic-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>
+    <g id="ic-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></g>
+    <g id="ic-send"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></g>
+    <g id="ic-inbox"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></g>
+  </defs>
+
+  <g transform="translate(1079,484) rotate(42) scale(0.45)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(646,327) rotate(3) scale(0.39)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(728,172) rotate(21) scale(0.4)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(631,872) rotate(34) scale(0.43)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(652,139) rotate(-52) scale(0.45)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(168,372) rotate(-8) scale(0.48)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(1000,434) rotate(-3) scale(0.4)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(834,358) rotate(42) scale(0.43)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(493,949) rotate(27) scale(0.4)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(497,808) rotate(51) scale(0.4)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(924,213) rotate(-26) scale(0.41)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(321,139) rotate(53) scale(0.45)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(409,222) rotate(44) scale(0.4)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(550,887) rotate(-32) scale(0.49)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(390,343) rotate(34) scale(0.45)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(86,855) rotate(0) scale(0.43)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(365,515) rotate(0) scale(0.42)"><use href="#W"/><use href="#S"/></g>
+  <g transform="translate(202,841) rotate(-34) scale(0.41)"><use href="#W"/><use href="#S"/></g>
+  <use href="#ic-file" transform="translate(224,300) rotate(-28) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(427,883) rotate(-19) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(854,939) rotate(-20) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(957,690) rotate(-48) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(674,783) rotate(51) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(1061,787) rotate(26) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(978,782) rotate(31) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(78,1129) rotate(-38) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(139,295) rotate(55) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(930,1024) rotate(-1) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(1001,518) rotate(-33) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(445,414) rotate(51) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(827,734) rotate(42) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(637,540) rotate(-16) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(1139,591) rotate(-21) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(158,550) rotate(-24) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(997,351) rotate(9) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(772,806) rotate(-53) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(980,598) rotate(10) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(305,312) rotate(13) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(79,1044) rotate(38) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(835,607) rotate(15) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(229,939) rotate(-42) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(350,774) rotate(-28) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(1062,289) rotate(-2) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(113,742) rotate(-22) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(488,533) rotate(47) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(715,83) rotate(26) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(1021,167) rotate(-23) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(86,380) rotate(-33) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(1061,572) rotate(-48) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(968,1122) rotate(45) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(603,1047) rotate(5) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(795,1053) rotate(-13) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(1123,838) rotate(-2) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(250,395) rotate(45) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(1138,322) rotate(-39) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(166,1111) rotate(7) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(772,924) rotate(18) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(630,236) rotate(35) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(239,560) rotate(-18) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(251,1137) rotate(33) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(1136,1017) rotate(-42) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(294,640) rotate(-45) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(841,261) rotate(35) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(175,202) rotate(30) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(713,868) rotate(16) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(903,821) rotate(-5) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(1024,1039) rotate(-21) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(1036,867) rotate(4) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(812,471) rotate(-24) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(582,774) rotate(27) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(1103,1130) rotate(37) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(347,870) rotate(-2) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(577,465) rotate(-46) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(655,418) rotate(-10) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(177,1012) rotate(23) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(630,970) rotate(19) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(440,665) rotate(28) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(106,964) rotate(-27) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(1112,133) rotate(4) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(473,68) rotate(19) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(361,1124) rotate(-50) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(877,537) rotate(-16) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(520,276) rotate(32) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(317,443) rotate(22) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(435,748) rotate(-43) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(914,132) rotate(14) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(150,634) rotate(36) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(710,981) rotate(-50) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(1072,661) rotate(-40) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(334,982) rotate(-7) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(740,546) rotate(-2) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(292,224) rotate(53) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(424,997) rotate(-37) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(290,1064) rotate(36) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(643,702) rotate(14) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(738,431) rotate(8) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(452,1086) rotate(20) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(228,478) rotate(25) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(1122,222) rotate(-18) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(728,257) rotate(-14) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(671,615) rotate(22) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(66,142) rotate(46) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(1068,390) rotate(43) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(727,338) rotate(-3) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(970,75) rotate(-41) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(408,130) rotate(-40) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(69,479) rotate(19) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(569,634) rotate(22) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(238,733) rotate(20) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(63,658) rotate(-5) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(553,103) rotate(50) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(389,592) rotate(-22) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(521,1031) rotate(15) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(510,716) rotate(-16) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(77,559) rotate(0) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(1137,749) rotate(44) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(987,946) rotate(-35) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(1072,969) rotate(22) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(177,76) rotate(6) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(583,1133) rotate(-41) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(539,361) rotate(36) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(533,180) rotate(46) scale(1.8)"/>
+  <use href="#ic-link" transform="translate(693,1083) rotate(-2) scale(1.8)"/>
+  <use href="#ic-share" transform="translate(881,1115) rotate(19) scale(1.8)"/>
+  <use href="#ic-lock" transform="translate(724,676) rotate(11) scale(1.8)"/>
+  <use href="#ic-download" transform="translate(811,61) rotate(-11) scale(1.8)"/>
+  <use href="#ic-send" transform="translate(270,60) rotate(-8) scale(1.8)"/>
+  <use href="#ic-inbox" transform="translate(355,692) rotate(33) scale(1.8)"/>
+  <use href="#ic-file" transform="translate(61,229) rotate(-53) scale(1.8)"/>
+  <use href="#ic-upload" transform="translate(916,361) rotate(17) scale(1.8)"/>
+  <use href="#ic-cloud" transform="translate(921,459) rotate(-1) scale(1.8)"/>
+  <use href="#ic-folder" transform="translate(811,151) rotate(24) scale(1.8)"/>
+</svg>

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="拿呀呀 logo mark">
+  <title>拿呀呀</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#FFE3B0"/>
+      <stop offset="55%" stop-color="#FFC9A0"/>
+      <stop offset="100%" stop-color="#FF8A3D"/>
+    </radialGradient>
+    <linearGradient id="file" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD9A8"/>
+      <stop offset="100%" stop-color="#FFB36E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆 -->
+  <circle cx="128" cy="128" r="120" fill="url(#bg)" stroke="#E36A1F" stroke-width="6"/>
+
+  <!-- 头顶小卷毛 -->
+  <path d="M118 36 Q124 22 132 30 Q138 18 146 28 Q150 36 142 40 Z"
+        fill="#E36A1F" stroke="#2A1810" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- 头部主体 -->
+  <ellipse cx="128" cy="108" rx="62" ry="58"
+           fill="#FFEBC5" stroke="#2A1810" stroke-width="5"/>
+
+  <!-- 脸颊腮红 -->
+  <ellipse cx="92" cy="120" rx="10" ry="6" fill="#FFB497" opacity="0.85"/>
+  <ellipse cx="164" cy="120" rx="10" ry="6" fill="#FFB497" opacity="0.85"/>
+
+  <!-- 眼睛 -->
+  <circle cx="106" cy="104" r="6" fill="#2A1810"/>
+  <circle cx="150" cy="104" r="6" fill="#2A1810"/>
+  <circle cx="108" cy="102" r="2" fill="#FFFFFF"/>
+  <circle cx="152" cy="102" r="2" fill="#FFFFFF"/>
+
+  <!-- 嘴：开心的小弧 -->
+  <path d="M116 128 Q128 138 140 128"
+        fill="none" stroke="#2A1810" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- 双手托起文件 -->
+  <!-- 左手 -->
+  <path d="M62 178 Q60 158 78 156 Q92 154 96 168 L100 196 Z"
+        fill="#FFEBC5" stroke="#2A1810" stroke-width="5" stroke-linejoin="round"/>
+  <!-- 右手 -->
+  <path d="M194 178 Q196 158 178 156 Q164 154 160 168 L156 196 Z"
+        fill="#FFEBC5" stroke="#2A1810" stroke-width="5" stroke-linejoin="round"/>
+
+  <!-- 中间的"文件" -->
+  <g transform="translate(80 168)">
+    <rect x="0" y="0" width="96" height="60" rx="10" ry="10"
+          fill="url(#file)" stroke="#2A1810" stroke-width="5"/>
+    <!-- 文件夹小耳朵 -->
+    <path d="M0 12 Q0 0 12 0 L36 0 L46 10 L96 10"
+          fill="none" stroke="#2A1810" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 上行小箭头：寓意"传/拿" -->
+    <path d="M48 44 L48 22 M40 30 L48 22 L56 30"
+          fill="none" stroke="#2A1810" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -1,0 +1,33 @@
+# /etc/systemd/system/nyy.service
+#
+# 部署：
+#   sudo cp deploy/nyy.service /etc/systemd/system/nyy.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nyy
+
+[Unit]
+Description=nyy.app FastAPI backend
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=nyy
+Group=nyy
+WorkingDirectory=/opt/nyy
+EnvironmentFile=/opt/nyy/.env
+ExecStart=/opt/nyy/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="127.0.0.1"
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/nyy/var
+
+[Install]
+WantedBy=multi-user.target

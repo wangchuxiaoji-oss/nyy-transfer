@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" fill="none" stroke="#c4956a" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <!-- connected nodes: icons linked by dotted lines -->
+  <!-- file top-left -->
+  <path d="M20 20h8l4 4v9a1.5 1.5 0 0 1-1.5 1.5H20a1.5 1.5 0 0 1-1.5-1.5V21.5A1.5 1.5 0 0 1 20 20z"/>
+  <path d="M28 20v4h4"/>
+  <!-- cloud top-right -->
+  <path d="M95 20a4.5 4.5 0 0 1 0-9h.5a6 6 0 0 1 11.5 3 3.5 3.5 0 0 1-1.5 6H95z"/>
+  <!-- nyy center -->
+  <text x="52" y="72" font-family="monospace" font-size="13" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+  <!-- folder bottom-left -->
+  <path d="M18 105h9a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 27 114H15a1.5 1.5 0 0 1-1.5-1.5V106.5A1.5 1.5 0 0 1 15 105h1.5l1-1.5h2z"/>
+  <!-- upload bottom-right -->
+  <path d="M110 115v-10m-3 3l3-3 3 3"/>
+  <!-- connecting dotted lines to center -->
+  <path d="M32 30l25 32" stroke-dasharray="2 3" opacity="0.5"/>
+  <path d="M100 18l-35 45" stroke-dasharray="2 3" opacity="0.5"/>
+  <path d="M25 105l32-38" stroke-dasharray="2 3" opacity="0.5"/>
+  <path d="M108 108l-40-40" stroke-dasharray="2 3" opacity="0.5"/>
+</svg>

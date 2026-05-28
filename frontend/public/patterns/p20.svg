@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" fill="none" stroke="#c4956a" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- very sparse, large tile, breathing room -->
+  <!-- file top-left area -->
+  <path d="M30 40h12l6 6v16a2 2 0 0 1-2 2H30a2 2 0 0 1-2-2V42a2 2 0 0 1 2-2z"/>
+  <path d="M42 40v6h6"/><path d="M34 52h10M34 57h7"/>
+  <!-- nyy center-right -->
+  <text x="120" y="75" font-family="monospace" font-size="16" font-weight="bold" fill="#c4956a" stroke="none" opacity="0.6">nyy</text>
+  <!-- cloud bottom-right -->
+  <path d="M130 155a6 6 0 0 1 0-12h.5a8 8 0 0 1 15 4 5 5 0 0 1-2.5 8H130z"/>
+  <!-- upload top-right -->
+  <path d="M155 35v-14m-4 4l4-4 4 4"/>
+  <!-- share bottom-left -->
+  <circle cx="45" cy="150" r="3"/><circle cx="58" cy="142" r="3"/><circle cx="58" cy="158" r="3"/>
+  <line x1="48" y1="149" x2="55" y2="143"/><line x1="48" y1="151" x2="55" y2="157"/>
+  <!-- single dot accents -->
+  <circle cx="100" cy="30" r="2" fill="#c4956a" stroke="none" opacity="0.3"/>
+  <circle cx="30" cy="120" r="1.5" fill="#c4956a" stroke="none" opacity="0.3"/>
+  <circle cx="170" cy="120" r="1.5" fill="#c4956a" stroke="none" opacity="0.3"/>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" fill="none" stroke="#c4956a" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- all icons tilted 45 degrees -->
+  <g transform="rotate(45 60 60)">
+    <!-- file -->
+    <path d="M35 20h9l4 4v10a1.5 1.5 0 0 1-1.5 1.5H35a1.5 1.5 0 0 1-1.5-1.5V21.5a1.5 1.5 0 0 1 1.5-1.5z"/>
+    <path d="M44 20v4h4"/>
+    <!-- upload -->
+    <path d="M80 30v-10m-3 3l3-3 3 3"/>
+    <!-- cloud -->
+    <path d="M30 70a4.5 4.5 0 0 1 0-9h.5a6 6 0 0 1 11.5 3 3.5 3.5 0 0 1-1.5 6H30z"/>
+    <!-- folder -->
+    <path d="M70 65h9a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 79 74H67a1.5 1.5 0 0 1-1.5-1.5V66.5A1.5 1.5 0 0 1 67 65h1.5l1-1.5h2z"/>
+  </g>
+  <!-- nyy stays horizontal for readability -->
+  <text x="42" y="65" font-family="monospace" font-size="12" font-weight="bold" fill="#c4956a" stroke="none">nyy</text>
+</svg>
