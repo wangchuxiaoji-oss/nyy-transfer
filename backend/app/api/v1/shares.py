@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.models.share import Share, ShareFile
 from app.models.system import Report
 from app.schemas.share import (
+    ChunkDownloadInfo,
     ShareDownloadResponse,
     ShareFileDownload,
     ShareFileInfo,
@@ -63,30 +64,126 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
 
 
 async def _get_download_urls(files: list[ShareFile]) -> list[ShareFileDownload]:
-    """为所有文件获取临时下载 URL。"""
+    """为所有逻辑文件获取临时下载 URL，按 logical_file_id 聚合。"""
     client = None
+
+    # 按 logical_file_id 分组
+    from collections import defaultdict
+    grouped: dict[str | None, list[ShareFile]] = defaultdict(list)
+    standalone: list[ShareFile] = []
+
+    for f in files:
+        if f.logical_file_id:
+            grouped[str(f.logical_file_id)].append(f)
+        else:
+            standalone.append(f)
+
     results: list[ShareFileDownload] = []
-    for f in sorted(files, key=lambda x: x.chunk_index):
+
+    # 处理普通文件（无 logical_file_id）
+    for f in sorted(standalone, key=lambda x: x.chunk_index):
         if f.tos_uri.startswith(_EMPTY_URI_PREFIX):
             results.append(ShareFileDownload(
                 file_name=f.original_name,
                 file_size=f.size,
+                content_type=f.content_type or "",
+                is_chunked=False,
                 download_url=_EMPTY_FILE_DATA_URL,
+                chunks=[],
             ))
             continue
 
         if client is None:
             client = await get_doubao_client()
         try:
-            url = await client.get_download_url(f.tos_uri)
+            url = await client.get_download_url(f.tos_uri, expire_seconds=86400)
         except DoubaoClientError as e:
             log.error("get_download_url failed for %s: %s", f.tos_uri, e)
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
         results.append(ShareFileDownload(
             file_name=f.original_name,
             file_size=f.size,
+            content_type=f.content_type or "",
+            is_chunked=False,
             download_url=url,
+            chunks=[],
         ))
+
+    # 处理分片大文件（有 logical_file_id）
+    for lfid, chunks in grouped.items():
+        chunks_sorted = sorted(chunks, key=lambda x: x.chunk_index)
+        first = chunks_sorted[0]
+        total_size = sum(c.size for c in chunks_sorted)
+
+        chunk_downloads: list[ChunkDownloadInfo] = []
+        for c in chunks_sorted:
+            if client is None:
+                client = await get_doubao_client()
+            try:
+                url = await client.get_download_url(c.tos_uri, expire_seconds=86400)
+            except DoubaoClientError as e:
+                log.error("get_download_url failed for chunk %s: %s", c.tos_uri, e)
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
+            chunk_downloads.append(ChunkDownloadInfo(
+                index=c.chunk_index,
+                size=c.size,
+                download_url=url,
+            ))
+
+        results.append(ShareFileDownload(
+            file_name=first.original_name,
+            file_size=total_size,
+            content_type=first.content_type or "",
+            is_chunked=True,
+            download_url="",
+            chunks=chunk_downloads,
+        ))
+
+    return results
+
+
+def _aggregate_file_info(files: list[ShareFile]) -> list[ShareFileInfo]:
+    """将 ShareFile 行聚合为逻辑文件列表（用于详情展示）。"""
+    from collections import defaultdict
+    grouped: dict[str, list[ShareFile]] = defaultdict(list)
+    standalone: list[ShareFile] = []
+
+    for f in files:
+        if f.logical_file_id:
+            grouped[str(f.logical_file_id)].append(f)
+        else:
+            standalone.append(f)
+
+    results: list[ShareFileInfo] = []
+    idx = 0
+
+    for f in sorted(standalone, key=lambda x: x.chunk_index):
+        results.append(ShareFileInfo(
+            file_name=f.original_name,
+            file_size=f.size,
+            file_ext=f.original_name.rsplit(".", 1)[-1] if "." in f.original_name else "",
+            content_type=f.content_type or "",
+            index=idx,
+            is_chunked=False,
+            chunk_count=1,
+        ))
+        idx += 1
+
+    for lfid, chunks in grouped.items():
+        chunks_sorted = sorted(chunks, key=lambda x: x.chunk_index)
+        first = chunks_sorted[0]
+        total_size = sum(c.size for c in chunks_sorted)
+        results.append(ShareFileInfo(
+            file_name=first.original_name,
+            file_size=total_size,
+            file_ext=first.original_name.rsplit(".", 1)[-1] if "." in first.original_name else "",
+            content_type=first.content_type or "",
+            index=idx,
+            is_chunked=True,
+            chunk_count=len(chunks_sorted),
+        ))
+        idx += 1
+
     return results
 
 
@@ -149,15 +246,7 @@ async def get_share(code: str, request: Request):
 
     return ShareInfoResponse(
         code=share.code,
-        files=[
-            ShareFileInfo(
-                file_name=f.original_name,
-                file_size=f.size,
-                file_ext=f.original_name.rsplit(".", 1)[-1] if "." in f.original_name else "",
-                index=f.chunk_index,
-            )
-            for f in sorted(share.files, key=lambda x: x.chunk_index)
-        ],
+        files=_aggregate_file_info(share.files),
         empty_dirs=share.empty_dirs or [],
         total_bytes=share.total_bytes,
         created_at=share.created_at,

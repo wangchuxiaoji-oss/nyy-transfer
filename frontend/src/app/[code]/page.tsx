@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
@@ -8,15 +8,34 @@ import QRCode from "qrcode";
 import { Download, FileIcon, Clock, AlertCircle, Lock, Play, Package, Files, Flag, QrCode, Copy, X, Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
+import { MediaPlayer, getMediaType } from "@/components/media-player";
 import {
   getShareInfo, verifyShare, downloadShare, reportShare,
   type ShareInfo, type ShareFileDownload,
 } from "@/lib/api";
+import { supportsChunkedDownload, chunkedDownload, type ChunkedDownloadProgress } from "@/lib/chunked-download";
 import { getErrorMessage, isHttpStatusError } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
+import { prepareVirtualMediaTransport, setVirtualMediaDebugEnabled } from "@/lib/virtual-media";
+import { formatDebugLine, toDebugRecord, type DebugLogFn } from "@/lib/debug";
 
 type PageState = "loading" | "ready" | "not_found" | "expired" | "error";
-const VIDEO_EXTS = ["mp4", "webm", "ogg", "mov"];
+
+interface DebugEntry {
+  elapsedMs: number;
+  scope: string;
+  event: string;
+  data?: Record<string, unknown>;
+  line: string;
+}
+
+interface DebugStatus {
+  mode: string;
+  concurrency: number | null;
+  lastLatencyMs: number | null;
+  lastScope: string;
+  lastEvent: string;
+}
 
 export default function SharePage() {
   const passwordInputId = useId();
@@ -29,12 +48,54 @@ export default function SharePage() {
   const [password, setPassword] = useState("");
   const [pwError, setPwError] = useState("");
   const [downloads, setDownloads] = useState<ShareFileDownload[]>([]);
-  const [videoUrl, setVideoUrl] = useState("");
   const [qr, setQr] = useState("");
   const [reported, setReported] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
+  const [chunkProgress, setChunkProgress] = useState<ChunkedDownloadProgress | null>(null);
+  const [debugEntries, setDebugEntries] = useState<DebugEntry[]>([]);
+  const [debugCopied, setDebugCopied] = useState(false);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugStatus, setDebugStatus] = useState<DebugStatus>({
+    mode: "unknown",
+    concurrency: null,
+    lastLatencyMs: null,
+    lastScope: "",
+    lastEvent: "",
+  });
+  const debugStartPerfRef = useRef(0);
+  const debugStartWallRef = useRef(0);
   const { showToast } = useToast();
+
+  const ingestDebugEntry = useCallback((entry: Omit<DebugEntry, "line">) => {
+    if (!debugEnabled) return;
+    const line = formatDebugLine(entry.elapsedMs, entry.scope, entry.event, entry.data);
+    setDebugEntries((entries) => [...entries.slice(-399), { ...entry, line }]);
+    setDebugStatus((status) => {
+      let next = status;
+      const mode = entry.data && typeof entry.data.mode === "string" ? entry.data.mode : null;
+      const concurrency = entry.data && typeof entry.data.desiredConcurrency === "number" ? entry.data.desiredConcurrency : null;
+      const latencyMs = entry.data && typeof entry.data.latencyMs === "number" ? entry.data.latencyMs : null;
+      if (entry.scope === "sw" && entry.event === "register:file" && mode) {
+        next = { ...next, mode };
+      }
+      if (entry.scope === "sw" && entry.event === "debug:enabled" && next.mode === "unknown") {
+        next = { ...next, mode: "optimized" };
+      }
+      if (entry.scope === "sw" && entry.event === "concurrency" && concurrency !== null) {
+        next = { ...next, concurrency };
+      }
+      if (entry.scope === "player" && (entry.event === "seek:play" || entry.event === "seek:advance") && latencyMs !== null) {
+        next = { ...next, lastLatencyMs: latencyMs };
+      }
+      return { ...next, lastScope: entry.scope, lastEvent: entry.event };
+    });
+  }, [debugEnabled]);
+
+  const appendDebugLog = useCallback<DebugLogFn>((scope, event, data) => {
+    const elapsedMs = performance.now() - debugStartPerfRef.current;
+    ingestDebugEntry({ elapsedMs, scope, event, data });
+  }, [ingestDebugEntry]);
 
   useEffect(() => {
     if (!code) return;
@@ -53,6 +114,63 @@ export default function SharePage() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    void prepareVirtualMediaTransport().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setDebugEnabled(new URLSearchParams(window.location.search).get("debug") === "1");
+  }, []);
+
+  useEffect(() => {
+    if (!debugEnabled) return;
+    debugStartPerfRef.current = performance.now();
+    debugStartWallRef.current = Date.now();
+    const mode = new URLSearchParams(window.location.search).get("sw") === "legacy" ? "legacy" : "optimized";
+    setDebugStatus((status) => ({ ...status, mode }));
+    appendDebugLog("page", "debug:on", {
+      url: window.location.href,
+      mode,
+      userAgent: navigator.userAgent,
+      connection: getConnectionInfo(),
+    });
+
+    const onMessage = (event: MessageEvent) => {
+      const record = toDebugRecord(event.data);
+      if (!record) return;
+      ingestDebugEntry({
+        elapsedMs: record.ts - debugStartWallRef.current,
+        scope: record.scope,
+        event: record.event,
+        data: record.data,
+      });
+    };
+
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    const enableSwDebug = () => setVirtualMediaDebugEnabled(true);
+    const refreshSwDebug = () => enableSwDebug()
+      .catch((err) => appendDebugLog("sw", "debug:refresh-error", { error: err instanceof Error ? err.message : String(err) }));
+
+    void enableSwDebug()
+      .then(() => appendDebugLog("sw", "debug:enabled"))
+      .catch((err) => appendDebugLog("sw", "debug:enable-error", { error: err instanceof Error ? err.message : String(err) }));
+    const debugRefreshTimer = window.setInterval(() => void refreshSwDebug(), 30000);
+    const onControllerChange = () => void refreshSwDebug();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshSwDebug();
+    };
+    navigator.serviceWorker?.addEventListener("controllerchange", onControllerChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(debugRefreshTimer);
+      navigator.serviceWorker?.removeEventListener("message", onMessage);
+      navigator.serviceWorker?.removeEventListener("controllerchange", onControllerChange);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      void setVirtualMediaDebugEnabled(false).catch(() => {});
+    };
+  }, [appendDebugLog, debugEnabled, ingestDebugEntry]);
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -62,15 +180,20 @@ export default function SharePage() {
 
   const fetchDownloadUrls = async (): Promise<{ files: ShareFileDownload[]; emptyDirs: string[] } | null> => {
     try {
+      const startedAt = performance.now();
+      appendDebugLog("page", "download-url:start", { hasPassword: !!share?.has_password });
       if (share?.has_password) {
         if (password.length !== 4) { setPwError("请输入4位提取码"); return null; }
         const res = await verifyShare(code, password);
+        appendDebugLog("page", "download-url:done", { files: res.files.length, emptyDirs: res.empty_dirs.length, elapsedMs: Math.round(performance.now() - startedAt) });
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else {
         const res = await downloadShare(code);
+        appendDebugLog("page", "download-url:done", { files: res.files.length, emptyDirs: res.empty_dirs.length, elapsedMs: Math.round(performance.now() - startedAt) });
         return { files: res.files, emptyDirs: res.empty_dirs };
       }
     } catch (err) {
+      appendDebugLog("page", "download-url:error", { error: getErrorMessage(err, "获取下载链接失败") });
       setPwError(getErrorMessage(err, "获取下载链接失败"));
       return null;
     }
@@ -78,6 +201,7 @@ export default function SharePage() {
 
   const handleDownload = async () => {
     if (!share) return;
+    appendDebugLog("page", "download:click", { totalBytes: share.total_bytes, files: share.files.length });
     setDownloading(true);
     setPwError("");
     const res = await fetchDownloadUrls();
@@ -86,12 +210,35 @@ export default function SharePage() {
     setDownloads(files);
 
     if (files.length === 1 && res.emptyDirs.length === 0) {
-      // Single file: trigger browser download
-      const a = document.createElement("a");
-      a.href = files[0].download_url;
-      a.download = files[0].file_name;
-      a.rel = "noopener";
-      a.click();
+      const f = files[0];
+      if (f.is_chunked && f.chunks.length > 0) {
+        // Chunked large file download
+        if (!supportsChunkedDownload()) {
+          setPwError("当前浏览器不支持大文件下载，请使用桌面版 Chrome 或 Edge");
+          setDownloading(false);
+          return;
+        }
+        try {
+          await chunkedDownload(f.file_name, f.file_size, f.chunks, setChunkProgress, appendDebugLog);
+          setChunkProgress(null);
+        } catch (err) {
+          setChunkProgress(null);
+          if (err instanceof DOMException && err.name === "AbortError") {
+            // User cancelled save dialog
+          } else {
+            setPwError(getErrorMessage(err, "下载失败"));
+          }
+        }
+      } else {
+        // Single regular file: trigger browser download
+        appendDebugLog("download", "direct:start", { fileName: f.file_name, fileSize: f.file_size });
+        const a = document.createElement("a");
+        a.href = f.download_url;
+        a.download = f.file_name;
+        a.rel = "noopener";
+        a.click();
+        appendDebugLog("download", "direct:triggered", { fileName: f.file_name });
+      }
     } else if (files.length === 0 && res.emptyDirs.length > 0) {
       try {
         await downloadZipArchive([], res.emptyDirs);
@@ -106,6 +253,7 @@ export default function SharePage() {
   const handleReport = async () => {
     if (!reportReason.trim()) return;
     try {
+      appendDebugLog("page", "report:submit", { reason: reportReason.trim() });
       await reportShare(code, reportReason.trim());
       setReported(true);
       setReportOpen(false);
@@ -131,10 +279,13 @@ export default function SharePage() {
       document.execCommand("copy");
       document.body.removeChild(ta);
     }
+    appendDebugLog("page", "link:copy", { url: text });
     showToast({ title: "链接已复制", type: "success" });
   };
 
   const downloadZipArchive = async (files: ShareFileDownload[], emptyDirs: string[]) => {
+    const startedAt = performance.now();
+    appendDebugLog("download", "zip:start", { files: files.length, emptyDirs: emptyDirs.length });
     const { downloadZip } = await import("client-zip");
     const responses = await Promise.all(
       files.map(async (f) => ({
@@ -150,11 +301,13 @@ export default function SharePage() {
     a.download = `${code}.zip`;
     a.click();
     URL.revokeObjectURL(url);
+    appendDebugLog("download", "zip:triggered", { elapsedMs: Math.round(performance.now() - startedAt) });
   };
 
   const handleDownloadAll = async () => {
     if (downloads.length === 0 && (!share || share.empty_dirs.length === 0)) return;
     setDownloading(true);
+    appendDebugLog("page", "download:all:click", { files: downloads.length, emptyDirs: share?.empty_dirs.length || 0 });
     try {
       await downloadZipArchive(downloads, share?.empty_dirs || []);
     } catch {
@@ -165,12 +318,62 @@ export default function SharePage() {
 
   const handlePreview = async () => {
     if (!share) return;
+    appendDebugLog("page", "preview:click", { code, files: share.files.length, totalBytes: share.total_bytes });
+    const startedAt = performance.now();
     const res = await fetchDownloadUrls();
     if (res && res.files.length > 0) {
-      const videoFile = res.files.find((f) => VIDEO_EXTS.includes(f.file_name.split(".").pop()?.toLowerCase() || ""));
-      if (videoFile) setVideoUrl(videoFile.download_url);
+      appendDebugLog("page", "preview:ready", { files: res.files.length, firstFile: res.files[0]?.file_name, elapsedMs: Math.round(performance.now() - startedAt) });
       setDownloads(res.files);
     }
+  };
+
+  const handleCopyDebugLogs = () => {
+    const text = debugEntries.map((entry) => entry.line).join("\n");
+    void copyText(text);
+    setDebugCopied(true);
+    window.setTimeout(() => setDebugCopied(false), 1200);
+  };
+
+  const handleCopyDebugJson = () => {
+    const text = JSON.stringify({
+      status: debugStatus,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      entries: debugEntries.map(({ line: _line, ...entry }) => entry),
+    }, null, 2);
+    void copyText(text);
+    setDebugCopied(true);
+    window.setTimeout(() => setDebugCopied(false), 1200);
+  };
+
+  const copyText = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {
+        // Fall back to execCommand below.
+      }
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(0, text.length);
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  };
+
+  const getConnectionInfo = () => {
+    const nav = navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean } };
+    const connection = nav.connection;
+    return connection ? {
+      effectiveType: connection.effectiveType,
+      downlink: connection.downlink,
+      rtt: connection.rtt,
+      saveData: connection.saveData,
+    } : null;
   };
 
   // --- Status pages ---
@@ -189,7 +392,7 @@ export default function SharePage() {
 
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
-  const hasVideo = share.files.some((f) => VIDEO_EXTS.includes(f.file_ext.toLowerCase()));
+  const hasMedia = share.files.some((f) => getMediaType(f.file_name) !== null);
 
   return (
     <main className="min-h-dvh bg-warm-50 dark:bg-background flex flex-col items-center justify-center px-4 py-16">
@@ -231,13 +434,39 @@ export default function SharePage() {
               <FileIcon className="w-8 h-8 text-nyy-400 flex-shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="type-file-name font-medium text-gray-800 dark:text-gray-200 truncate">{f.file_name}</p>
-                <p className="type-file-meta text-gray-600 dark:text-gray-400">{formatSize(f.file_size)}</p>
+                <p className="type-file-meta text-gray-600 dark:text-gray-400">
+                  {formatSize(f.file_size)}
+                  {f.is_chunked && <span className="ml-1 text-nyy-500">({f.chunk_count} 分片)</span>}
+                </p>
               </div>
               {/* Individual download if URLs available */}
-              {downloads[i] && (
+              {downloads[i] && !downloads[i].is_chunked && (
                 <a href={downloads[i].download_url} target="_blank" rel="noopener" download={downloads[i].file_name} aria-label={`下载 ${f.file_name}`} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl hover:bg-nyy-50">
                   <Download className="w-4 h-4 text-nyy-500" />
                 </a>
+              )}
+              {downloads[i] && downloads[i].is_chunked && (
+                <button
+                  onClick={async () => {
+                    if (!supportsChunkedDownload()) {
+                      showToast({ title: "请使用桌面版 Chrome/Edge 下载大文件", type: "error" });
+                      return;
+                    }
+                    try {
+                      await chunkedDownload(downloads[i].file_name, downloads[i].file_size, downloads[i].chunks, setChunkProgress, appendDebugLog);
+                      setChunkProgress(null);
+                    } catch (err) {
+                      setChunkProgress(null);
+                      if (!(err instanceof DOMException && err.name === "AbortError")) {
+                        showToast({ title: getErrorMessage(err, "下载失败"), type: "error" });
+                      }
+                    }
+                  }}
+                  aria-label={`下载 ${f.file_name}`}
+                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl hover:bg-nyy-50"
+                >
+                  <Download className="w-4 h-4 text-nyy-500" />
+                </button>
               )}
             </div>
           ))}
@@ -255,14 +484,43 @@ export default function SharePage() {
           )}
         </div>
 
-        {/* Video preview */}
-        {hasVideo && videoUrl && (
-          <video src={videoUrl} controls className="w-full rounded-2xl" preload="metadata" />
-        )}
-        {hasVideo && !videoUrl && !share.has_password && (
+        {/* Media player */}
+        {downloads.length > 0 && downloads.map((dl, i) => {
+          const mt = getMediaType(dl.file_name);
+          if (!mt) return null;
+          return <MediaPlayer key={i} file={dl} className="rounded-2xl overflow-hidden" debugLog={appendDebugLog} />;
+        })}
+        {hasMedia && downloads.length === 0 && !share.has_password && (
           <button onClick={handlePreview} className="type-action flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-nyy-300 dark:border-nyy-700 text-nyy-800 dark:text-nyy-400 hover:bg-nyy-50 dark:hover:bg-nyy-900/20">
-            <Play className="w-4 h-4" /> 预览视频
+            <Play className="w-4 h-4" /> 预览
           </button>
+        )}
+
+        {debugEnabled && (
+          <div className="rounded-2xl border border-nyy-200 bg-nyy-50/70 p-3 dark:border-nyy-800 dark:bg-nyy-950/20">
+            <div className="mb-3 rounded-xl bg-white/80 p-3 dark:bg-black/20">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-700 dark:text-gray-300">
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">mode: {debugStatus.mode}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">concurrency: {debugStatus.concurrency ?? "-"}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">last: {debugStatus.lastScope}/{debugStatus.lastEvent}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">latency: {debugStatus.lastLatencyMs ?? "-"}ms</span>
+              </div>
+            </div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="type-caption font-semibold text-nyy-900 dark:text-nyy-200">Debug 日志 · {debugEntries.length}</p>
+              <div className="flex gap-2">
+                <button onClick={handleCopyDebugLogs} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+                  {debugCopied ? "已复制文本" : "复制文本"}
+                </button>
+                <button onClick={handleCopyDebugJson} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+                  复制 JSON
+                </button>
+              </div>
+            </div>
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/90 p-3 text-[11px] leading-relaxed text-green-100">
+              {debugEntries.length ? debugEntries.map((entry) => entry.line).join("\n") : "等待日志..."}
+            </pre>
+          </div>
         )}
 
         {/* Password input */}
@@ -277,6 +535,25 @@ export default function SharePage() {
               className="type-section min-h-[44px] w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-background px-4 text-center tracking-[0.5em] dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-nyy-300"
             />
             {pwError && <p role="alert" className="type-caption text-center text-red-700">{pwError}</p>}
+          </div>
+        )}
+
+        {/* Chunked download progress */}
+        {chunkProgress && (
+          <div className="space-y-2 p-3 bg-nyy-50/60 dark:bg-nyy-900/10 rounded-2xl">
+            <div className="flex justify-between type-caption text-gray-600 dark:text-gray-400">
+              <span>下载中 · 分片 {chunkProgress.currentChunk + 1}/{chunkProgress.totalChunks}</span>
+              <span>{Math.round((chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100)}%</span>
+            </div>
+            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-nyy-500 rounded-full transition-all duration-300"
+                style={{ width: `${(chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100}%` }}
+              />
+            </div>
+            <p className="type-caption text-gray-500 dark:text-gray-400">
+              {formatSize(chunkProgress.downloadedBytes)} / {formatSize(chunkProgress.totalBytes)}
+            </p>
           </div>
         )}
 

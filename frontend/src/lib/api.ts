@@ -18,6 +18,9 @@ export interface UploadInitResponse {
 export interface CommitFileItem {
   commit_token: string;
   store_uri: string;
+  logical_file_id?: string;
+  chunk_index?: number;
+  chunk_total?: number;
 }
 
 export interface UploadCommitResponse {
@@ -38,7 +41,16 @@ export interface ShareFileInfo {
   file_name: string;
   file_size: number;
   file_ext: string;
+  content_type: string;
   index: number;
+  is_chunked: boolean;
+  chunk_count: number;
+}
+
+export interface ChunkDownloadInfo {
+  index: number;
+  size: number;
+  download_url: string;
 }
 
 export interface ShareInfo {
@@ -56,7 +68,10 @@ export interface ShareInfo {
 export interface ShareFileDownload {
   file_name: string;
   file_size: number;
+  content_type: string;
+  is_chunked: boolean;
   download_url: string;
+  chunks: ChunkDownloadInfo[];
 }
 
 export interface ShareDownloadResponse {
@@ -77,7 +92,12 @@ export async function uploadInit(params: {
   file_name: string;
   file_size: number;
   file_ext: string;
+  content_type?: string;
   captcha_token?: string;
+  chunk_index?: number;
+  chunk_total?: number;
+  logical_file_id?: string;
+  logical_file_size?: number;
   request_code?: string;
   request_password?: string;
 }): Promise<UploadInitResponse> {

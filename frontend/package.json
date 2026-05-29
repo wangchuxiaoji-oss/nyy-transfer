@@ -6,7 +6,12 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:edge-media": "echo 'MSE regression removed — use test:edge-native-range'",
+    "test:edge-native-range": "node scripts/edge-native-range-regression.mjs",
+    "test:seek-patient": "node scripts/seek-stress-test.mjs --mode=patient",
+    "test:seek-rapid": "node scripts/seek-stress-test.mjs --mode=rapid",
+    "bench:buffer": "node scripts/buffer-benchmark.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.0",
@@ -15,13 +20,16 @@
     "crc-32": "^1.2.2",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.344.0",
+    "mp4box": "^0.5.2",
     "next": "14.2.35",
+    "plyr": "^3.7.8",
     "qrcode": "^1.5.4",
     "react": "^18",
     "react-dom": "^18",
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18",

@@ -13,7 +13,9 @@ import { uploadInit, uploadCommit, getQuota, type QuotaInfo, type CommitFileItem
 import { formatXhrStatusError, getErrorMessage, isSuccessfulHttpStatus } from "@/lib/errors";
 
 const MAX_RETRIES = 3;
-const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GiB
+const MAX_FILE_SIZE_GUEST = 1024 * 1024 * 1024; // 1 GiB (guest limit)
+const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 10 GiB (logged-in limit)
+const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
 const MAX_FILE_COUNT = 500;
 const MAX_EMPTY_DIR_COUNT = 500;
 
@@ -122,10 +124,17 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
   const pickFile = (file: File, uploadName = getFileUploadName(file)): PickedFile => ({ file, uploadName });
 
   const addFiles = (newFiles: PickedFile[], newEmptyDirs: string[] = []) => {
-    // 保留 0 字节文件，仅过滤超大文件
-    const valid = newFiles.filter(({ file }) => file.size <= MAX_FILE_SIZE);
+    const maxSize = loggedIn ? MAX_FILE_SIZE_USER : MAX_FILE_SIZE_GUEST;
+    // 检查是否有 >1GB 文件且未登录
+    const hasLargeFile = newFiles.some(({ file }) => file.size > MAX_FILE_SIZE_GUEST);
+    if (hasLargeFile && !loggedIn) {
+      setError("超过 1 GB 的大文件需要登录后上传");
+      onLoginClick?.();
+      return;
+    }
+    const valid = newFiles.filter(({ file }) => file.size <= maxSize);
     if (valid.length < newFiles.length) {
-      setError(`${newFiles.length - valid.length} 个文件超过 1 GB 已跳过`);
+      setError(`${newFiles.length - valid.length} 个文件超过 ${loggedIn ? "10" : "1"} GB 已跳过`);
     }
     const normalizedEmptyDirs = newEmptyDirs.map(normalizeDirPath).filter(Boolean);
     if (valid.length === 0 && normalizedEmptyDirs.length === 0) return;
@@ -196,6 +205,7 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     return { files: Array.from(dataTransfer.files).map((file) => pickFile(file)), emptyDirs: [] };
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const readDirectoryHandleSelection = async (dirHandle: { name: string; entries: () => AsyncIterableIterator<[string, any]> }, parentPath = ""): Promise<PickedSelection> => {
     const dirPath = `${parentPath}${dirHandle.name}/`;
     const files: PickedFile[] = [];
@@ -221,6 +231,7 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
   const handleFolderPick = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setFolderWarning("");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const showDirectoryPicker = (window as Window & { showDirectoryPicker?: (options?: { mode?: "read" }) => Promise<{ name: string; entries: () => AsyncIterableIterator<[string, any]> }> }).showDirectoryPicker;
 
     if (typeof showDirectoryPicker === "function") {
@@ -239,50 +250,87 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     setFolderWarning("当前浏览器无法保留空文件夹结构，请使用 Chrome / Edge 桌面端。");
   };
 
-  /** Upload a single file to TOS with retry. */
-  const uploadSingleFile = async (entry: FileEntry): Promise<CommitFileItem> => {
+  /** Generate a UUID v4 for logical_file_id. */
+  const generateUUID = (): string => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+  };
+
+  /** Upload a single chunk to TOS. Returns commit info for that chunk. */
+  const uploadChunk = async (
+    entry: FileEntry,
+    blob: Blob,
+    chunkIndex: number,
+    chunkTotal: number,
+    logicalFileId: string,
+    logicalFileSize: number,
+    contentType: string,
+    onProgress: (loaded: number) => void,
+  ): Promise<CommitFileItem> => {
     let lastError = "";
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        updateFile(entry.id, { state: "hashing", progress: 0, retries: attempt });
-        const crc32 = await computeCRC32(entry.file);
-
-        updateFile(entry.id, { state: "uploading", progress: 0 });
+        // CRC32 是 TOS 必须的（否则返回 Mismatch CRC32）
+        const crc32 = await computeCRC32(blob);
         const uploadName = entry.uploadName;
         const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
         const initRes = await uploadInit({
           file_name: uploadName,
-          file_size: entry.file.size,
+          file_size: blob.size,
           file_ext: ext,
+          content_type: contentType,
+          chunk_index: chunkIndex,
+          chunk_total: chunkTotal,
+          logical_file_id: logicalFileId,
+          logical_file_size: logicalFileSize,
         });
 
-        if (entry.file.size > 0 && initRes.upload_url) {
+        if (blob.size > 0 && initRes.upload_url) {
           await new Promise<void>((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            abortRef.current.set(entry.id, xhr);
+            const xhrKey = `${entry.id}_chunk_${chunkIndex}`;
+            abortRef.current.set(xhrKey, xhr);
             xhr.open("POST", initRes.upload_url);
             xhr.setRequestHeader("Authorization", initRes.authorization);
             xhr.setRequestHeader("Content-CRC32", crc32);
             xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
-                updateFile(entry.id, { progress: Math.round((e.loaded / e.total) * 100) });
-              }
+              if (e.lengthComputable) onProgress(e.loaded);
             };
             xhr.onload = () => {
-              abortRef.current.delete(entry.id);
-              if (isSuccessfulHttpStatus(xhr.status)) resolve();
-              else reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+              abortRef.current.delete(xhrKey);
+              if (!isSuccessfulHttpStatus(xhr.status)) {
+                reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+                return;
+              }
+              // TOS 可能返回 200 但 body 含错误码（如 CRC32 mismatch）
+              // TOS 成功码: 2000, 错误码: 4007 等
+              try {
+                const body = JSON.parse(xhr.responseText);
+                if (body.code && body.code !== 2000) {
+                  reject(new Error(body.message || `TOS error: ${body.code}`));
+                  return;
+                }
+              } catch { /* non-JSON response is OK */ }
+              resolve();
             };
             xhr.onerror = () => {
-              abortRef.current.delete(entry.id);
+              abortRef.current.delete(xhrKey);
               reject(new Error(formatXhrStatusError(0, "网络错误")));
             };
-            xhr.send(entry.file);
+            xhr.send(blob);
           });
         }
 
-        updateFile(entry.id, { state: "done", progress: 100, commitToken: initRes.commit_token, storeUri: initRes.store_uri });
-        return { commit_token: initRes.commit_token, store_uri: initRes.store_uri };
+        return {
+          commit_token: initRes.commit_token,
+          store_uri: initRes.store_uri,
+          logical_file_id: logicalFileId,
+          chunk_index: chunkIndex,
+          chunk_total: chunkTotal,
+        };
       } catch (err) {
         lastError = getErrorMessage(err, "上传失败");
         if (attempt < MAX_RETRIES) {
@@ -290,8 +338,125 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
         }
       }
     }
-    updateFile(entry.id, { state: "error", error: lastError });
     throw new Error(lastError);
+  };
+
+  /** Upload a single file (possibly chunked) to TOS with retry. */
+  const uploadSingleFile = async (entry: FileEntry): Promise<CommitFileItem[]> => {
+    const fileSize = entry.file.size;
+    const isLargeFile = fileSize > MAX_FILE_SIZE_GUEST;
+    const contentType = entry.file.type || "";
+
+    if (!isLargeFile) {
+      // Small file: single upload (original logic)
+      let lastError = "";
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          updateFile(entry.id, { state: "hashing", progress: 0, retries: attempt });
+          const crc32 = await computeCRC32(entry.file);
+
+          updateFile(entry.id, { state: "uploading", progress: 0 });
+          const uploadName = entry.uploadName;
+          const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
+          const initRes = await uploadInit({
+            file_name: uploadName,
+            file_size: entry.file.size,
+            file_ext: ext,
+            content_type: contentType,
+          });
+
+          if (entry.file.size > 0 && initRes.upload_url) {
+            await new Promise<void>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              abortRef.current.set(entry.id, xhr);
+              xhr.open("POST", initRes.upload_url);
+              xhr.setRequestHeader("Authorization", initRes.authorization);
+              xhr.setRequestHeader("Content-CRC32", crc32);
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  updateFile(entry.id, { progress: Math.round((e.loaded / e.total) * 100) });
+                }
+              };
+              xhr.onload = () => {
+                abortRef.current.delete(entry.id);
+                if (!isSuccessfulHttpStatus(xhr.status)) {
+                  reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+                  return;
+                }
+                try {
+                  const body = JSON.parse(xhr.responseText);
+                  if (body.code && body.code !== 2000) {
+                    reject(new Error(body.message || `TOS error: ${body.code}`));
+                    return;
+                  }
+                } catch { /* non-JSON response is OK */ }
+                resolve();
+              };
+              xhr.onerror = () => {
+                abortRef.current.delete(entry.id);
+                reject(new Error(formatXhrStatusError(0, "网络错误")));
+              };
+              xhr.send(entry.file);
+            });
+          }
+
+          updateFile(entry.id, { state: "done", progress: 100, commitToken: initRes.commit_token, storeUri: initRes.store_uri });
+          return [{ commit_token: initRes.commit_token, store_uri: initRes.store_uri }];
+        } catch (err) {
+          lastError = getErrorMessage(err, "上传失败");
+          if (attempt < MAX_RETRIES) {
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
+      }
+      updateFile(entry.id, { state: "error", error: lastError });
+      throw new Error(lastError);
+    }
+
+    // Large file: chunked upload
+    const logicalFileId = generateUUID();
+    const chunkTotal = Math.ceil(fileSize / CHUNK_SIZE);
+    const chunkResults: CommitFileItem[] = [];
+    const chunkLoaded: number[] = new Array(chunkTotal).fill(0);
+
+    updateFile(entry.id, { state: "uploading", progress: 0 });
+
+    // Upload chunks with concurrency limit of 2 (avoid memory pressure)
+    const chunkQueue = Array.from({ length: chunkTotal }, (_, i) => i);
+    let chunkError = "";
+
+    const chunkWorker = async () => {
+      while (chunkQueue.length > 0 && !chunkError) {
+        const idx = chunkQueue.shift()!;
+        const start = idx * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileSize);
+        const blob = entry.file.slice(start, end);
+        try {
+          const item = await uploadChunk(
+            entry, blob, idx, chunkTotal, logicalFileId, fileSize, contentType,
+            (loaded) => {
+              chunkLoaded[idx] = loaded;
+              const totalLoaded = chunkLoaded.reduce((a, b) => a + b, 0);
+              updateFile(entry.id, { progress: Math.round((totalLoaded / fileSize) * 100) });
+            },
+          );
+          chunkResults.push(item);
+        } catch (err) {
+          chunkError = getErrorMessage(err, `分片 ${idx + 1}/${chunkTotal} 上传失败`);
+        }
+      }
+    };
+
+    const concurrency = Math.min(2, chunkTotal);
+    await Promise.all(Array.from({ length: concurrency }, () => chunkWorker()));
+
+    if (chunkError || chunkResults.length !== chunkTotal) {
+      updateFile(entry.id, { state: "error", error: chunkError || "部分分片上传失败" });
+      throw new Error(chunkError || "部分分片上传失败");
+    }
+
+    updateFile(entry.id, { state: "done", progress: 100 });
+    return chunkResults;
   };
 
   /** Start uploading all pending files, then commit. */
@@ -310,8 +475,8 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
       while (queue.length > 0 && !hasError) {
         const entry = queue.shift()!;
         try {
-          const item = await uploadSingleFile(entry);
-          results.push(item);
+          const items = await uploadSingleFile(entry);
+          results.push(...items);
         } catch (err) {
           hasError = true;
           uploadError = getErrorMessage(err, "部分文件上传失败");
@@ -322,7 +487,7 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     const concurrency = Math.min(3, files.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-    if (hasError || results.length !== files.length) {
+    if (hasError || results.length < files.length) {
       setOverall("error");
       setError(uploadError || "部分文件上传失败");
       return;

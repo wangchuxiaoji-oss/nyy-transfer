@@ -145,3 +145,55 @@ body {
     opacity: 0.10;
   }
 }
+
+/* Plyr player theme overrides */
+:root {
+  --plyr-color-main: #FF8A3D;
+  --plyr-video-background: #1a1a1a;
+  --plyr-range-fill-background: #FF8A3D;
+  --plyr-badge-background: #FF8A3D;
+  --plyr-audio-controls-background: #fefcf9;
+  --plyr-audio-control-color: #2a1810;
+  /* Buffer bar: visible warm white against dark track */
+  --plyr-video-progress-buffered-background: rgba(255, 255, 255, 0.45);
+  --plyr-video-range-track-background: rgba(255, 255, 255, 0.12);
+  --plyr-audio-progress-buffered-background: rgba(255, 138, 61, 0.3);
+  --plyr-audio-range-track-background: rgba(0, 0, 0, 0.1);
+}
+
+.dark {
+  --plyr-audio-controls-background: #1e1e1e;
+  --plyr-audio-control-color: #f0ebe5;
+  --plyr-audio-progress-buffered-background: rgba(255, 138, 61, 0.35);
+  --plyr-audio-range-track-background: rgba(255, 255, 255, 0.08);
+}
+
+.plyr {
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.plyr--audio {
+  border-radius: 0.75rem;
+}
+
+/* Ensure buffer progress bar is visible across browsers */
+.plyr--video .plyr__progress__buffer {
+  color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
+  background-color: transparent;
+  border-radius: 100px;
+}
+.plyr--video .plyr__progress__buffer::-webkit-progress-value {
+  background-color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
+  border-radius: 100px;
+  transition: width 0.2s ease;
+}
+.plyr--video .plyr__progress__buffer::-moz-progress-bar {
+  background-color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
+  border-radius: 100px;
+  transition: width 0.2s ease;
+}
+.plyr--video .plyr__progress__buffer::-webkit-progress-bar {
+  background-color: var(--plyr-video-range-track-background, rgba(255, 255, 255, 0.12));
+  border-radius: 100px;
+}

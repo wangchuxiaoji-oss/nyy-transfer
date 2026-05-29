@@ -63,7 +63,7 @@ class Share(Base, TimestampMixin):
 
 
 class ShareFile(Base, TimestampMixin):
-    """分享下的单个文件（v1 单文件 = 1 行；v1.5 多分片 = N 行同一 share_id）。"""
+    """分享下的单个文件（v1 单文件 = 1 行；v2 大文件分片 = N 行同一 logical_file_id）。"""
 
     __tablename__ = "share_files"
 
@@ -81,9 +81,14 @@ class ShareFile(Base, TimestampMixin):
     content_type: Mapped[str | None] = mapped_column(String(127))
     tos_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     sha256: Mapped[str | None] = mapped_column(String(64), index=True)
-    # 多分片时使用；v1 单分片 chunk_index=0 chunk_total=1
+    # 多分片时使用；普通文件 chunk_index=0 chunk_total=1
     chunk_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     chunk_total: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # 大文件分片：同一逻辑文件的所有 chunk 共享同一 logical_file_id
+    # NULL = 普通文件（<=1GB，单 chunk）
+    logical_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
 
     share: Mapped[Share] = relationship("Share", back_populates="files")
 

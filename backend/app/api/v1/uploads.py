@@ -156,6 +156,16 @@ async def upload_init(
     settings = get_settings()
     ip = _get_client_ip(request)
 
+    # --- 大文件权限检查：>1GB 需要登录 ---
+    _ONE_GB = 1024 * 1024 * 1024
+    is_large_file = body.logical_file_size > _ONE_GB or body.file_size > _ONE_GB
+    if is_large_file and not user:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "上传超过 1GB 的文件需要登录")
+
+    # 单个 chunk 不能超过 1GB（TOS 限制）
+    if body.file_size > _ONE_GB:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "单个分片不能超过 1GB")
+
     # --- hCaptcha 校验（dev 环境跳过） ---
     if not settings.is_dev and settings.hcaptcha_secret:
         if not body.captcha_token:
@@ -194,12 +204,22 @@ async def upload_init(
                         _active_share_limit_message(active_count, max_shares),
                     )
         if request_owner_id:
-            result = await quota_svc.check_user_with_config(request_owner_id, body.file_size, quota_config)
+            # 大文件：仅第一个 chunk 做配额预检（按逻辑文件总大小）
+            quota_size = body.logical_file_size if body.logical_file_size > 0 and body.chunk_index == 0 else body.file_size
+            # 非第一个 chunk 跳过配额检查（commit 时统一扣减）
+            if body.chunk_index == 0:
+                result = await quota_svc.check_user_with_config(request_owner_id, quota_size, quota_config)
+            else:
+                result = None
         elif user:
-            result = await quota_svc.check_user_with_config(str(user.id), body.file_size, quota_config)
+            quota_size = body.logical_file_size if body.logical_file_size > 0 and body.chunk_index == 0 else body.file_size
+            if body.chunk_index == 0:
+                result = await quota_svc.check_user_with_config(str(user.id), quota_size, quota_config)
+            else:
+                result = None
         else:
             result = await quota_svc.check_guest_with_config(ip, body.file_size, quota_config)
-        if not result.allowed:
+        if result is not None and not result.allowed:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
 
     if body.file_size == 0:
@@ -213,6 +233,7 @@ async def upload_init(
             "file_name": body.file_name,
             "file_size": body.file_size,
             "file_ext": body.file_ext,
+            "content_type": body.content_type,
             "store_uri": store_uri,
             "session_key": None,
             "service_id": None,
@@ -220,6 +241,10 @@ async def upload_init(
             "secret_key": None,
             "session_token": None,
             "is_empty": True,
+            "chunk_index": body.chunk_index,
+            "chunk_total": body.chunk_total,
+            "logical_file_id": body.logical_file_id or None,
+            "logical_file_size": body.logical_file_size,
         }
     else:
         # --- 调豆包 init_upload ---
@@ -243,6 +268,7 @@ async def upload_init(
             "file_name": body.file_name,
             "file_size": body.file_size,
             "file_ext": body.file_ext,
+            "content_type": body.content_type,
             "store_uri": init_result.store_uri,
             "session_key": init_result.session_key,
             "service_id": init_result.service_id,
@@ -250,6 +276,10 @@ async def upload_init(
             "secret_key": init_result.secret_key,
             "session_token": init_result.session_token,
             "is_empty": False,
+            "chunk_index": body.chunk_index,
+            "chunk_total": body.chunk_total,
+            "logical_file_id": body.logical_file_id or None,
+            "logical_file_size": body.logical_file_size,
         }
 
     # --- 生成 commit_token，存 Redis ---
@@ -300,6 +330,10 @@ async def upload_commit(
         token_data = json.loads(raw)
         if token_data["store_uri"] != item.store_uri:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
+        # 合并 commit 请求中的 chunk 信息（优先使用请求中的值）
+        token_data["_logical_file_id"] = item.logical_file_id or token_data.get("logical_file_id")
+        token_data["_chunk_index"] = item.chunk_index
+        token_data["_chunk_total"] = item.chunk_total
         file_infos.append(token_data)
 
     # 取第一个文件的信息；纯空目录分享则取当前请求身份/IP
@@ -374,14 +408,21 @@ async def upload_commit(
             revoke_token=revoke_token,
         )
         for idx, info in enumerate(file_infos):
+            import uuid as _uuid
+            logical_fid = info.get("_logical_file_id")
+            logical_file_uuid = _uuid.UUID(logical_fid) if logical_fid else None
+            chunk_idx = info.get("_chunk_index", idx)
+            chunk_tot = info.get("_chunk_total", 1)
+
             sf = ShareFile(
                 share=share,
                 original_name=info["file_name"],
                 size=info["file_size"],
                 tos_uri=info["store_uri"],
-                content_type=None,
-                chunk_index=idx,
-                chunk_total=len(file_infos),
+                content_type=info.get("content_type") or None,
+                chunk_index=chunk_idx,
+                chunk_total=chunk_tot,
+                logical_file_id=logical_file_uuid,
             )
             db.add(sf)
         db.add(share)
@@ -403,6 +444,16 @@ async def upload_commit(
         await redis.delete(f"nyy:commit:{item.commit_token}")
 
     share_url = f"{settings.app_base_url}/{share_code}"
-    log.info("share created: code=%s files=%d size=%d", share_code, len(file_infos), total_bytes)
+    # 计算逻辑文件数（按 logical_file_id 分组，无 ID 的各算一个）
+    logical_ids = set()
+    standalone_count = 0
+    for info in file_infos:
+        lfid = info.get("_logical_file_id")
+        if lfid:
+            logical_ids.add(lfid)
+        else:
+            standalone_count += 1
+    logical_file_count = len(logical_ids) + standalone_count
+    log.info("share created: code=%s logical_files=%d chunks=%d size=%d", share_code, logical_file_count, len(file_infos), total_bytes)
 
-    return UploadCommitResponse(share_code=share_code, share_url=share_url, file_count=len(file_infos), revoke_token=revoke_token)
+    return UploadCommitResponse(share_code=share_code, share_url=share_url, file_count=logical_file_count, revoke_token=revoke_token)
