@@ -33,7 +33,9 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 # commit_token TTL (Redis)
-_COMMIT_TOKEN_TTL = timedelta(minutes=30)
+# 大文件（5GB+）在慢速网络下可能需要数小时上传完毕，
+# 早期分片的 token 必须存活到整个文件 commit 为止。
+_COMMIT_TOKEN_TTL = timedelta(hours=24)
 _EMPTY_URI_PREFIX = "nyy-empty://"
 _MAX_EMPTY_DIRS = 500
 _MAX_EMPTY_DIR_PATH_LEN = 512
