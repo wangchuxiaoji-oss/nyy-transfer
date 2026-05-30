@@ -9,6 +9,7 @@ import { Download, FileIcon, Clock, AlertCircle, Lock, Play, Package, Files, Fla
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import { MediaPlayer, getMediaType } from "@/components/media-player";
+import { SelfDevelopPlayer, getSelfDevelopMediaType } from "@/components/self-develop-player";
 import {
   getShareInfo, verifyShare, downloadShare, reportShare,
   type ShareInfo, type ShareFileDownload,
@@ -35,6 +36,17 @@ interface DebugStatus {
   lastLatencyMs: number | null;
   lastScope: string;
   lastEvent: string;
+  metadataSource: string | null;
+  moovOffset: number | null;
+  audioCodecs: string[];
+  sidecarDecision: string | null;
+  sdpReadBytes: number | null;
+  sdpFileSize: number | null;
+  sdpRenderedFrames: number | null;
+  sdpQueuedBlocks: number | null;
+  sdpPendingBlocks: number | null;
+  sdpCarryBytes: number | null;
+  sdpDecodeQueueSize: number | null;
 }
 
 export default function SharePage() {
@@ -56,12 +68,24 @@ export default function SharePage() {
   const [debugEntries, setDebugEntries] = useState<DebugEntry[]>([]);
   const [debugCopied, setDebugCopied] = useState(false);
   const [debugEnabled, setDebugEnabled] = useState(false);
+  const [sdpEnabled, setSdpEnabled] = useState(false);
   const [debugStatus, setDebugStatus] = useState<DebugStatus>({
     mode: "unknown",
     concurrency: null,
     lastLatencyMs: null,
     lastScope: "",
     lastEvent: "",
+    metadataSource: null,
+    moovOffset: null,
+    audioCodecs: [],
+    sidecarDecision: null,
+    sdpReadBytes: null,
+    sdpFileSize: null,
+    sdpRenderedFrames: null,
+    sdpQueuedBlocks: null,
+    sdpPendingBlocks: null,
+    sdpCarryBytes: null,
+    sdpDecodeQueueSize: null,
   });
   const debugStartPerfRef = useRef(0);
   const debugStartWallRef = useRef(0);
@@ -87,6 +111,52 @@ export default function SharePage() {
       }
       if (entry.scope === "player" && (entry.event === "seek:play" || entry.event === "seek:advance") && latencyMs !== null) {
         next = { ...next, lastLatencyMs: latencyMs };
+      }
+      if (entry.scope === "player" && entry.event === "sidecar:decision" && entry.data) {
+        next = {
+          ...next,
+          metadataSource: typeof entry.data.metadataSource === "string" ? entry.data.metadataSource : null,
+          moovOffset: typeof entry.data.moovOffset === "number" ? entry.data.moovOffset : null,
+          audioCodecs: Array.isArray(entry.data.audioCodecs) ? entry.data.audioCodecs.filter((item): item is string => typeof item === "string") : [],
+          sidecarDecision: typeof entry.data.sidecarDecision === "string" ? entry.data.sidecarDecision : null,
+        };
+      }
+      if (entry.scope === "sdp-mkv" && entry.event === "range:done" && entry.data) {
+        next = {
+          ...next,
+          sdpReadBytes: typeof entry.data.totalBytesRead === "number" ? entry.data.totalBytesRead : next.sdpReadBytes,
+        };
+      }
+      if (entry.scope === "sdp-mkv" && entry.event === "cluster:parsed" && entry.data) {
+        next = {
+          ...next,
+          sdpCarryBytes: typeof entry.data.carryBytes === "number" ? entry.data.carryBytes : next.sdpCarryBytes,
+        };
+      }
+      if (entry.scope === "sdp-mkv" && entry.event === "decoder:backlog" && entry.data) {
+        next = {
+          ...next,
+          sdpPendingBlocks: typeof entry.data.pendingBlocks === "number" ? entry.data.pendingBlocks : next.sdpPendingBlocks,
+        };
+      }
+      if (entry.scope === "sdp-mkv" && entry.event === "decoder:queued" && entry.data) {
+        next = {
+          ...next,
+          sdpQueuedBlocks: typeof entry.data.totalQueuedBlocks === "number" ? entry.data.totalQueuedBlocks : next.sdpQueuedBlocks,
+          sdpDecodeQueueSize: typeof entry.data.decodeQueueSize === "number" ? entry.data.decodeQueueSize : next.sdpDecodeQueueSize,
+        };
+      }
+      if (entry.scope === "sdp-mkv" && entry.event === "render:progress" && entry.data) {
+        next = {
+          ...next,
+          sdpRenderedFrames: typeof entry.data.renderedFrames === "number" ? entry.data.renderedFrames : next.sdpRenderedFrames,
+        };
+      }
+      if (entry.scope === "sdp" && entry.event === "init" && entry.data) {
+        next = {
+          ...next,
+          sdpFileSize: typeof entry.data.fileSize === "number" ? entry.data.fileSize : next.sdpFileSize,
+        };
       }
       return { ...next, lastScope: entry.scope, lastEvent: entry.event };
     });
@@ -119,7 +189,9 @@ export default function SharePage() {
   }, []);
 
   useEffect(() => {
-    setDebugEnabled(new URLSearchParams(window.location.search).get("debug") === "1");
+    const searchParams = new URLSearchParams(window.location.search);
+    setDebugEnabled(searchParams.get("debug") === "1");
+    setSdpEnabled(searchParams.get("sdp") === "1");
   }, []);
 
   useEffect(() => {
@@ -131,6 +203,7 @@ export default function SharePage() {
     appendDebugLog("page", "debug:on", {
       url: window.location.href,
       mode,
+      sdpEnabled,
       userAgent: navigator.userAgent,
       connection: getConnectionInfo(),
     });
@@ -169,7 +242,7 @@ export default function SharePage() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       void setVirtualMediaDebugEnabled(false).catch(() => {});
     };
-  }, [appendDebugLog, debugEnabled, ingestDebugEntry]);
+  }, [appendDebugLog, debugEnabled, ingestDebugEntry, sdpEnabled]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -392,7 +465,8 @@ export default function SharePage() {
 
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
-  const hasMedia = share.files.some((f) => getMediaType(f.file_name) !== null);
+  const sdpEligibleSingle = sdpEnabled && isSingle && share.files.some((f) => getSelfDevelopMediaType(f.file_name) !== null);
+  const hasMedia = sdpEligibleSingle || share.files.some((f) => getMediaType(f.file_name) !== null);
 
   return (
     <main className="min-h-dvh bg-warm-50 dark:bg-background flex flex-col items-center justify-center px-4 py-16">
@@ -486,13 +560,15 @@ export default function SharePage() {
 
         {/* Media player */}
         {downloads.length > 0 && downloads.map((dl, i) => {
+          const useSdp = sdpEnabled && isSingle && getSelfDevelopMediaType(dl.file_name) !== null;
+          if (useSdp) return <SelfDevelopPlayer key={i} file={dl} className="rounded-2xl overflow-hidden" debugLog={appendDebugLog} />;
           const mt = getMediaType(dl.file_name);
           if (!mt) return null;
           return <MediaPlayer key={i} file={dl} className="rounded-2xl overflow-hidden" debugLog={appendDebugLog} />;
         })}
         {hasMedia && downloads.length === 0 && !share.has_password && (
           <button onClick={handlePreview} className="type-action flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-nyy-300 dark:border-nyy-700 text-nyy-800 dark:text-nyy-400 hover:bg-nyy-50 dark:hover:bg-nyy-900/20">
-            <Play className="w-4 h-4" /> 预览
+            <Play className="w-4 h-4" /> {sdpEligibleSingle ? "SDP 预览" : "预览"}
           </button>
         )}
 
@@ -501,10 +577,25 @@ export default function SharePage() {
             <div className="mb-3 rounded-xl bg-white/80 p-3 dark:bg-black/20">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-700 dark:text-gray-300">
                 <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">mode: {debugStatus.mode}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">sdp: {sdpEnabled ? "on" : "off"}</span>
                 <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">concurrency: {debugStatus.concurrency ?? "-"}</span>
                 <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">last: {debugStatus.lastScope}/{debugStatus.lastEvent}</span>
                 <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">latency: {debugStatus.lastLatencyMs ?? "-"}ms</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">metadata: {debugStatus.metadataSource ?? "-"}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">moov: {debugStatus.moovOffset ?? "-"}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">audio: {debugStatus.audioCodecs.length ? debugStatus.audioCodecs.join("/") : "-"}</span>
+                <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">sidecar: {debugStatus.sidecarDecision ?? "-"}</span>
               </div>
+              {sdpEnabled && debugStatus.sdpReadBytes !== null && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-700 dark:text-gray-300">
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">read: {formatSize(debugStatus.sdpReadBytes)}{debugStatus.sdpFileSize ? ` / ${formatSize(debugStatus.sdpFileSize)} (${Math.round(debugStatus.sdpReadBytes / debugStatus.sdpFileSize * 100)}%)` : ""}</span>
+                  {debugStatus.sdpRenderedFrames !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">rendered: {debugStatus.sdpRenderedFrames}</span>}
+                  {debugStatus.sdpQueuedBlocks !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">queued: {debugStatus.sdpQueuedBlocks}</span>}
+                  {debugStatus.sdpPendingBlocks !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">pending: {debugStatus.sdpPendingBlocks}</span>}
+                  {debugStatus.sdpCarryBytes !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">carry: {formatSize(debugStatus.sdpCarryBytes)}</span>}
+                  {debugStatus.sdpDecodeQueueSize !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">decodeQ: {debugStatus.sdpDecodeQueueSize}</span>}
+                </div>
+              )}
             </div>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <p className="type-caption font-semibold text-nyy-900 dark:text-nyy-200">Debug 日志 · {debugEntries.length}</p>
