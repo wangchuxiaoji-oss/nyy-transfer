@@ -48,6 +48,7 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
   const ext = getFileExtension(file.file_name);
   const capabilities = useMemo(() => collectCapabilities(), []);
   const mediaType = getSelfDevelopMediaType(file.file_name);
+  const hasProbeAudioTrack = (probe?.audio_tracks?.length ?? 0) > 0;
 
   const getOrCreateVirtualFileId = useCallback(() => {
     if (!virtualFileIdRef.current) virtualFileIdRef.current = createVirtualMediaFileId(`sdp-${file.file_name}`);
@@ -196,8 +197,14 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
         </div>
       )}
 
-      {ext === "mkv" && probe?.probe_status === "ok" && (
+      {ext === "mkv" && probe?.probe_status === "ok" && hasProbeAudioTrack && (
         <SdpPlayer file={file} debugLog={debugLog} />
+      )}
+
+      {ext === "mkv" && probe?.probe_status === "ok" && !hasProbeAudioTrack && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-200">
+          SDP v2 音频主时钟需要音频轨；当前文件未检测到音频轨，已禁用 SDP 播放。
+        </div>
       )}
 
       <div className="rounded-xl bg-warm-50 p-3 text-xs text-gray-700 dark:bg-white/5 dark:text-gray-300">

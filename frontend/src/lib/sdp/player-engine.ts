@@ -91,15 +91,30 @@ export class PlayerEngine {
       return;
     }
 
+    if (!this.audioInfo) {
+      this.handleError("SDP v2 需要可解码音频轨；当前文件无音频，已禁用 SDP");
+      return;
+    }
+
+    if (typeof AudioDecoder === "undefined" || typeof AudioDecoder.isConfigSupported !== "function") {
+      this.handleError("SDP v2 需要 WebCodecs AudioDecoder；当前浏览器不支持音频主时钟");
+      return;
+    }
+
+    const audioSupport = await AudioDecoder.isConfigSupported(this.audioInfo.decoderConfig).catch(() => null);
+    if (!audioSupport?.supported) {
+      this.handleError("SDP v2 需要可解码音频轨；当前音频配置不受支持，已禁用 SDP");
+      return;
+    }
+
     // Configure video renderer
     this.videoRenderer = new VideoRenderer(this.canvas, this.clock);
     this.videoRenderer.configure(this.videoInfo.decoderConfig);
 
     // Configure audio renderer
-    if (this.audioInfo) {
-      this.audioRenderer = new AudioRenderer();
-      await this.audioRenderer.configure(this.audioInfo.decoderConfig);
-    }
+    this.audioRenderer = new AudioRenderer();
+    await this.audioRenderer.configure(this.audioInfo.decoderConfig);
+    this.clock.setAudioTimeProvider(() => this.audioRenderer?.getCurrentAudioTimeSec() ?? -1);
 
     // Create preload buffers
     this.videoBuffer = new PacketBuffer({
@@ -107,13 +122,11 @@ export class PlayerEngine {
       maxAheadSec: 30,
       debugLog: this.debugLog,
     });
-    if (this.audioInfo) {
-      this.audioBuffer = new PacketBuffer({
-        label: "audio",
-        maxAheadSec: 30,
-        debugLog: this.debugLog,
-      });
-    }
+    this.audioBuffer = new PacketBuffer({
+      label: "audio",
+      maxAheadSec: 30,
+      debugLog: this.debugLog,
+    });
 
     // Listen for visibility changes
     this.visibilityHandler = () => this.handleVisibilityChange();
@@ -593,20 +606,6 @@ export class PlayerEngine {
             ? Math.round((clockSec - audioTimeSec) * 1000)
             : null;
 
-          // Drift supervisor: if clock has drifted far ahead of audio and
-          // audio buffering is healthy, pull clock back to audio position.
-          // This corrects permanent desync after network starvation events.
-          const audioBufferedSec = this.audioRenderer?.getBufferedAheadSec() ?? 0;
-          if (avDriftMs !== null && avDriftMs > 300 && audioBufferedSec > 0.5) {
-            this.clock.seekTo(audioTimeSec);
-            this.debugLog?.("sdp-v2", "av:drift-correct", {
-              clockWas: +clockSec.toFixed(3),
-              audioTimeSec: +audioTimeSec.toFixed(3),
-              driftMs: avDriftMs,
-              audioBufferedSec: +audioBufferedSec.toFixed(2),
-            });
-          }
-
           this.debugLog?.("sdp-v2", "video:feed:progress", {
             packets: packetCount,
             clockSec: this.clock.getCurrentTimeSec(),
@@ -780,16 +779,17 @@ export class PlayerEngine {
       this.finishPlayback(epoch, "eof-no-duration");
       return;
     }
-    const remainingMs = Math.max(0, (this.duration - this.clock.getCurrentTimeSec()) * 1000);
+    const clockSec = this.clock.getCurrentTimeSec();
+    const remainingMs = Math.max(0, (this.duration - clockSec) * 1000);
     this.debugLog?.("sdp-v2", "ended:scheduled", {
       epoch,
       duration: this.duration,
-      clockSec: this.clock.getCurrentTimeSec(),
+      clockSec,
       remainingMs: Math.round(remainingMs),
     });
-    this.endTimer = setTimeout(() => {
-      this.finishPlayback(epoch, "eof-timer");
-    }, remainingMs);
+    if (remainingMs === 0) {
+      this.finishPlayback(epoch, "eof-now");
+    }
   }
 
   private finishPlayback(epoch: number, reason: string) {
