@@ -46,6 +46,15 @@ export class RangeFileReader {
   private chunks: VirtualChunk[];
   readonly totalSize: number;
 
+  /**
+   * Parallel read settings. When `parallelParts > 1`, any `read` whose span is
+   * at least `parallelThresholdBytes` is split into that many concurrent
+   * sub-range fetches. Used to accelerate large cluster reads during seek on
+   * rate-capped CDNs; small reads (headers, probes) stay single-connection.
+   */
+  private parallelParts = 1;
+  private parallelThresholdBytes = 512 * 1024;
+
   constructor(file: ShareFileDownload) {
     if (file.is_chunked) {
       let offset = 0;
@@ -68,11 +77,30 @@ export class RangeFileReader {
     }
   }
 
+  /**
+   * Enable/disable automatic parallel splitting for large reads.
+   * `parts <= 1` disables it.
+   */
+  setParallelMode(parts: number, thresholdBytes?: number): void {
+    this.parallelParts = Number.isFinite(parts) && parts > 1 ? Math.min(Math.floor(parts), 16) : 1;
+    if (thresholdBytes !== undefined && thresholdBytes > 0) {
+      this.parallelThresholdBytes = thresholdBytes;
+    }
+  }
+
   async read(start: number, end: number, signal?: AbortSignal, observer?: RangeReadObserver): Promise<ArrayBuffer> {
     const boundedStart = Math.max(0, start);
     const boundedEnd = Math.min(Math.max(boundedStart, end), this.totalSize);
     if (boundedStart >= boundedEnd) return new ArrayBuffer(0);
 
+    // Large reads get split into concurrent sub-ranges when parallel mode is on.
+    if (this.parallelParts > 1 && boundedEnd - boundedStart >= this.parallelThresholdBytes) {
+      return this.readParallel(boundedStart, boundedEnd, this.parallelParts, signal, observer);
+    }
+    return this.readSerial(boundedStart, boundedEnd, signal, observer);
+  }
+
+  private async readSerial(boundedStart: number, boundedEnd: number, signal?: AbortSignal, observer?: RangeReadObserver): Promise<ArrayBuffer> {
     const parts: ArrayBuffer[] = [];
     for (const chunk of this.chunks) {
       if (chunk.end < boundedStart) continue;
@@ -98,6 +126,46 @@ export class RangeFileReader {
 
   readFirstBytes(bytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
     return this.read(0, Math.min(bytes, this.totalSize), signal);
+  }
+
+  /**
+   * Read [start, end) by splitting it into `parts` equal sub-ranges fetched
+   * concurrently, then concatenating in order. Reuses `read` per sub-range, so
+   * chunk-boundary mapping, retries and timeouts all still apply. Used to
+   * benchmark parallel vs single-connection download on rate-capped CDNs.
+   */
+  async readParallel(
+    start: number,
+    end: number,
+    parts: number,
+    signal?: AbortSignal,
+    observer?: RangeReadObserver,
+  ): Promise<ArrayBuffer> {
+    const boundedStart = Math.max(0, start);
+    const boundedEnd = Math.min(Math.max(boundedStart, end), this.totalSize);
+    const total = boundedEnd - boundedStart;
+    if (total <= 0) return new ArrayBuffer(0);
+    const n = Math.max(1, Math.min(parts, total));
+    const per = Math.floor(total / n);
+
+    const ranges: Array<{ s: number; e: number }> = [];
+    for (let i = 0; i < n; i += 1) {
+      const s = boundedStart + i * per;
+      const e = i === n - 1 ? boundedEnd : s + per;
+      ranges.push({ s, e });
+    }
+
+    const buffers = await Promise.all(
+      ranges.map((r) => this.readSerial(r.s, r.e, signal, observer)),
+    );
+
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const buf of buffers) {
+      out.set(new Uint8Array(buf), offset);
+      offset += buf.byteLength;
+    }
+    return out.buffer;
   }
 }
 

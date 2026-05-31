@@ -31,22 +31,19 @@ export interface PacketBufferOptions {
   maxAheadSec?: number;
   /** Max bytes to hold in buffer */
   maxBytes?: number;
+  onPacket?: (packet: MbEncodedPacket) => void;
   debugLog?: DebugLogFn;
 }
 
 const DEFAULT_MAX_AHEAD_SEC = 30;
 const DEFAULT_MAX_BYTES = 128 * 1024 * 1024; // 128 MB
-const STATUS_LOG_PACKET_INTERVAL = 1000;
 
 export class PacketBuffer {
   private queue: MbEncodedPacket[] = [];
   private totalBytes = 0;
-  private lastConsumedTimestamp = -Infinity;
   private filling = false;
   private disposed = false;
   private epoch = 0;
-  /** Edge-trigger guard so the "full" log fires once per full→drain cycle */
-  private loggedFull = false;
   private iterator: MbPacketIterator | null = null;
 
   // Consumer waiting for data
@@ -57,6 +54,7 @@ export class PacketBuffer {
   private label: string;
   private maxAheadSec: number;
   private maxBytes: number;
+  private onPacket?: (packet: MbEncodedPacket) => void;
   private debugLog?: DebugLogFn;
 
   /** Whether the source stream has ended (all packets consumed) */
@@ -66,6 +64,7 @@ export class PacketBuffer {
     this.label = options.label;
     this.maxAheadSec = options.maxAheadSec ?? DEFAULT_MAX_AHEAD_SEC;
     this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+    this.onPacket = options.onPacket;
     this.debugLog = options.debugLog;
   }
 
@@ -83,7 +82,11 @@ export class PacketBuffer {
   /** Stop the run-ahead loop (e.g. on seek or dispose) */
   stopFilling(): void {
     this.filling = false;
+    const iterator = this.iterator;
     this.iterator = null;
+    if (iterator) {
+      void iterator.return(undefined).catch(() => {});
+    }
     // Wake producer if blocked
     if (this.spaceWaiter) {
       this.spaceWaiter.resolve();
@@ -100,9 +103,7 @@ export class PacketBuffer {
   clear(): void {
     this.queue = [];
     this.totalBytes = 0;
-    this.lastConsumedTimestamp = -Infinity;
     this.ended = false;
-    this.loggedFull = false;
   }
 
   /** Reset for seek: stop, clear, optionally restart */
@@ -127,7 +128,6 @@ export class PacketBuffer {
         const packet = this.queue.shift()!;
         const size = estimatePacketBytes(packet);
         this.totalBytes -= size;
-        this.lastConsumedTimestamp = packet.timestamp;
         // Wake producer if it was waiting for space
         if (this.spaceWaiter) {
           this.spaceWaiter.resolve();
@@ -187,23 +187,10 @@ export class PacketBuffer {
       while (this.filling && !this.disposed && epoch === this.epoch) {
         // Back-pressure: wait if buffer is full
         if (this.isFull()) {
-          if (!this.loggedFull) {
-            this.loggedFull = true;
-            this.debugLog?.("sdp-v2", `buffer:${this.label}:full`, {
-              packets: this.queue.length,
-              bytes: this.totalBytes,
-              durationSec: +this.bufferedDurationSec.toFixed(2),
-            });
-          }
           await new Promise<void>((resolve) => {
             this.spaceWaiter = { resolve };
           });
           if (!this.filling || this.disposed || epoch !== this.epoch) break;
-        } else if (this.loggedFull && this.isBelowRearmThreshold()) {
-          // Dropped well below the full threshold (hysteresis) — re-arm the
-          // edge-triggered log so a genuine refill is reported once. Avoids
-          // spam during single-packet oscillation at the exact boundary.
-          this.loggedFull = false;
         }
 
         const result = await iter.next();
@@ -225,6 +212,7 @@ export class PacketBuffer {
         const size = estimatePacketBytes(packet);
         this.queue.push(packet);
         this.totalBytes += size;
+        this.onPacket?.(packet);
         fillCount++;
 
         // Wake consumer if it was waiting
@@ -233,15 +221,6 @@ export class PacketBuffer {
           this.waiter = null;
         }
 
-        // Periodic status log
-        if (fillCount % STATUS_LOG_PACKET_INTERVAL === 0) {
-          this.debugLog?.("sdp-v2", `buffer:${this.label}:status`, {
-            filled: fillCount,
-            queued: this.queue.length,
-            bytes: this.totalBytes,
-            durationSec: +this.bufferedDurationSec.toFixed(2),
-          });
-        }
       }
     } catch (err) {
       if (!this.disposed && this.filling && epoch === this.epoch) {
@@ -263,20 +242,11 @@ export class PacketBuffer {
     if (this.queue.length === 0) return false;
     return this.bufferedDurationSec >= this.maxAheadSec;
   }
-
-  /**
-   * Hysteresis check for re-arming the "full" log. Returns true only when the
-   * buffer has drained to below 80% of either capacity limit, so a single
-   * packet consumed-then-refilled at the exact boundary does not re-arm.
-   */
-  private isBelowRearmThreshold(): boolean {
-    if (this.totalBytes >= this.maxBytes * 0.8) return false;
-    return this.bufferedDurationSec < this.maxAheadSec * 0.8;
-  }
 }
 
 /** Estimate byte size of an encoded packet (data + overhead) */
 function estimatePacketBytes(packet: MbEncodedPacket): number {
   // mediabunny EncodedPacket exposes .byteLength or .data.byteLength
-  return (packet as any).byteLength ?? (packet as any).data?.byteLength ?? 4096;
+  const p = packet as { byteLength?: number; data?: { byteLength?: number } };
+  return p.byteLength ?? p.data?.byteLength ?? 4096;
 }

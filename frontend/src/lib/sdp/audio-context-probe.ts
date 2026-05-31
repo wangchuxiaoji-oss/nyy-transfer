@@ -7,7 +7,7 @@ export function runAudioContextSuspendProbe(debugLog?: DebugLogFn) {
   if (typeof window === "undefined") return;
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get("debug") !== "1" && params.get("audioClockProbe") !== "1") return;
+  if (params.get("audioClockProbe") !== "1") return;
 
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) {

@@ -6,6 +6,8 @@ export { PlaybackClock } from "./clock";
 export { SdpDemuxer } from "./demuxer";
 export { VideoRenderer } from "./video-renderer";
 export { AudioRenderer } from "./audio-renderer";
+export { MkvSeekIndex } from "./mkv-seek-index";
+export type { MkvCueLookup } from "./mkv-seek-index";
 export type {
   PlayerState,
   BufferingState,

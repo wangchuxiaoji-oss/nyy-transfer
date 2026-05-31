@@ -6,7 +6,7 @@ import type { DebugLogFn } from "@/lib/debug";
 import { PlayerEngine, type BufferingState, type PlayerState } from "@/lib/sdp";
 import { PrefetchProbe } from "@/lib/sdp/prefetch-probe";
 
-const SEEK_PREWARM_DEBOUNCE_MS = 700;
+const SEEK_PREWARM_DEBOUNCE_MS = 80;
 
 interface SdpPlayerProps {
   file: ShareFileDownload;
@@ -33,7 +33,9 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     if (!canvas) return;
 
     let disposed = false;
-    const engine = new PlayerEngine({ file, canvas, debugLog });
+    const prefetchProfile = readPrefetchProfileOverride();
+    const seekParallelParts = readSeekParallelParts();
+    const engine = new PlayerEngine({ file, canvas, debugLog, prefetchProfile, seekParallelParts });
     engineRef.current = engine;
 
     engine.onStateChange = (s) => { if (!disposed) setState(s); };
@@ -77,10 +79,16 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const handlePlay = () => engineRef.current?.play();
   const handlePause = () => engineRef.current?.pause();
 
-  const handleScrubStart = () => {
+  const handleScrubStart = (event: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+    const target = getPointerRangeValue(event, duration) ?? currentTime;
     setScrubbing(true);
-    setScrubValue(currentTime);
+    setScrubValue(target);
     prewarmTokenRef.current++;
+    if (prewarmTimerRef.current) {
+      clearTimeout(prewarmTimerRef.current);
+      prewarmTimerRef.current = null;
+    }
+    void engineRef.current?.prewarmSeek(target);
   };
   const handleScrubChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = Number(e.target.value);
@@ -103,6 +111,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       clearTimeout(prewarmTimerRef.current);
       prewarmTimerRef.current = null;
     }
+    void engineRef.current?.prewarmSeek(target);
     void engineRef.current?.seek(target);
   };
 
@@ -183,6 +192,21 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   );
 }
 
+function readPrefetchProfileOverride(): "none" | "fileSystem" | "network" | undefined {
+  if (typeof window === "undefined") return undefined;
+  const value = new URLSearchParams(window.location.search).get("prefetchProfile");
+  if (value === "none" || value === "fileSystem" || value === "network") return value;
+  return undefined;
+}
+
+function readSeekParallelParts(): number | undefined {
+  if (typeof window === "undefined") return undefined;
+  const raw = new URLSearchParams(window.location.search).get("seekParallel");
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 16) : undefined;
+}
+
 function getStateLabel(state: PlayerState): string {
   switch (state) {
     case "idle": return "初始化";
@@ -210,6 +234,23 @@ function formatSpeed(bytesPerSec: number | null): string | null {
   const kbPerSec = bytesPerSec / 1024;
   if (kbPerSec >= 1024) return `${(kbPerSec / 1024).toFixed(1)} MB/s`;
   return `${Math.round(kbPerSec)} KB/s`;
+}
+
+function getPointerRangeValue(
+  event: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>,
+  duration: number,
+): number | null {
+  if (!duration || !Number.isFinite(duration)) return null;
+  const rect = event.currentTarget.getBoundingClientRect();
+  if (rect.width <= 0) return null;
+
+  const clientX = "touches" in event
+    ? event.touches[0]?.clientX ?? event.changedTouches[0]?.clientX
+    : event.clientX;
+  if (typeof clientX !== "number") return null;
+
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return ratio * duration;
 }
 
 function buildBufferingMessage(buffering: BufferingState | null, progressPct: number | null, speed: string | null): string {

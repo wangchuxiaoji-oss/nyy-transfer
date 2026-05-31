@@ -40,6 +40,10 @@ export interface PlayerConfig {
   file: ShareFileDownload;
   canvas: HTMLCanvasElement;
   debugLog?: DebugLogFn;
+  /** Override the source prefetch profile (debug experiment). */
+  prefetchProfile?: "none" | "fileSystem" | "network";
+  /** Parallel connections for downloading the target cluster on seek (default 4). */
+  seekParallelParts?: number;
 }
 
 /** Video track info extracted from demuxer */

@@ -14,6 +14,7 @@ import { AudioRenderer } from "./audio-renderer";
 import { PlaybackClock } from "./clock";
 import { PacketBuffer } from "./packet-buffer";
 import { runAudioContextSuspendProbe } from "./audio-context-probe";
+import { MkvSeekIndex } from "./mkv-seek-index";
 
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
 
@@ -67,6 +68,29 @@ export class PlayerEngine {
   private videoBuffer: PacketBuffer | null = null;
   private audioBuffer: PacketBuffer | null = null;
 
+  /** MKV Cues seek index (read-only validation probe; null when absent). */
+  private mkvSeekIndex: MkvSeekIndex | null = null;
+
+  /**
+   * Number of parallel connections used to download the target cluster during
+   * seek. 1 disables parallel splitting. Defaults to 4 (validated to be ~2-3x
+   * faster and more stable on rate-capped CDNs).
+   */
+  private seekParallelParts = 4;
+
+  /**
+   * Accumulates source reads observed during an active seek's keyframe lookup,
+   * so we can report how many range requests / bytes mediabunny needed to
+   * resolve a single getKeyPacket. null when not measuring.
+   */
+  private seekReadAccumulator: {
+    epoch: number;
+    reads: number;
+    bytes: number;
+    durationMsSum: number;
+    maxReadBytes: number;
+  } | null = null;
+
   state: PlayerState = "idle";
   onStateChange: ((state: PlayerState) => void) | null = null;
   onTimeUpdate: ((sec: number) => void) | null = null;
@@ -80,12 +104,28 @@ export class PlayerEngine {
   constructor(config: PlayerConfig) {
     this.canvas = config.canvas;
     this.debugLog = config.debugLog;
-    this.demuxer = new SdpDemuxer(config.file, config.debugLog, (stats) => this.handleSourceRead(stats));
+    this.demuxer = new SdpDemuxer(
+      config.file,
+      config.debugLog,
+      (stats) => this.handleSourceRead(stats),
+      config.prefetchProfile ?? "fileSystem",
+    );
+    this.mkvSeekIndex = MkvSeekIndex.fromMetadata(config.file.media_metadata ?? null);
+    if (config.seekParallelParts !== undefined) {
+      this.seekParallelParts = config.seekParallelParts;
+    }
   }
 
   private handleSourceRead(stats: SourceReadStats) {
     this.lastSourceReadAtMs = performance.now();
     this.lastSourceReadSpeedBytesPerSec = stats.durationMs > 0 ? (stats.bytes * 1000) / stats.durationMs : null;
+    if (this.seekReadAccumulator && this.seekReadAccumulator.epoch === this.playbackEpoch) {
+      const acc = this.seekReadAccumulator;
+      acc.reads += 1;
+      acc.bytes += stats.bytes;
+      acc.durationMsSum += stats.durationMs;
+      if (stats.bytes > acc.maxReadBytes) acc.maxReadBytes = stats.bytes;
+    }
     this.updateBufferingState();
   }
 
@@ -143,6 +183,7 @@ export class PlayerEngine {
     this.videoBuffer = new PacketBuffer({
       label: "video",
       maxAheadSec: 30,
+      onPacket: (packet) => this.cacheVideoKeyPacketIfNeeded(packet),
       debugLog: this.debugLog,
     });
     this.audioBuffer = new PacketBuffer({
@@ -162,6 +203,10 @@ export class PlayerEngine {
       duration: this.duration,
       width: this.videoInfo.codedWidth,
       height: this.videoInfo.codedHeight,
+      prefetchProfile: this.demuxer.prefetchProfileName,
+      mkvSeekIndex: this.mkvSeekIndex
+        ? { cueCount: this.mkvSeekIndex.count, segmentDataStart: this.mkvSeekIndex.segmentDataStart }
+        : null,
     });
   }
 
@@ -247,16 +292,17 @@ export class PlayerEngine {
     const generation = ++this.seekWarmupGeneration;
     const epoch = this.playbackEpoch;
     try {
-      const result = await this.getVideoKeyPacketForSeek(clamped);
+      const packet = await this.demuxer.getVideoKeyPacket(clamped, { metadataOnly: true });
       if (generation !== this.seekWarmupGeneration || epoch !== this.playbackEpoch || this.seeking || this.disposed) return;
       this.debugLog?.("sdp-v2", "seek:warmup", {
         target: +clamped.toFixed(3),
-        videoKeyTime: result.packet ? +result.packet.timestamp.toFixed(3) : null,
-        cacheHit: result.cacheHit,
-        inflightHit: result.inflightHit,
-        cacheGapSec: result.cacheGapSec,
+        videoKeyTime: packet ? +packet.timestamp.toFixed(3) : null,
+        metadataOnly: true,
         durationMs: Math.round(performance.now() - startedAt),
       });
+      if (packet) {
+        void this.getVideoKeyPacketForSeek(packet.timestamp);
+      }
     } catch (err) {
       if (!this.disposed && generation === this.seekWarmupGeneration && epoch === this.playbackEpoch && !this.seeking) {
         this.debugLog?.("sdp-v2", "seek:warmup:error", {
@@ -313,6 +359,11 @@ export class PlayerEngine {
         wasPlaying,
       });
 
+      // Read-only validation probe: does the MKV seek index land on a real
+      // Cluster, and how fast is a single direct range read vs mediabunny's
+      // cold keyframe lookup? Fire-and-forget; never affects seek behavior.
+      this.runSeekIndexProbe(clamped, epoch);
+
       // Ask any existing packet pumps to stop before we wait on them.
       await this.cancelCurrentPumps();
       await this.audioRenderer?.pause();
@@ -338,17 +389,31 @@ export class PlayerEngine {
       }
       const resetMs = performance.now() - resetStartPerf;
 
-      // 5. Find nearest keyframe at/before target
+      // 5. Find nearest keyframe at/before target.
+      //    Enable parallel splitting so the ~1.5MB cluster download uses
+      //    multiple connections (validated ~2-3x faster on this CDN). The
+      //    normal feed loop is stopped here, so it won't contend for bandwidth.
+      this.seekReadAccumulator = { epoch, reads: 0, bytes: 0, durationMsSum: 0, maxReadBytes: 0 };
       const videoKeyStartPerf = performance.now();
-      const videoKeyResult = await this.getVideoKeyPacketForSeek(clamped);
+      let videoKeyResult: Awaited<ReturnType<PlayerEngine["getVideoKeyPacketForSeek"]>>;
+      let audioPacket: MbEncodedPacket | null;
+      let audioPacketMs: number;
+      if (this.seekParallelParts > 1) this.demuxer.setParallelMode(this.seekParallelParts);
+      try {
+        videoKeyResult = await this.getVideoKeyPacketForSeek(clamped);
+
+        const audioPacketStartPerf = performance.now();
+        audioPacket = this.audioInfo
+          ? await this.demuxer.getAudioPacket(clamped)
+          : null;
+        audioPacketMs = performance.now() - audioPacketStartPerf;
+      } finally {
+        if (this.seekParallelParts > 1) this.demuxer.setParallelMode(1);
+      }
       const videoKeyPacket = videoKeyResult.packet;
       const videoKeyMs = performance.now() - videoKeyStartPerf;
-
-      const audioPacketStartPerf = performance.now();
-      const audioPacket = this.audioInfo
-        ? await this.demuxer.getAudioPacket(clamped)
-        : null;
-      const audioPacketMs = performance.now() - audioPacketStartPerf;
+      const videoKeyReads = this.seekReadAccumulator;
+      this.seekReadAccumulator = null;
 
       if (this.disposed || epoch !== this.playbackEpoch) {
         return;
@@ -368,6 +433,14 @@ export class PlayerEngine {
         videoKeyCacheHit: videoKeyResult.cacheHit,
         videoKeyInflightHit: videoKeyResult.inflightHit,
         videoKeyCacheGapSec: videoKeyResult.cacheGapSec,
+        prefetchProfile: this.demuxer.prefetchProfileName,
+        seekParallelParts: this.seekParallelParts,
+        videoKeyReads: {
+          reads: videoKeyReads.reads,
+          bytes: videoKeyReads.bytes,
+          maxReadBytes: videoKeyReads.maxReadBytes,
+          readMsSum: Math.round(videoKeyReads.durationMsSum),
+        },
         timing: {
           feedStopMs: Math.round(feedStop.elapsedMs),
           feedStopTimedOut: feedStop.timedOut,
@@ -459,13 +532,10 @@ export class PlayerEngine {
   }
 
   private async cancelCurrentPumps(): Promise<void> {
+    this.demuxer.abortActiveReads();
     // Stop buffer filling (which owns the underlying iterators)
     this.videoBuffer?.stopFilling();
     this.audioBuffer?.stopFilling();
-    this.debugLog?.("sdp-v2", "feed:cancel-request", {
-      video: true,
-      audio: true,
-    });
   }
 
   private async getVideoKeyPacketForSeek(targetSec: number): Promise<{
@@ -485,7 +555,7 @@ export class PlayerEngine {
     }
 
     const inFlight = this.videoKeyLookupInFlight;
-    if (inFlight && Math.abs(inFlight.targetSec - targetSec) <= VIDEO_KEY_INFLIGHT_REUSE_DISTANCE_SEC) {
+    if (inFlight && this.canReuseVideoKeyLookup(inFlight.targetSec, targetSec)) {
       const packet = await inFlight.promise;
       if (packet) this.cacheVideoKeyPacket(targetSec, packet);
       return {
@@ -507,6 +577,51 @@ export class PlayerEngine {
         this.videoKeyLookupInFlight = null;
       }
     }
+  }
+
+  private canReuseVideoKeyLookup(inFlightTargetSec: number, targetSec: number): boolean {
+    if (Math.abs(inFlightTargetSec - targetSec) <= VIDEO_KEY_INFLIGHT_REUSE_DISTANCE_SEC) return true;
+    return inFlightTargetSec <= targetSec && targetSec - inFlightTargetSec <= VIDEO_KEY_CACHE_MAX_REWIND_SEC;
+  }
+
+  /**
+   * Read-only validation probe (debug only): resolve the target time through
+   * the MKV Cues seek index, directly range-read that byte offset, and verify
+   * it lands on a Cluster. Logs `seek:index-probe` so its timing sits next to
+   * the same seek's `seek:keyframe` videoKeyMs. Never mutates player state.
+   */
+  private runSeekIndexProbe(targetSec: number, epoch: number): void {
+    const index = this.mkvSeekIndex;
+    if (!index) return;
+    const startedAt = performance.now();
+    const lookup = index.lookup(targetSec);
+    if (!lookup) return;
+
+    void (async () => {
+      try {
+        const result = await this.demuxer.probeElementAt(lookup.absByteOffset);
+        if (this.disposed || epoch !== this.playbackEpoch) return;
+        this.debugLog?.("sdp-v2", "seek:index-probe", {
+          target: +targetSec.toFixed(3),
+          cueTime: +lookup.cueTimeSec.toFixed(3),
+          cueGapSec: +(targetSec - lookup.cueTimeSec).toFixed(3),
+          absByteOffset: lookup.absByteOffset,
+          entryIndex: lookup.entryIndex,
+          isCluster: result.isCluster,
+          elementId: "0x" + (result.elementId >>> 0).toString(16),
+          probeMs: result.durationMs,
+          totalMs: Math.round(performance.now() - startedAt),
+        });
+      } catch (err) {
+        if (this.disposed || epoch !== this.playbackEpoch) return;
+        this.debugLog?.("sdp-v2", "seek:index-probe:error", {
+          target: +targetSec.toFixed(3),
+          absByteOffset: lookup.absByteOffset,
+          durationMs: Math.round(performance.now() - startedAt),
+          error: errMsg(err),
+        });
+      }
+    })();
   }
 
   private getCachedVideoKeyPacket(targetSec: number): MbEncodedPacket | null {
@@ -534,6 +649,11 @@ export class PlayerEngine {
     if (this.videoKeyPacketCache.length > VIDEO_KEY_CACHE_MAX_ENTRIES) {
       this.videoKeyPacketCache.shift();
     }
+  }
+
+  private cacheVideoKeyPacketIfNeeded(packet: MbEncodedPacket) {
+    if (packet.type !== "key") return;
+    this.cacheVideoKeyPacket(packet.timestamp, packet);
   }
 
   /** Stop and reset */
@@ -589,8 +709,6 @@ export class PlayerEngine {
       this.videoBuffer.reset(sink, startPacket);
     }
 
-    this.debugLog?.("sdp-v2", "video:feed:start", { epoch, from: startPacket?.timestamp ?? 0, seekTarget: options?.seekTargetSec ?? null });
-    let packetCount = 0;
     const LOOKAHEAD_SEC = 2; // only decode up to 2s ahead of clock
     let seekPreviewCommitted = false;
     let seekDecodeWindowStarted = false;
@@ -625,7 +743,6 @@ export class PlayerEngine {
         // Feed the chunk
         const chunk = packet.toEncodedVideoChunk();
         this.videoRenderer.decode(chunk);
-        packetCount++;
 
         if (!seekPreviewCommitted && options?.seekTargetSec !== undefined) {
           if (packetTimeSec >= options.seekTargetSec) {
@@ -646,32 +763,6 @@ export class PlayerEngine {
           }
         }
 
-        // Log progress every 300 packets (~10s of video at 30fps)
-        if (packetCount % 300 === 0) {
-          const clockSec = this.clock.getCurrentTimeSec();
-          const audioClock = this.audioRenderer?.getClockSnapshot() ?? null;
-          const audioTimeSec = audioClock?.currentTimeSec ?? -1;
-          const avDriftMs = audioTimeSec >= 0
-            ? Math.round((clockSec - audioTimeSec) * 1000)
-            : null;
-
-          this.debugLog?.("sdp-v2", "video:feed:progress", {
-            packets: packetCount,
-            clockSec: this.clock.getCurrentTimeSec(),
-            audioTimeSec: audioTimeSec >= 0 ? +audioTimeSec.toFixed(3) : null,
-            avDriftMs: audioTimeSec >= 0
-              ? Math.round((this.clock.getCurrentTimeSec() - audioTimeSec) * 1000)
-              : null,
-            audioBufferedSec: this.audioRenderer?.getBufferedAheadSec() ?? null,
-            audioClockClamped: audioClock?.clamped ?? null,
-            audioFreeRunSec: audioClock ? +audioClock.freeRunSec.toFixed(3) : null,
-            audioScheduledEndSec: audioClock ? +audioClock.scheduledEndSec.toFixed(3) : null,
-            videoBufferSec: this.videoBuffer?.bufferedDurationSec ?? null,
-            videoBufferPkts: this.videoBuffer?.length ?? null,
-            queueLen: this.videoRenderer.queueLength,
-            renderedFrames: this.videoRenderer.renderedFrames,
-          });
-        }
       }
       // All packets consumed — flush decoder (only if still current epoch)
       if (!this.disposed && epoch === this.playbackEpoch) {
@@ -834,12 +925,6 @@ export class PlayerEngine {
     }
     const clockSec = this.clock.getCurrentTimeSec();
     const remainingMs = Math.max(0, (this.duration - clockSec) * 1000);
-    this.debugLog?.("sdp-v2", "ended:scheduled", {
-      epoch,
-      duration: this.duration,
-      clockSec,
-      remainingMs: Math.round(remainingMs),
-    });
     if (remainingMs === 0) {
       this.finishPlayback(epoch, "eof-now");
     }
@@ -1000,7 +1085,6 @@ export class PlayerEngine {
     this.seekBuffering = null;
     if (!wasBuffering) return;
     this.onBufferingChange?.(null);
-    this.debugLog?.("sdp-v2", "playback:resume");
   }
 
   private finishPlayback(epoch: number, reason: string) {
