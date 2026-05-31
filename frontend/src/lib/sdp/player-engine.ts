@@ -150,26 +150,12 @@ export class PlayerEngine {
       clockTime: this.clock.getCurrentTimeSec(),
     });
 
-    // Audio: resume if suspended with baseline, else establish baseline + feed
-    if (this.audioRenderer) {
-      if (this.audioRenderer.hasBaseline()) {
-        // Normal resume after pause — resume audio first, then clock
-        await this.audioRenderer.resume();
-      } else {
-        // Fresh start or post-seek — set baseline and start feeding
-        await this.audioRenderer.play();
-        this.feedAudioLoop(epoch, this.resumeAudioPacket ?? undefined);
-        this.resumeAudioPacket = null;
-      }
-    }
-
-    this.setState("playing");
-    this.clock.play();
-    this.videoRenderer?.startRenderLoop();
-
-    // Start buffer filling if not already active (first play from start).
-    // Skip if resumeAudioPacket is set — feedAudioLoop will reset the buffer
-    // to the correct position.
+    // Start buffer filling BEFORE starting feed loops. The feed loops consume
+    // via buffer.take(), which returns null when the buffer is not yet filling.
+    // Starting feed first (especially audio) would also flip feedingAudio=true
+    // and bypass the startFilling guards below, leaving the buffer dormant.
+    // Skip audio startFilling when resumeAudioPacket is set — feedAudioLoop
+    // will reset the buffer to the correct position itself.
     const videoSink = this.demuxer.getVideoSink();
     if (this.videoBuffer && videoSink && !this.videoBuffer.length && !this.feedingVideo) {
       this.videoBuffer.startFilling(videoSink);
@@ -178,6 +164,23 @@ export class PlayerEngine {
     if (this.audioBuffer && audioSink && !this.audioBuffer.length && !this.feedingAudio && !this.resumeAudioPacket) {
       this.audioBuffer.startFilling(audioSink);
     }
+
+    // Audio: resume if suspended with baseline, else establish baseline + feed
+    if (this.audioRenderer) {
+      if (this.audioRenderer.hasBaseline()) {
+        // Normal resume after pause — resume audio first, then clock
+        await this.audioRenderer.resume();
+      } else {
+        // Fresh start or post-seek — set baseline and start feeding
+        await this.audioRenderer.play();
+        void this.feedAudioLoop(epoch, this.resumeAudioPacket ?? undefined);
+        this.resumeAudioPacket = null;
+      }
+    }
+
+    this.setState("playing");
+    this.clock.play();
+    this.videoRenderer?.startRenderLoop();
 
     // Video feed loop parks on the clock gate when paused, so it may
     // already be running. Only start if not active.
