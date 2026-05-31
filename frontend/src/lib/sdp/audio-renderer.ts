@@ -21,6 +21,10 @@ export class AudioRenderer {
   private ctxStartTime = -1; // AudioContext.currentTime when play() is called
   private mediaStartSec = -1; // media timestamp (sec) of first audio packet
   private scheduledEnd = 0;
+  // All currently-scheduled (started, not-yet-ended) source nodes. We MUST be
+  // able to stop these on seek/reset, otherwise audio buffered ahead of the
+  // seek point keeps playing and overlaps the new position's audio.
+  private scheduledSources = new Set<AudioBufferSourceNode>();
 
   /** Configure audio decoder and create AudioContext */
   async configure(config: AudioDecoderConfig): Promise<AudioContext> {
@@ -127,8 +131,28 @@ export class AudioRenderer {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
+    source.onended = () => {
+      this.scheduledSources.delete(source);
+      try { source.disconnect(); } catch {}
+    };
+    this.scheduledSources.add(source);
     source.start(scheduleAt);
     this.scheduledEnd = scheduleAt + numberOfFrames / sampleRate;
+  }
+
+  /**
+   * Stop and discard every scheduled source node immediately. Called on seek
+   * so that audio buffered ahead of the old position cannot leak into the new
+   * one. `onended` fires for stopped nodes, but we also clear eagerly so a
+   * subsequent reset starts from a clean slate.
+   */
+  private stopAllScheduledSources() {
+    this.scheduledSources.forEach((source) => {
+      source.onended = null;
+      try { source.stop(); } catch {}
+      try { source.disconnect(); } catch {}
+    });
+    this.scheduledSources.clear();
   }
 
   /** Flush the decoder */
@@ -158,6 +182,10 @@ export class AudioRenderer {
 
   /** Reset for seek */
   async reset(config: AudioDecoderConfig) {
+    // Kill any audio already scheduled on the AudioContext timeline first —
+    // otherwise the ~3s of look-ahead audio from the old position keeps
+    // playing and overlaps the post-seek audio.
+    this.stopAllScheduledSources();
     this.scheduledEnd = 0;
     this.ctxStartTime = -1;
     this.mediaStartSec = -1;
@@ -170,6 +198,7 @@ export class AudioRenderer {
   /** Dispose all resources */
   dispose() {
     this.disposed = true;
+    this.stopAllScheduledSources();
     if (this.decoder) {
       try { this.decoder.close(); } catch {}
       this.decoder = null;
