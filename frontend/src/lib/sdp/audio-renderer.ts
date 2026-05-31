@@ -123,12 +123,9 @@ export class AudioRenderer {
       this.scheduledEnd,
     );
 
-    // Starvation recovery: if the computed schedule time has fallen far behind
-    // ctx.currentTime, it means the audio pipeline was starved (no data arrived
-    // for a while). Instead of scheduling in the past (which would be dropped)
-    // or accumulating a permanent lag, re-anchor the baseline so that this
-    // sample plays "now". This causes a small audible skip but immediately
-    // restores A/V sync instead of drifting forever.
+    // Stall-resume recovery: if computed schedule time fell far behind the
+    // AudioContext timeline, the pipeline starved. Re-anchor this packet to
+    // play now; otherwise resumed audio would be considered late and dropped.
     const lagBehindNow = ctx.currentTime - scheduleAt;
     if (lagBehindNow > 0.15) {
       // Re-anchor: pretend playback started now at this media time.
@@ -179,13 +176,23 @@ export class AudioRenderer {
 
   /**
    * Get the current audio playback position in media time (seconds).
-   * This represents what the audio hardware is currently outputting.
+   * This represents the clamped media position the audio pipeline can
+   * actually sustain right now.
    */
   getCurrentAudioTimeSec(): number {
+    return this.getClockSnapshot()?.currentTimeSec ?? -1;
+  }
+
+  /** Current audio-clock diagnostics for sync/stall logging */
+  getClockSnapshot(): AudioClockSnapshot | null {
     const ctx = this.audioCtx;
-    if (!ctx || this.ctxStartTime < 0 || this.mediaStartSec < 0) return -1;
-    const elapsed = ctx.currentTime - this.ctxStartTime;
-    return this.mediaStartSec + Math.max(0, elapsed);
+    if (!ctx) return null;
+    return computeAudioClockSnapshot({
+      ctxCurrentTime: ctx.currentTime,
+      ctxStartTime: this.ctxStartTime,
+      mediaStartSec: this.mediaStartSec,
+      scheduledEnd: this.scheduledEnd,
+    });
   }
 
   /** Get how far ahead audio is scheduled (buffer depth in seconds) */
@@ -223,4 +230,34 @@ export class AudioRenderer {
       this.audioCtx = null;
     }
   }
+}
+
+export interface AudioClockSnapshot {
+  currentTimeSec: number;
+  freeRunSec: number;
+  scheduledEndSec: number;
+  bufferedAheadSec: number;
+  clamped: boolean;
+}
+
+export function computeAudioClockSnapshot(input: {
+  ctxCurrentTime: number;
+  ctxStartTime: number;
+  mediaStartSec: number;
+  scheduledEnd: number;
+}): AudioClockSnapshot | null {
+  const { ctxCurrentTime, ctxStartTime, mediaStartSec, scheduledEnd } = input;
+  if (ctxStartTime < 0 || mediaStartSec < 0) return null;
+  if (scheduledEnd <= ctxStartTime) return null;
+
+  const freeRunSec = mediaStartSec + Math.max(0, ctxCurrentTime - ctxStartTime);
+  const scheduledEndSec = mediaStartSec + Math.max(0, scheduledEnd - ctxStartTime);
+  const currentTimeSec = Math.min(freeRunSec, scheduledEndSec);
+  return {
+    currentTimeSec,
+    freeRunSec,
+    scheduledEndSec,
+    bufferedAheadSec: Math.max(0, scheduledEnd - ctxCurrentTime),
+    clamped: freeRunSec > scheduledEndSec + 0.001,
+  };
 }

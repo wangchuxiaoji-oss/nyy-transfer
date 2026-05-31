@@ -13,6 +13,7 @@ import { VideoRenderer } from "./video-renderer";
 import { AudioRenderer } from "./audio-renderer";
 import { PlaybackClock } from "./clock";
 import { PacketBuffer } from "./packet-buffer";
+import { runAudioContextSuspendProbe } from "./audio-context-probe";
 
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
 
@@ -176,6 +177,7 @@ export class PlayerEngine {
         void this.feedAudioLoop(epoch, this.resumeAudioPacket ?? undefined);
         this.resumeAudioPacket = null;
       }
+      runAudioContextSuspendProbe(this.debugLog);
     }
 
     this.setState("playing");
@@ -585,7 +587,8 @@ export class PlayerEngine {
         // Log progress every 300 packets (~10s of video at 30fps)
         if (packetCount % 300 === 0) {
           const clockSec = this.clock.getCurrentTimeSec();
-          const audioTimeSec = this.audioRenderer?.getCurrentAudioTimeSec() ?? -1;
+          const audioClock = this.audioRenderer?.getClockSnapshot() ?? null;
+          const audioTimeSec = audioClock?.currentTimeSec ?? -1;
           const avDriftMs = audioTimeSec >= 0
             ? Math.round((clockSec - audioTimeSec) * 1000)
             : null;
@@ -612,6 +615,9 @@ export class PlayerEngine {
               ? Math.round((this.clock.getCurrentTimeSec() - audioTimeSec) * 1000)
               : null,
             audioBufferedSec: this.audioRenderer?.getBufferedAheadSec() ?? null,
+            audioClockClamped: audioClock?.clamped ?? null,
+            audioFreeRunSec: audioClock ? +audioClock.freeRunSec.toFixed(3) : null,
+            audioScheduledEndSec: audioClock ? +audioClock.scheduledEndSec.toFixed(3) : null,
             videoBufferSec: this.videoBuffer?.bufferedDurationSec ?? null,
             videoBufferPkts: this.videoBuffer?.length ?? null,
             queueLen: this.videoRenderer.queueLength,
