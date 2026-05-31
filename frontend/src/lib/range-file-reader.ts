@@ -10,7 +10,37 @@ interface VirtualChunk {
 
 const RANGE_FETCH_MAX_ATTEMPTS = 3;
 const RANGE_FETCH_RETRY_DELAYS_MS = [300, 900];
-const RANGE_READ_TIMEOUT_MS = 15_000;
+// Dynamic per-attempt timeout: scales with requested bytes so that large
+// sequential reads (mediabunny grows reads up to ~8MB) are not killed at a
+// fixed deadline, while small cold reads still fail fast enough to retry.
+// CDN cold-region TTFB can spike to several seconds, so keep a generous base.
+const RANGE_READ_TIMEOUT_BASE_MS = 10_000;
+const RANGE_READ_TIMEOUT_PER_MB_MS = 3_500;
+const RANGE_READ_TIMEOUT_MAX_MS = 30_000;
+
+function computeReadTimeoutMs(bytes: number): number {
+  const mb = Math.max(0, bytes) / (1024 * 1024);
+  const ms = RANGE_READ_TIMEOUT_BASE_MS + mb * RANGE_READ_TIMEOUT_PER_MB_MS;
+  return Math.min(RANGE_READ_TIMEOUT_MAX_MS, Math.round(ms));
+}
+
+/** Marks errors that must not be retried (definitive failures). */
+class NonRetryableRangeError extends Error {}
+
+/** Per-attempt observability hook (retry visibility in debug logs). */
+export interface RangeReadAttemptInfo {
+  attempt: number;
+  ok: boolean;
+  status?: number;
+  timedOut: boolean;
+  timeoutMs: number;
+  durationMs: number;
+  willRetry: boolean;
+  error?: string;
+  chunkIndex: number;
+  requestedBytes: number;
+}
+export type RangeReadObserver = (info: RangeReadAttemptInfo) => void;
 
 export class RangeFileReader {
   private chunks: VirtualChunk[];
@@ -38,41 +68,32 @@ export class RangeFileReader {
     }
   }
 
-  async read(start: number, end: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+  async read(start: number, end: number, signal?: AbortSignal, observer?: RangeReadObserver): Promise<ArrayBuffer> {
     const boundedStart = Math.max(0, start);
     const boundedEnd = Math.min(Math.max(boundedStart, end), this.totalSize);
     if (boundedStart >= boundedEnd) return new ArrayBuffer(0);
 
-    const abort = createReadAbortSignal(signal, RANGE_READ_TIMEOUT_MS);
-    try {
-      const parts: ArrayBuffer[] = [];
-      for (const chunk of this.chunks) {
-        if (chunk.end < boundedStart) continue;
-        if (chunk.start >= boundedEnd) break;
+    const parts: ArrayBuffer[] = [];
+    for (const chunk of this.chunks) {
+      if (chunk.end < boundedStart) continue;
+      if (chunk.start >= boundedEnd) break;
 
-        const localStart = Math.max(0, boundedStart - chunk.start);
-        const localEnd = Math.min(chunk.size, boundedEnd - chunk.start);
-        const requestedBytes = localEnd - localStart;
-        const resp = await fetchChunkRange(chunk, localStart, localEnd, abort.signal);
-        if (!resp.ok && resp.status !== 206) throw new Error(`Range fetch failed: HTTP ${resp.status} (${describeChunkRange(chunk, localStart, localEnd)})`);
-        if (resp.status === 200 && requestedBytes < chunk.size) {
-          throw new Error("CDN ignored Range request; refusing to fetch a full large chunk");
-        }
-        parts.push(await resp.arrayBuffer());
-      }
-
-      if (parts.length === 1) return parts[0];
-      const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
-      const out = new Uint8Array(total);
-      let offset = 0;
-      for (const part of parts) {
-        out.set(new Uint8Array(part), offset);
-        offset += part.byteLength;
-      }
-      return out.buffer;
-    } finally {
-      abort.cleanup();
+      const localStart = Math.max(0, boundedStart - chunk.start);
+      const localEnd = Math.min(chunk.size, boundedEnd - chunk.start);
+      const requestedBytes = localEnd - localStart;
+      const buf = await fetchChunkRange(chunk, localStart, localEnd, requestedBytes, signal, observer);
+      parts.push(buf);
     }
+
+    if (parts.length === 1) return parts[0];
+    const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      out.set(new Uint8Array(part), offset);
+      offset += part.byteLength;
+    }
+    return out.buffer;
   }
 
   readFirstBytes(bytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
@@ -80,26 +101,96 @@ export class RangeFileReader {
   }
 }
 
-async function fetchChunkRange(chunk: VirtualChunk, localStart: number, localEnd: number, signal?: AbortSignal): Promise<Response> {
+async function fetchChunkRange(
+  chunk: VirtualChunk,
+  localStart: number,
+  localEnd: number,
+  requestedBytes: number,
+  parentSignal?: AbortSignal,
+  observer?: RangeReadObserver,
+): Promise<ArrayBuffer> {
   const range = `bytes=${localStart}-${localEnd - 1}`;
+  const timeoutMs = computeReadTimeoutMs(requestedBytes);
   let lastError: unknown;
 
+  const report = (
+    attempt: number,
+    fields: Partial<RangeReadAttemptInfo> & { durationMs: number },
+  ) => {
+    observer?.({
+      attempt,
+      ok: false,
+      timedOut: false,
+      willRetry: false,
+      timeoutMs,
+      chunkIndex: chunk.index,
+      requestedBytes,
+      ...fields,
+    });
+  };
+
   for (let attempt = 1; attempt <= RANGE_FETCH_MAX_ATTEMPTS; attempt += 1) {
-    if (signal?.aborted) throw new Error(`${abortReasonMessage(signal)} (${describeChunkRange(chunk, localStart, localEnd)})`);
+    // Parent cancellation (e.g. a newer seek) is definitive — never retry.
+    if (parentSignal?.aborted) {
+      throw new Error(`${abortReasonMessage(parentSignal)} (${describeChunkRange(chunk, localStart, localEnd)})`);
+    }
+
+    const attemptAbort = createReadAbortSignal(parentSignal, timeoutMs);
+    const startedAt = performance.now();
     try {
-      const resp = await fetch(chunk.url, { headers: { Range: range }, signal });
-      if (resp.ok || !isRetryableRangeStatus(resp.status) || attempt === RANGE_FETCH_MAX_ATTEMPTS) return resp;
-      lastError = new Error(`HTTP ${resp.status}`);
+      const resp = await fetch(chunk.url, { headers: { Range: range }, signal: attemptAbort.signal });
+
+      // 200 on a partial request means the CDN ignored Range — fetching the
+      // whole (possibly 512MB) chunk is never acceptable. Definitive failure.
+      if (resp.status === 200 && requestedBytes < chunk.size) {
+        await resp.body?.cancel().catch(() => undefined);
+        report(attempt, { status: 200, durationMs: performance.now() - startedAt, error: "CDN ignored Range" });
+        throw new NonRetryableRangeError(
+          `CDN ignored Range request; refusing to fetch a full large chunk (${describeChunkRange(chunk, localStart, localEnd)})`,
+        );
+      }
+
+      if (resp.ok || resp.status === 206) {
+        // Body download is part of the timed window: a stalled stream after
+        // headers arrive must also count against the per-attempt deadline.
+        const buf = await resp.arrayBuffer();
+        if (attempt > 1) report(attempt, { ok: true, status: resp.status, durationMs: performance.now() - startedAt });
+        return buf;
+      }
+
       await resp.body?.cancel().catch(() => undefined);
+      if (!isRetryableRangeStatus(resp.status) || attempt === RANGE_FETCH_MAX_ATTEMPTS) {
+        report(attempt, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}` });
+        throw new NonRetryableRangeError(`Range fetch failed: HTTP ${resp.status} (${describeChunkRange(chunk, localStart, localEnd)})`);
+      }
+      lastError = new Error(`HTTP ${resp.status}`);
+      report(attempt, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}`, willRetry: true });
     } catch (err) {
-      if (signal?.aborted || attempt === RANGE_FETCH_MAX_ATTEMPTS) {
-        const message = signal?.aborted ? abortReasonMessage(signal) : errorMessage(err);
+      if (err instanceof NonRetryableRangeError) throw err;
+      // Distinguish OUR per-attempt timeout (retryable) from a parent cancel
+      // (definitive). attemptAbort fires for both, so check the parent first.
+      if (parentSignal?.aborted) {
+        throw new Error(`${abortReasonMessage(parentSignal)} (${describeChunkRange(chunk, localStart, localEnd)})`);
+      }
+      const isLast = attempt === RANGE_FETCH_MAX_ATTEMPTS;
+      report(attempt, {
+        timedOut: attemptAbort.timedOut,
+        durationMs: performance.now() - startedAt,
+        error: attemptAbort.timedOut ? `timeout ${timeoutMs}ms` : errorMessage(err),
+        willRetry: !isLast,
+      });
+      if (isLast) {
+        const message = attemptAbort.timedOut
+          ? `Range read timeout after ${timeoutMs}ms`
+          : errorMessage(err);
         throw new Error(`Range fetch failed after ${attempt} attempt(s): ${message} (${describeChunkRange(chunk, localStart, localEnd)})`);
       }
       lastError = err;
+    } finally {
+      attemptAbort.cleanup();
     }
 
-    await waitForRetry(RANGE_FETCH_RETRY_DELAYS_MS[attempt - 1] ?? RANGE_FETCH_RETRY_DELAYS_MS[RANGE_FETCH_RETRY_DELAYS_MS.length - 1], signal);
+    await waitForRetry(RANGE_FETCH_RETRY_DELAYS_MS[attempt - 1] ?? RANGE_FETCH_RETRY_DELAYS_MS[RANGE_FETCH_RETRY_DELAYS_MS.length - 1], parentSignal);
   }
 
   throw new Error(`Range fetch failed: ${errorMessage(lastError)} (${describeChunkRange(chunk, localStart, localEnd)})`);
@@ -127,9 +218,14 @@ function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function createReadAbortSignal(parentSignal: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+function createReadAbortSignal(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void; readonly timedOut: boolean } {
   const controller = new AbortController();
+  let timedOut = false;
   const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
     controller.abort(new Error(`Range read timeout after ${timeoutMs}ms`));
   }, timeoutMs);
 
@@ -148,6 +244,9 @@ function createReadAbortSignal(parentSignal: AbortSignal | undefined, timeoutMs:
     cleanup: () => {
       globalThis.clearTimeout(timeout);
       parentSignal?.removeEventListener("abort", onParentAbort);
+    },
+    get timedOut() {
+      return timedOut;
     },
   };
 }

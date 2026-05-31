@@ -48,7 +48,13 @@ export class SdpDemuxer {
         const seq = ++this.sourceReadSeq;
         const startedAt = performance.now();
         try {
-          const buf = await reader.read(start, end, signal);
+          const buf = await reader.read(start, end, signal, (info) => {
+            // Only surface noteworthy attempts (retries, timeouts, failures);
+            // a clean first-try success stays quiet to avoid log spam.
+            if (info.attempt > 1 || info.willRetry || info.timedOut || !info.ok) {
+              this.debugLog?.("sdp-v2", "source:read:attempt", { seq, ...info });
+            }
+          });
           const durationMs = performance.now() - startedAt;
           const bytes = buf.byteLength;
           this.debugLog?.("sdp-v2", "source:read", {
