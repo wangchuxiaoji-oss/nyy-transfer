@@ -16,10 +16,21 @@ export type PlayerState =
   | "ended"
   | "error";
 
+export type BufferingReason = "seek" | "stall";
+
+export interface BufferingState {
+  reason: BufferingReason;
+  progressPct: number | null;
+  speedBytesPerSec: number | null;
+  progressSec: number | null;
+  requiredSec: number | null;
+}
+
 /** Events emitted by PlayerEngine */
 export interface PlayerEvents {
   stateChange: (state: PlayerState) => void;
   timeUpdate: (currentTimeSec: number) => void;
+  bufferingChange: (state: BufferingState | null) => void;
   error: (message: string) => void;
   ended: () => void;
 }

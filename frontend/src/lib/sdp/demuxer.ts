@@ -18,6 +18,16 @@ type MbEncodedPacketSink = InstanceType<
 >;
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
 
+export interface SourceReadStats {
+  seq: number;
+  start: number;
+  end: number;
+  bytes: number;
+  durationMs: number;
+  throughputKbps: number | null;
+  slow: boolean;
+}
+
 export class SdpDemuxer {
   private input: MbInput | null = null;
   private reader: RangeFileReader;
@@ -30,7 +40,11 @@ export class SdpDemuxer {
   audioInfo: AudioTrackInfo | null = null;
   duration = 0;
 
-  constructor(private file: ShareFileDownload, private debugLog?: DebugLogFn) {
+  constructor(
+    private file: ShareFileDownload,
+    private debugLog?: DebugLogFn,
+    private onSourceRead?: (stats: SourceReadStats) => void,
+  ) {
     this.reader = new RangeFileReader(file);
   }
 
@@ -57,7 +71,7 @@ export class SdpDemuxer {
           });
           const durationMs = performance.now() - startedAt;
           const bytes = buf.byteLength;
-          this.debugLog?.("sdp-v2", "source:read", {
+          const stats: SourceReadStats = {
             seq,
             start,
             end,
@@ -65,7 +79,11 @@ export class SdpDemuxer {
             durationMs: Math.round(durationMs),
             throughputKbps: durationMs > 0 ? Math.round((bytes * 8) / durationMs) : null,
             slow: durationMs >= 250,
-          });
+          };
+          if (shouldLogSourceRead(stats)) {
+            this.debugLog?.("sdp-v2", "source:read", { ...stats });
+          }
+          this.onSourceRead?.(stats);
           return new Uint8Array(buf);
         } catch (err) {
           const durationMs = performance.now() - startedAt;
@@ -160,4 +178,8 @@ export class SdpDemuxer {
     this.videoSink = null;
     this.audioSink = null;
   }
+}
+
+function shouldLogSourceRead(stats: SourceReadStats): boolean {
+  return stats.seq <= 5 || stats.seq % 10 === 0 || stats.durationMs >= 1500;
 }

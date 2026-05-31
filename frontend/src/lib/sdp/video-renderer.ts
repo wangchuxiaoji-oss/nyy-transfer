@@ -24,6 +24,7 @@ export class VideoRenderer {
   private disposed = false;
   private displaySuppressed = false;
   private seekTargetUs: number | null = null;
+  onSeekDecodeProgress: ((decodedSec: number) => void) | null = null;
   renderedFrames = 0;
 
   /** Called when decoder has space for more chunks */
@@ -206,6 +207,7 @@ export class VideoRenderer {
       if (frame.timestamp <= this.seekTargetUs) {
         this.clearFrameQueue();
         this.frameQueue.push(frame);
+        this.onSeekDecodeProgress?.(frame.timestamp / 1_000_000);
       } else if (this.frameQueue.length === 0) {
         // Keep the first post-target frame around only if nothing else exists yet.
         this.frameQueue.push(frame);

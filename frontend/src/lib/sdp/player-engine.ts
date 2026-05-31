@@ -6,9 +6,9 @@
  * and the packet feeding loop with proper back-pressure.
  */
 
-import type { PlayerConfig, PlayerState, VideoTrackInfo, AudioTrackInfo } from "./types";
+import type { PlayerConfig, PlayerState, VideoTrackInfo, AudioTrackInfo, BufferingState, BufferingReason } from "./types";
 import type { DebugLogFn } from "@/lib/debug";
-import { SdpDemuxer } from "./demuxer";
+import { SdpDemuxer, type SourceReadStats } from "./demuxer";
 import { VideoRenderer } from "./video-renderer";
 import { AudioRenderer } from "./audio-renderer";
 import { PlaybackClock } from "./clock";
@@ -20,6 +20,15 @@ type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
 const VIDEO_KEY_CACHE_MAX_ENTRIES = 24;
 const VIDEO_KEY_CACHE_MAX_REWIND_SEC = 15;
 const VIDEO_KEY_INFLIGHT_REUSE_DISTANCE_SEC = 0.25;
+const RECOVERY_BUFFER_TARGET_SEC = 3;
+const SOURCE_READ_SPEED_STALE_MS = 2000;
+
+interface SeekBufferingState {
+  startSec: number | null;
+  targetSec: number;
+  decodedSec: number | null;
+  ready: boolean;
+}
 
 export class PlayerEngine {
   private demuxer: SdpDemuxer;
@@ -39,6 +48,12 @@ export class PlayerEngine {
   private visibilityResumeInFlight = false;
   private videoFeedEpoch: number | null = null;
   private audioFeedEpoch: number | null = null;
+  private bufferingState: BufferingState | null = null;
+  private lastSourceReadSpeedBytesPerSec: number | null = null;
+  private lastSourceReadAtMs = 0;
+  private stallLastMediaSec = 0;
+  private stallLastAdvanceAtMs = 0;
+  private seekBuffering: SeekBufferingState | null = null;
   private videoKeyPacketCache: Array<{ targetSec: number; packet: MbEncodedPacket }> = [];
   private videoKeyLookupInFlight: {
     targetSec: number;
@@ -55,6 +70,7 @@ export class PlayerEngine {
   state: PlayerState = "idle";
   onStateChange: ((state: PlayerState) => void) | null = null;
   onTimeUpdate: ((sec: number) => void) | null = null;
+  onBufferingChange: ((state: BufferingState | null) => void) | null = null;
   onError: ((msg: string) => void) | null = null;
 
   videoInfo: VideoTrackInfo | null = null;
@@ -64,7 +80,13 @@ export class PlayerEngine {
   constructor(config: PlayerConfig) {
     this.canvas = config.canvas;
     this.debugLog = config.debugLog;
-    this.demuxer = new SdpDemuxer(config.file, config.debugLog);
+    this.demuxer = new SdpDemuxer(config.file, config.debugLog, (stats) => this.handleSourceRead(stats));
+  }
+
+  private handleSourceRead(stats: SourceReadStats) {
+    this.lastSourceReadAtMs = performance.now();
+    this.lastSourceReadSpeedBytesPerSec = stats.durationMs > 0 ? (stats.bytes * 1000) / stats.durationMs : null;
+    this.updateBufferingState();
   }
 
   /** Initialize: parse file, configure decoders */
@@ -110,6 +132,7 @@ export class PlayerEngine {
     // Configure video renderer
     this.videoRenderer = new VideoRenderer(this.canvas, this.clock);
     this.videoRenderer.configure(this.videoInfo.decoderConfig);
+    this.videoRenderer.onSeekDecodeProgress = (decodedSec) => this.handleSeekDecodeProgress(decodedSec);
 
     // Configure audio renderer
     this.audioRenderer = new AudioRenderer();
@@ -195,6 +218,7 @@ export class PlayerEngine {
 
     this.setState("playing");
     this.clock.play();
+    this.resetStallTracker();
     this.videoRenderer?.startRenderLoop();
 
     // Video feed loop parks on the clock gate when paused, so it may
@@ -211,18 +235,20 @@ export class PlayerEngine {
     // Feed loops keep running and naturally stop at the frozen clock gate.
     // Audio output is suspended; baseline is preserved for clean resume.
     void this.audioRenderer?.pause();
+    this.clearBufferingState();
     this.setState("paused");
   }
 
   /** Warm keyframe lookup before the user commits a seek. */
   async prewarmSeek(targetSec: number): Promise<void> {
-    if (this.disposed || !this.videoInfo || !this.duration) return;
+    if (this.disposed || this.seeking || !this.videoInfo || !this.duration) return;
     const clamped = Math.max(0, Math.min(targetSec, this.duration));
     const startedAt = performance.now();
     const generation = ++this.seekWarmupGeneration;
+    const epoch = this.playbackEpoch;
     try {
       const result = await this.getVideoKeyPacketForSeek(clamped);
-      if (generation !== this.seekWarmupGeneration || this.disposed) return;
+      if (generation !== this.seekWarmupGeneration || epoch !== this.playbackEpoch || this.seeking || this.disposed) return;
       this.debugLog?.("sdp-v2", "seek:warmup", {
         target: +clamped.toFixed(3),
         videoKeyTime: result.packet ? +result.packet.timestamp.toFixed(3) : null,
@@ -232,7 +258,7 @@ export class PlayerEngine {
         durationMs: Math.round(performance.now() - startedAt),
       });
     } catch (err) {
-      if (!this.disposed) {
+      if (!this.disposed && generation === this.seekWarmupGeneration && epoch === this.playbackEpoch && !this.seeking) {
         this.debugLog?.("sdp-v2", "seek:warmup:error", {
           target: +clamped.toFixed(3),
           durationMs: Math.round(performance.now() - startedAt),
@@ -266,6 +292,13 @@ export class PlayerEngine {
     const previousTimeSec = this.clock.getCurrentTimeSec();
     let autoResumeAfterError = false;
     this.setState("seeking");
+    this.seekBuffering = {
+      startSec: null,
+      targetSec: clamped,
+      decodedSec: null,
+      ready: false,
+    };
+    this.beginBufferingState("seek");
 
     let epoch = this.playbackEpoch;
     try {
@@ -321,13 +354,20 @@ export class PlayerEngine {
         return;
       }
 
+      if (this.seekBuffering) {
+        const seekStartSec = videoKeyPacket?.timestamp ?? 0;
+        this.seekBuffering.startSec = seekStartSec;
+        this.seekBuffering.decodedSec = seekStartSec;
+      }
+      this.updateBufferingState();
+
       this.debugLog?.("sdp-v2", "seek:keyframe", {
         target: +clamped.toFixed(3),
-      videoKeyTime: videoKeyPacket ? +videoKeyPacket.timestamp.toFixed(3) : null,
-      audioTime: audioPacket ? +audioPacket.timestamp.toFixed(3) : null,
-      videoKeyCacheHit: videoKeyResult.cacheHit,
-      videoKeyInflightHit: videoKeyResult.inflightHit,
-      videoKeyCacheGapSec: videoKeyResult.cacheGapSec,
+        videoKeyTime: videoKeyPacket ? +videoKeyPacket.timestamp.toFixed(3) : null,
+        audioTime: audioPacket ? +audioPacket.timestamp.toFixed(3) : null,
+        videoKeyCacheHit: videoKeyResult.cacheHit,
+        videoKeyInflightHit: videoKeyResult.inflightHit,
+        videoKeyCacheGapSec: videoKeyResult.cacheGapSec,
         timing: {
           feedStopMs: Math.round(feedStop.elapsedMs),
           feedStopTimedOut: feedStop.timedOut,
@@ -345,7 +385,10 @@ export class PlayerEngine {
       this.videoRenderer?.startRenderLoop();
       void this.feedVideoLoop(epoch, videoKeyPacket ?? undefined, {
         seekTargetSec: clamped,
-        onSeekPreviewReady: () => seekPreviewReady.resolve(),
+        onSeekPreviewReady: () => {
+          this.markSeekBufferingReady();
+          seekPreviewReady.resolve();
+        },
         onSeekPreviewError: (error) => seekPreviewReady.reject(error),
       });
 
@@ -358,12 +401,15 @@ export class PlayerEngine {
         }
         this.setState("playing");
         this.clock.play(clamped);
+        this.resetStallTracker();
+        this.updateBufferingState();
       } else {
         await seekPreviewReady.promise;
         // Stay paused: store audio resume point for the next play()
         this.setState("paused");
         this.resumeSeekSec = clamped;
         this.resumeAudioPacket = audioPacket;
+        this.clearBufferingState();
       }
     } catch (err) {
       if (!this.disposed) {
@@ -378,6 +424,7 @@ export class PlayerEngine {
         this.resumeSeekSec = previousTimeSec;
         this.resumeAudioPacket = null;
         this.setState("paused");
+        this.clearBufferingState();
         autoResumeAfterError = wasPlaying;
       }
     } finally {
@@ -499,6 +546,7 @@ export class PlayerEngine {
     this.videoRenderer?.clearFrameQueue();
     this.resumeSeekSec = null;
     this.resumeAudioPacket = null;
+    this.clearBufferingState();
     this.setState("idle");
   }
 
@@ -516,6 +564,7 @@ export class PlayerEngine {
     this.clock.reset();
     this.resumeSeekSec = null;
     this.resumeAudioPacket = null;
+    this.clearBufferingState();
     if (this.visibilityHandler) {
       document.removeEventListener("visibilitychange", this.visibilityHandler);
     }
@@ -727,6 +776,7 @@ export class PlayerEngine {
       this.videoRenderer?.stopRenderLoop();
       this.videoRenderer?.clearFrameQueue();
       this.audioRenderer?.pause();
+      this.clearBufferingState();
       this.debugLog?.("sdp-v2", "visibility:hidden", { frozenAt });
     } else if (!document.hidden && this.state === "playing") {
       void this.resumeFromVisibilityHidden();
@@ -742,6 +792,7 @@ export class PlayerEngine {
       await this.audioRenderer?.resume();
       if (this.disposed || document.hidden || this.state !== "playing") return;
       this.clock.play(resumeFrom);
+      this.resetStallTracker();
       this.videoRenderer?.startRenderLoop();
       const clockSec = this.clock.getCurrentTimeSec();
       const audioTimeSec = this.audioRenderer?.getCurrentAudioTimeSec() ?? -1;
@@ -768,7 +819,9 @@ export class PlayerEngine {
         this.onTimeUpdate(currentTime);
         if (this.duration > 0 && rawTime >= this.duration) {
           this.finishPlayback(this.playbackEpoch, "time-update");
+          return;
         }
+        this.updateStallState(rawTime);
       }
     }, 250);
   }
@@ -792,6 +845,164 @@ export class PlayerEngine {
     }
   }
 
+  private resetStallTracker() {
+    this.stallLastMediaSec = this.clock.getCurrentTimeSec();
+    this.stallLastAdvanceAtMs = performance.now();
+    if (this.bufferingState?.reason === "stall") {
+      this.clearBufferingState();
+    }
+  }
+
+  private updateStallState(rawTimeSec: number) {
+    if (document.hidden || this.state !== "playing") return;
+
+    if (rawTimeSec > this.stallLastMediaSec + 0.05) {
+      this.stallLastMediaSec = rawTimeSec;
+      this.stallLastAdvanceAtMs = performance.now();
+      if (this.bufferingState?.reason === "stall") {
+        this.clearBufferingState();
+      }
+      return;
+    }
+
+    const audioClock = this.audioRenderer?.getClockSnapshot() ?? null;
+    const stalledForMs = performance.now() - this.stallLastAdvanceAtMs;
+    const shouldStall = stalledForMs >= 1000 && (
+      audioClock === null ||
+      audioClock.clamped ||
+      audioClock.bufferedAheadSec < 0.15
+    );
+
+    if (shouldStall) {
+      this.beginBufferingState("stall", {
+        stalledForMs: Math.round(stalledForMs),
+        clockSec: +rawTimeSec.toFixed(3),
+        audioTimeSec: audioClock ? +audioClock.currentTimeSec.toFixed(3) : null,
+        audioBufferedSec: audioClock ? +audioClock.bufferedAheadSec.toFixed(3) : null,
+        audioClockClamped: audioClock?.clamped ?? null,
+      });
+    }
+  }
+
+  private handleSeekDecodeProgress(decodedSec: number) {
+    if (!this.seekBuffering || this.seekBuffering.ready || this.bufferingState?.reason !== "seek") return;
+    if (this.seekBuffering.startSec === null) return;
+
+    const previousDecodedSec = this.seekBuffering.decodedSec ?? this.seekBuffering.startSec;
+    if (!Number.isFinite(decodedSec) || decodedSec <= previousDecodedSec) return;
+
+    this.seekBuffering.decodedSec = decodedSec;
+    this.updateBufferingState();
+  }
+
+  private markSeekBufferingReady() {
+    if (!this.seekBuffering) return;
+
+    this.seekBuffering.ready = true;
+    this.seekBuffering.decodedSec = this.seekBuffering.targetSec;
+    this.updateBufferingState();
+  }
+
+  private beginBufferingState(reason: BufferingReason, data?: Record<string, unknown>) {
+    const wasBuffering = this.bufferingState?.reason === reason;
+    this.bufferingState = this.createBufferingState(reason);
+    this.onBufferingChange?.(this.bufferingState);
+    if (!wasBuffering) {
+      this.debugLog?.("sdp-v2", reason === "seek" ? "playback:seek-buffering" : "playback:stall", {
+        progressPct: this.bufferingState.progressPct,
+        speedBytesPerSec: this.bufferingState.speedBytesPerSec,
+        progressSec: roundOptionalSec(this.bufferingState.progressSec),
+        requiredSec: roundOptionalSec(this.bufferingState.requiredSec),
+        ...data,
+      });
+    }
+  }
+
+  private updateBufferingState() {
+    if (!this.bufferingState) return;
+
+    this.bufferingState = this.createBufferingState(this.bufferingState.reason);
+    this.onBufferingChange?.(this.bufferingState);
+
+    if (
+      this.bufferingState.reason === "seek" &&
+      this.state === "playing" &&
+      this.bufferingState.progressPct !== null &&
+      this.bufferingState.progressPct >= 100
+    ) {
+      this.clearBufferingState();
+    }
+  }
+
+  private createBufferingState(reason: BufferingReason): BufferingState {
+    return reason === "seek" ? this.createSeekBufferingState() : this.createStallBufferingState();
+  }
+
+  private createSeekBufferingState(): BufferingState {
+    const seek = this.seekBuffering;
+    if (!seek || seek.startSec === null || seek.decodedSec === null) {
+      return {
+        reason: "seek",
+        progressPct: null,
+        speedBytesPerSec: this.getRecentSourceReadSpeedBytesPerSec(),
+        progressSec: null,
+        requiredSec: null,
+      };
+    }
+
+    const startSec = seek.startSec;
+    const targetSec = seek.targetSec;
+    const requiredSec = Math.max(0, targetSec - startSec);
+    const decodedSec = seek.decodedSec;
+    const progressSec = seek.ready
+      ? requiredSec
+      : Math.max(0, Math.min(decodedSec - startSec, requiredSec));
+    const progressPct = seek.ready
+      ? 100
+      : requiredSec <= 0
+        ? 0
+        : Math.min(99, Math.floor((progressSec / requiredSec) * 100));
+
+    return {
+      reason: "seek",
+      progressPct,
+      speedBytesPerSec: this.getRecentSourceReadSpeedBytesPerSec(),
+      progressSec,
+      requiredSec,
+    };
+  }
+
+  private createStallBufferingState(): BufferingState {
+    const progressSec = this.audioRenderer?.getClockSnapshot()?.bufferedAheadSec ?? 0;
+    const requiredSec = RECOVERY_BUFFER_TARGET_SEC;
+    const progressPct = requiredSec <= 0
+      ? 0
+      : Math.max(0, Math.min(100, Math.round((progressSec / requiredSec) * 100)));
+
+    return {
+      reason: "stall",
+      progressPct,
+      speedBytesPerSec: this.getRecentSourceReadSpeedBytesPerSec(),
+      progressSec,
+      requiredSec,
+    };
+  }
+
+  private getRecentSourceReadSpeedBytesPerSec(): number | null {
+    if (!this.lastSourceReadAtMs) return null;
+    if (performance.now() - this.lastSourceReadAtMs > SOURCE_READ_SPEED_STALE_MS) return null;
+    return this.lastSourceReadSpeedBytesPerSec;
+  }
+
+  private clearBufferingState() {
+    const wasBuffering = this.bufferingState !== null;
+    this.bufferingState = null;
+    this.seekBuffering = null;
+    if (!wasBuffering) return;
+    this.onBufferingChange?.(null);
+    this.debugLog?.("sdp-v2", "playback:resume");
+  }
+
   private finishPlayback(epoch: number, reason: string) {
     if (this.disposed || epoch !== this.playbackEpoch || this.state === "ended") return;
     this.clearEndTimer();
@@ -800,6 +1011,7 @@ export class PlayerEngine {
     this.clock.seekTo(finalTime);
     this.videoRenderer?.stopRenderLoop();
     void this.audioRenderer?.pause();
+    this.clearBufferingState();
     this.onTimeUpdate?.(finalTime);
     this.setState("ended");
     this.debugLog?.("sdp-v2", "ended", {
@@ -831,6 +1043,10 @@ export class PlayerEngine {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function roundOptionalSec(value: number | null): number | null {
+  return value === null ? null : +value.toFixed(3);
 }
 
 function sleep(ms: number): Promise<void> {

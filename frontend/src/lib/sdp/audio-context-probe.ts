@@ -30,11 +30,6 @@ async function runAudioContextSuspendProbeInternal(
       await ctx.resume();
     }
 
-    debugLog?.("sdp-v2", "audio-clock:probe:start", {
-      initialState: ctx.state,
-      initialTime: +ctx.currentTime.toFixed(6),
-    });
-
     const runningStart = ctx.currentTime;
     await sleep(150);
     const runningEnd = ctx.currentTime;

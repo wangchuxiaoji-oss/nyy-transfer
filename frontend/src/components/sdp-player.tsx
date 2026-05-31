@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import type { DebugLogFn } from "@/lib/debug";
-import { PlayerEngine, type PlayerState } from "@/lib/sdp";
+import { PlayerEngine, type BufferingState, type PlayerState } from "@/lib/sdp";
 import { PrefetchProbe } from "@/lib/sdp/prefetch-probe";
 
 const SEEK_PREWARM_DEBOUNCE_MS = 700;
@@ -24,6 +24,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState("");
+  const [buffering, setBuffering] = useState<BufferingState | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
 
@@ -36,6 +37,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     engineRef.current = engine;
 
     engine.onStateChange = (s) => { if (!disposed) setState(s); };
+    engine.onBufferingChange = (nextBuffering) => { if (!disposed) setBuffering(nextBuffering); };
     engine.onTimeUpdate = (t) => {
       if (disposed) return;
       playheadRef.current = t;
@@ -106,6 +108,11 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
 
   const sliderValue = scrubbing ? scrubValue : currentTime;
   const canSeek = duration > 0 && state !== "loading" && state !== "idle";
+  const isBuffering = buffering !== null;
+  const statusLabel = isBuffering ? "缓冲中" : getStateLabel(state);
+  const bufferingProgress = buffering?.progressPct ?? null;
+  const bufferingSpeed = formatSpeed(buffering?.speedBytesPerSec ?? null);
+  const bufferingMessage = buildBufferingMessage(buffering, bufferingProgress, bufferingSpeed);
 
   return (
     <div className="space-y-2">
@@ -113,14 +120,26 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
         <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
           SDP v2
         </span>
-        <span className="text-xs text-gray-500">{getStateLabel(state)}</span>
+        <span className="text-xs text-gray-500">{statusLabel}</span>
       </div>
 
-      <canvas
-        ref={canvasRef}
-        className="block w-full rounded-xl bg-black"
-        style={{ aspectRatio: "16/9" }}
-      />
+      <div className="relative overflow-hidden rounded-xl bg-black">
+        <canvas
+          ref={canvasRef}
+          className="block w-full bg-black"
+          style={{ aspectRatio: "16/9" }}
+        />
+        {isBuffering && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 px-4 text-center text-white">
+            <p
+              className="text-sm font-normal drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] sm:text-base"
+              style={{ fontFamily: 'SimSun, "Songti SC", "Noto Serif SC", serif' }}
+            >
+              {bufferingMessage}
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center gap-2">
         {state === "ready" || state === "paused" ? (
@@ -184,4 +203,23 @@ function formatTime(sec: number): string {
   const s = Math.floor(sec % 60);
   if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatSpeed(bytesPerSec: number | null): string | null {
+  if (!bytesPerSec || !Number.isFinite(bytesPerSec)) return null;
+  const kbPerSec = bytesPerSec / 1024;
+  if (kbPerSec >= 1024) return `${(kbPerSec / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(kbPerSec)} KB/s`;
+}
+
+function buildBufferingMessage(buffering: BufferingState | null, progressPct: number | null, speed: string | null): string {
+  const label = buffering?.reason === "seek" && progressPct === null ? "定位中..." : "缓冲中...";
+  const parts: string[] = [label];
+  if (progressPct !== null) {
+    parts.push(`${progressPct}%`);
+  }
+  if (speed) {
+    parts.push(speed);
+  }
+  return parts.join(" · ");
 }

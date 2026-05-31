@@ -7,8 +7,8 @@
  * from decode timing.
  *
  * Design:
- * - Capacity: up to BUFFER_DURATION_SEC ahead of the last consumed packet,
- *   or MAX_BUFFER_BYTES total memory, whichever is hit first.
+ * - Capacity: up to BUFFER_DURATION_SEC queued, or MAX_BUFFER_BYTES total
+ *   memory, whichever is hit first.
  * - Consumers call `take()` which resolves instantly if data is available,
  *   or waits (via a deferred promise) until the run-ahead loop fills more.
  * - The run-ahead loop pauses (back-pressure) when the buffer is full.
@@ -27,7 +27,7 @@ type MbPacketIterator = AsyncGenerator<MbEncodedPacket, void, unknown>;
 export interface PacketBufferOptions {
   /** Label for debug logs (e.g. "video" or "audio") */
   label: string;
-  /** Max seconds ahead of consumed position to buffer */
+  /** Max seconds to keep queued */
   maxAheadSec?: number;
   /** Max bytes to hold in buffer */
   maxBytes?: number;
@@ -36,6 +36,7 @@ export interface PacketBufferOptions {
 
 const DEFAULT_MAX_AHEAD_SEC = 30;
 const DEFAULT_MAX_BYTES = 128 * 1024 * 1024; // 128 MB
+const STATUS_LOG_PACKET_INTERVAL = 1000;
 
 export class PacketBuffer {
   private queue: MbEncodedPacket[] = [];
@@ -206,6 +207,7 @@ export class PacketBuffer {
         }
 
         const result = await iter.next();
+        if (!this.filling || this.disposed || epoch !== this.epoch) break;
         if (result.done) {
           this.ended = true;
           // Wake consumer waiting for data
@@ -232,7 +234,7 @@ export class PacketBuffer {
         }
 
         // Periodic status log
-        if (fillCount % 500 === 0) {
+        if (fillCount % STATUS_LOG_PACKET_INTERVAL === 0) {
           this.debugLog?.("sdp-v2", `buffer:${this.label}:status`, {
             filled: fillCount,
             queued: this.queue.length,
@@ -259,12 +261,7 @@ export class PacketBuffer {
   private isFull(): boolean {
     if (this.totalBytes >= this.maxBytes) return true;
     if (this.queue.length === 0) return false;
-    // Check duration: last packet in queue vs last consumed
-    const headTimestamp = this.lastConsumedTimestamp === -Infinity
-      ? this.queue[0].timestamp
-      : this.lastConsumedTimestamp;
-    const tailTimestamp = this.queue[this.queue.length - 1].timestamp;
-    return (tailTimestamp - headTimestamp) >= this.maxAheadSec;
+    return this.bufferedDurationSec >= this.maxAheadSec;
   }
 
   /**
@@ -274,12 +271,7 @@ export class PacketBuffer {
    */
   private isBelowRearmThreshold(): boolean {
     if (this.totalBytes >= this.maxBytes * 0.8) return false;
-    if (this.queue.length === 0) return true;
-    const headTimestamp = this.lastConsumedTimestamp === -Infinity
-      ? this.queue[0].timestamp
-      : this.lastConsumedTimestamp;
-    const tailTimestamp = this.queue[this.queue.length - 1].timestamp;
-    return (tailTimestamp - headTimestamp) < this.maxAheadSec * 0.8;
+    return this.bufferedDurationSec < this.maxAheadSec * 0.8;
   }
 }
 
@@ -288,4 +280,3 @@ function estimatePacketBytes(packet: MbEncodedPacket): number {
   // mediabunny EncodedPacket exposes .byteLength or .data.byteLength
   return (packet as any).byteLength ?? (packet as any).data?.byteLength ?? 4096;
 }
-

@@ -8,6 +8,8 @@ export { VideoRenderer } from "./video-renderer";
 export { AudioRenderer } from "./audio-renderer";
 export type {
   PlayerState,
+  BufferingState,
+  BufferingReason,
   PlayerEvents,
   PlayerConfig,
   VideoTrackInfo,
