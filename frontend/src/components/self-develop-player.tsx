@@ -6,8 +6,6 @@ import type { DebugLogFn } from "@/lib/debug";
 import { createVirtualMediaFileId, registerVirtualMediaFile } from "@/lib/virtual-media";
 import { RangeFileReader } from "@/lib/range-file-reader";
 import { probeUnsupportedMediaBuffer, type UnsupportedMediaProbe } from "@/lib/unsupported-media-probe";
-import { MkvWebCodecsPreview } from "@/components/mkv-webcodecs-preview";
-import { SdpPoc } from "@/components/sdp-poc";
 import { SdpPlayer } from "@/components/sdp-player";
 
 const SDP_VIDEO_EXTS = new Set(["mp4", "mkv", "wmv"]);
@@ -47,15 +45,9 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
   const [sourceUrl, setSourceUrl] = useState("");
   const [probe, setProbe] = useState<UnsupportedMediaProbe | null>(null);
   const [status, setStatus] = useState("SDP 初始化中...");
-  const [sdpVersion, setSdpVersion] = useState<"1" | "2">("1");
   const ext = getFileExtension(file.file_name);
   const capabilities = useMemo(() => collectCapabilities(), []);
   const mediaType = getSelfDevelopMediaType(file.file_name);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("sdp") === "2") setSdpVersion("2");
-  }, []);
 
   const getOrCreateVirtualFileId = useCallback(() => {
     if (!virtualFileIdRef.current) virtualFileIdRef.current = createVirtualMediaFileId(`sdp-${file.file_name}`);
@@ -204,13 +196,7 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
         </div>
       )}
 
-      {ext === "mkv" && probe?.probe_status === "ok" && sdpVersion === "1" && (
-        <MkvWebCodecsPreview file={file} debugLog={debugLog} />
-      )}
-
-      {ext === "mkv" && sdpVersion === "1" && <SdpPoc file={file} />}
-
-      {ext === "mkv" && sdpVersion === "2" && (
+      {ext === "mkv" && probe?.probe_status === "ok" && (
         <SdpPlayer file={file} debugLog={debugLog} />
       )}
 
