@@ -12,9 +12,9 @@ import { SdpDemuxer } from "./demuxer";
 import { VideoRenderer } from "./video-renderer";
 import { AudioRenderer } from "./audio-renderer";
 import { PlaybackClock } from "./clock";
+import { PacketBuffer } from "./packet-buffer";
 
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
-type MbPacketIterator = AsyncGenerator<MbEncodedPacket, void, unknown>;
 
 const VIDEO_KEY_CACHE_MAX_ENTRIES = 24;
 const VIDEO_KEY_CACHE_MAX_REWIND_SEC = 15;
@@ -36,8 +36,6 @@ export class PlayerEngine {
   private pendingSeekSec: number | null = null;
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   private visibilityResumeInFlight = false;
-  private videoPacketIterator: MbPacketIterator | null = null;
-  private audioPacketIterator: MbPacketIterator | null = null;
   private videoFeedEpoch: number | null = null;
   private audioFeedEpoch: number | null = null;
   private videoKeyPacketCache: Array<{ targetSec: number; packet: MbEncodedPacket }> = [];
@@ -49,6 +47,9 @@ export class PlayerEngine {
   private seekWarmupGeneration = 0;
   /** Audio packet to resume from when play() is called after a paused seek */
   private resumeAudioPacket: MbEncodedPacket | null = null;
+  /** Preload buffers — decouple network from decode timing */
+  private videoBuffer: PacketBuffer | null = null;
+  private audioBuffer: PacketBuffer | null = null;
 
   state: PlayerState = "idle";
   onStateChange: ((state: PlayerState) => void) | null = null;
@@ -97,6 +98,20 @@ export class PlayerEngine {
     if (this.audioInfo) {
       this.audioRenderer = new AudioRenderer();
       await this.audioRenderer.configure(this.audioInfo.decoderConfig);
+    }
+
+    // Create preload buffers
+    this.videoBuffer = new PacketBuffer({
+      label: "video",
+      maxAheadSec: 30,
+      debugLog: this.debugLog,
+    });
+    if (this.audioInfo) {
+      this.audioBuffer = new PacketBuffer({
+        label: "audio",
+        maxAheadSec: 30,
+        debugLog: this.debugLog,
+      });
     }
 
     // Listen for visibility changes
@@ -151,6 +166,18 @@ export class PlayerEngine {
     this.setState("playing");
     this.clock.play();
     this.videoRenderer?.startRenderLoop();
+
+    // Start buffer filling if not already active (first play from start).
+    // Skip if resumeAudioPacket is set — feedAudioLoop will reset the buffer
+    // to the correct position.
+    const videoSink = this.demuxer.getVideoSink();
+    if (this.videoBuffer && videoSink && !this.videoBuffer.length && !this.feedingVideo) {
+      this.videoBuffer.startFilling(videoSink);
+    }
+    const audioSink = this.demuxer.getAudioSink();
+    if (this.audioBuffer && audioSink && !this.audioBuffer.length && !this.feedingAudio && !this.resumeAudioPacket) {
+      this.audioBuffer.startFilling(audioSink);
+    }
 
     // Video feed loop parks on the clock gate when paused, so it may
     // already be running. Only start if not active.
@@ -367,16 +394,13 @@ export class PlayerEngine {
   }
 
   private async cancelCurrentPumps(): Promise<void> {
-    const videoCancel = this.videoPacketIterator?.return?.();
-    const audioCancel = this.audioPacketIterator?.return?.();
-    if (videoCancel) void videoCancel.catch(() => undefined);
-    if (audioCancel) void audioCancel.catch(() => undefined);
-    if (videoCancel || audioCancel) {
-      this.debugLog?.("sdp-v2", "feed:cancel-request", {
-        video: Boolean(videoCancel),
-        audio: Boolean(audioCancel),
-      });
-    }
+    // Stop buffer filling (which owns the underlying iterators)
+    this.videoBuffer?.stopFilling();
+    this.audioBuffer?.stopFilling();
+    this.debugLog?.("sdp-v2", "feed:cancel-request", {
+      video: true,
+      audio: true,
+    });
   }
 
   private async getVideoKeyPacketForSeek(targetSec: number): Promise<{
@@ -466,6 +490,8 @@ export class PlayerEngine {
     this.playbackEpoch++;
     this.clearEndTimer();
     void this.cancelCurrentPumps();
+    this.videoBuffer?.dispose();
+    this.audioBuffer?.dispose();
     this.videoRenderer?.dispose();
     this.audioRenderer?.dispose();
     this.demuxer.dispose();
@@ -486,9 +512,14 @@ export class PlayerEngine {
     this.videoFeedEpoch = epoch;
 
     const sink = this.demuxer.getVideoSink();
-    if (!sink || !this.videoRenderer) {
+    if (!sink || !this.videoRenderer || !this.videoBuffer) {
       this.feedingVideo = false;
       return;
+    }
+
+    // If startPacket provided (seek), reset buffer to fill from that point
+    if (startPacket) {
+      this.videoBuffer.reset(sink, startPacket);
     }
 
     this.debugLog?.("sdp-v2", "video:feed:start", { epoch, from: startPacket?.timestamp ?? 0, seekTarget: options?.seekTargetSec ?? null });
@@ -499,17 +530,14 @@ export class PlayerEngine {
     let packetsDecodedAfterSeekTarget = 0;
     const SEEK_POST_TARGET_PACKETS = 6;
 
-    const packetStream = sink.packets(startPacket);
-    this.videoPacketIterator = packetStream;
-
     try {
-      const iterator = packetStream[Symbol.asyncIterator]();
       while (true) {
         if (this.disposed || epoch !== this.playbackEpoch) break;
 
-        const nextResult = await iterator.next();
-        if (nextResult.done) break;
-        const packet = nextResult.value;
+        const packet = await this.videoBuffer.take(
+          () => this.disposed || epoch !== this.playbackEpoch,
+        );
+        if (!packet) break; // end of stream or aborted
 
         // Wait for decoder/frame queue to have space
         await this.videoRenderer.waitForSpace(
@@ -581,6 +609,8 @@ export class PlayerEngine {
               ? Math.round((this.clock.getCurrentTimeSec() - audioTimeSec) * 1000)
               : null,
             audioBufferedSec: this.audioRenderer?.getBufferedAheadSec() ?? null,
+            videoBufferSec: this.videoBuffer?.bufferedDurationSec ?? null,
+            videoBufferPkts: this.videoBuffer?.length ?? null,
             queueLen: this.videoRenderer.queueLength,
             renderedFrames: this.videoRenderer.renderedFrames,
           });
@@ -609,9 +639,6 @@ export class PlayerEngine {
         this.handleError("Video feed error: " + errMsg(err));
       }
     } finally {
-      if (this.videoFeedEpoch === epoch && this.videoPacketIterator === packetStream) {
-        this.videoPacketIterator = null;
-      }
       if (this.videoFeedEpoch === epoch) {
         this.feedingVideo = false;
         this.videoFeedEpoch = null;
@@ -637,23 +664,25 @@ export class PlayerEngine {
     this.audioFeedEpoch = epoch;
 
     const sink = this.demuxer.getAudioSink();
-    if (!sink) {
+    if (!sink || !this.audioBuffer) {
       this.feedingAudio = false;
       return;
     }
 
-    const packetStream = sink.packets(startPacket);
-    this.audioPacketIterator = packetStream;
+    // If startPacket provided (seek), reset buffer to fill from that point
+    if (startPacket) {
+      this.audioBuffer.reset(sink, startPacket);
+    }
 
     try {
       const AUDIO_LOOKAHEAD_SEC = 3; // schedule audio slightly ahead
-      const iterator = packetStream[Symbol.asyncIterator]();
       while (true) {
         if (this.disposed || epoch !== this.playbackEpoch) break;
 
-        const nextResult = await iterator.next();
-        if (nextResult.done) break;
-        const packet = nextResult.value;
+        const packet = await this.audioBuffer.take(
+          () => this.disposed || epoch !== this.playbackEpoch,
+        );
+        if (!packet) break; // end of stream or aborted
 
         // Time-gate audio too
         const packetTimeSec = packet.timestamp;
@@ -675,9 +704,6 @@ export class PlayerEngine {
         this.debugLog?.("sdp-v2", "audio:error", { error: errMsg(err) });
       }
     } finally {
-      if (this.audioFeedEpoch === epoch && this.audioPacketIterator === packetStream) {
-        this.audioPacketIterator = null;
-      }
       if (this.audioFeedEpoch === epoch) {
         this.feedingAudio = false;
         this.audioFeedEpoch = null;
