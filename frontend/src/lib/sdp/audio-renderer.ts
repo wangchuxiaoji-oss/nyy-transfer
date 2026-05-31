@@ -118,12 +118,27 @@ export class AudioRenderer {
 
     // Map media time to AudioContext timeline
     const relativeMediaTime = mediaTimeSec - this.mediaStartSec;
-    const scheduleAt = Math.max(
+    let scheduleAt = Math.max(
       this.ctxStartTime + relativeMediaTime,
       this.scheduledEnd,
     );
 
-    // Don't schedule if too far in the past
+    // Starvation recovery: if the computed schedule time has fallen far behind
+    // ctx.currentTime, it means the audio pipeline was starved (no data arrived
+    // for a while). Instead of scheduling in the past (which would be dropped)
+    // or accumulating a permanent lag, re-anchor the baseline so that this
+    // sample plays "now". This causes a small audible skip but immediately
+    // restores A/V sync instead of drifting forever.
+    const lagBehindNow = ctx.currentTime - scheduleAt;
+    if (lagBehindNow > 0.15) {
+      // Re-anchor: pretend playback started now at this media time.
+      this.ctxStartTime = ctx.currentTime;
+      this.mediaStartSec = mediaTimeSec;
+      this.scheduledEnd = ctx.currentTime;
+      scheduleAt = ctx.currentTime;
+    }
+
+    // Don't schedule if too far in the past (small jitter tolerance)
     if (scheduleAt < ctx.currentTime - 0.1) {
       return; // drop late audio
     }

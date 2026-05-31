@@ -558,11 +558,28 @@ export class PlayerEngine {
           const avDriftMs = audioTimeSec >= 0
             ? Math.round((clockSec - audioTimeSec) * 1000)
             : null;
+
+          // Drift supervisor: if clock has drifted far ahead of audio and
+          // audio buffering is healthy, pull clock back to audio position.
+          // This corrects permanent desync after network starvation events.
+          const audioBufferedSec = this.audioRenderer?.getBufferedAheadSec() ?? 0;
+          if (avDriftMs !== null && avDriftMs > 300 && audioBufferedSec > 0.5) {
+            this.clock.seekTo(audioTimeSec);
+            this.debugLog?.("sdp-v2", "av:drift-correct", {
+              clockWas: +clockSec.toFixed(3),
+              audioTimeSec: +audioTimeSec.toFixed(3),
+              driftMs: avDriftMs,
+              audioBufferedSec: +audioBufferedSec.toFixed(2),
+            });
+          }
+
           this.debugLog?.("sdp-v2", "video:feed:progress", {
             packets: packetCount,
-            clockSec,
+            clockSec: this.clock.getCurrentTimeSec(),
             audioTimeSec: audioTimeSec >= 0 ? +audioTimeSec.toFixed(3) : null,
-            avDriftMs,
+            avDriftMs: audioTimeSec >= 0
+              ? Math.round((this.clock.getCurrentTimeSec() - audioTimeSec) * 1000)
+              : null,
             audioBufferedSec: this.audioRenderer?.getBufferedAheadSec() ?? null,
             queueLen: this.videoRenderer.queueLength,
             renderedFrames: this.videoRenderer.renderedFrames,
