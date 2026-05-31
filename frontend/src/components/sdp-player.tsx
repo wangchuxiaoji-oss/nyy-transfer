@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import type { DebugLogFn } from "@/lib/debug";
 import { PlayerEngine, type PlayerState } from "@/lib/sdp";
+import { PrefetchProbe } from "@/lib/sdp/prefetch-probe";
 
 const SEEK_PREWARM_DEBOUNCE_MS = 700;
 
@@ -17,6 +18,8 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const engineRef = useRef<PlayerEngine | null>(null);
   const prewarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prewarmTokenRef = useRef(0);
+  const playheadRef = useRef(0);
+  const probeRef = useRef<PrefetchProbe | null>(null);
   const [state, setState] = useState<PlayerState>("idle");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -33,12 +36,25 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     engineRef.current = engine;
 
     engine.onStateChange = (s) => { if (!disposed) setState(s); };
-    engine.onTimeUpdate = (t) => { if (!disposed) setCurrentTime(t); };
+    engine.onTimeUpdate = (t) => {
+      if (disposed) return;
+      playheadRef.current = t;
+      setCurrentTime(t);
+    };
     engine.onError = (msg) => { if (!disposed) setError(msg); };
 
     engine.init().then(() => {
       if (!disposed && engine.state === "ready") {
         setDuration(engine.duration);
+        // Prefetch feasibility probe (measurement only, gated by ?prefetch=1).
+        const prefetchEnabled =
+          typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("prefetch") === "1";
+        if (prefetchEnabled && engine.duration > 0) {
+          const probe = new PrefetchProbe(file, engine.duration, debugLog);
+          probeRef.current = probe;
+          probe.start(() => playheadRef.current);
+        }
       }
     });
 
@@ -49,6 +65,8 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
         prewarmTimerRef.current = null;
       }
       prewarmTokenRef.current++;
+      probeRef.current?.stop();
+      probeRef.current = null;
       engine.dispose();
       engineRef.current = null;
     };
