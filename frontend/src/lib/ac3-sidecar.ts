@@ -1,6 +1,6 @@
-import type { ShareFileDownload } from "./api";
+import type { MediaMetadata, ShareFileDownload } from "./api";
 
-const PROBE_BYTES = 8 * 1024 * 1024;
+const METADATA_HEAD_BYTES = 1024 * 1024;
 const FETCH_SIZE = 2 * 1024 * 1024;
 
 interface VirtualChunk {
@@ -105,21 +105,78 @@ async function loadLibavAc3Script(): Promise<void> {
   return libavLoaderPromise;
 }
 
-async function extractAc3Payload(file: ShareFileDownload, targetSec: number, requestedSec: number, signal?: AbortSignal): Promise<Uint8Array> {
+function getNumberMetadataField(metadata: MediaMetadata | null | undefined, key: string): number | null {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function getAudioCodecs(metadata: MediaMetadata | null | undefined): string[] {
+  return (metadata?.audio_tracks || [])
+    .map((track) => (track.codec || track.codec_tag || "").toLowerCase())
+    .filter(Boolean);
+}
+
+async function loadMp4Metadata(file: ShareFileDownload, signal?: AbortSignal): Promise<{
+  mp4boxFile: import("mp4box").MP4File;
+  info: import("mp4box").MP4Info;
+  virtualFile: SidecarVirtualFile;
+}> {
   const { createFile } = await import("mp4box");
   const vf = new SidecarVirtualFile(file);
-  const probe = await vf.fetchRange(0, Math.min(PROBE_BYTES, vf.totalSize), signal);
-  const mp4boxFile = createFile();
+  const moovOffset = getNumberMetadataField(file.media_metadata, "moov_offset");
+  const moovSize = getNumberMetadataField(file.media_metadata, "moov_size");
+  if (moovOffset === null || moovSize === null || moovSize <= 0) {
+    throw new Error("AC-3 sidecar requires uploaded MP4 metadata");
+  }
 
-  const info = await new Promise<import("mp4box").MP4Info>((resolve, reject) => {
+  const mp4boxFile = createFile();
+  const infoPromise = new Promise<import("mp4box").MP4Info>((resolve, reject) => {
     let settled = false;
-    mp4boxFile.onReady = (value) => { if (!settled) { settled = true; resolve(value); } };
-    mp4boxFile.onError = (err) => { if (!settled) { settled = true; reject(err); } };
-    const ab = probe as ArrayBuffer & { fileStart: number };
+    const timer = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("mp4 metadata parsing timed out"));
+      }
+    }, 5000);
+    mp4boxFile.onReady = (value) => {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(value);
+      }
+    };
+    mp4boxFile.onError = (err) => {
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timer);
+        reject(err);
+      }
+    };
+  });
+
+  if (moovOffset <= METADATA_HEAD_BYTES) {
+    const end = Math.min(vf.totalSize, moovOffset + moovSize);
+    const head = await vf.fetchRange(0, end, signal);
+    const ab = head as ArrayBuffer & { fileStart: number };
     ab.fileStart = 0;
     mp4boxFile.appendBuffer(ab);
-    setTimeout(() => { if (!settled) { settled = true; reject(new Error("moov not found in first 8MB")); } }, 5000);
-  });
+  } else {
+    const head = await vf.fetchRange(0, Math.min(METADATA_HEAD_BYTES, vf.totalSize), signal);
+    const headBuffer = head as ArrayBuffer & { fileStart: number };
+    headBuffer.fileStart = 0;
+    mp4boxFile.appendBuffer(headBuffer);
+
+    const moov = await vf.fetchRange(moovOffset, Math.min(vf.totalSize, moovOffset + moovSize), signal);
+    const moovBuffer = moov as ArrayBuffer & { fileStart: number };
+    moovBuffer.fileStart = moovOffset;
+    mp4boxFile.appendBuffer(moovBuffer);
+  }
+
+  return { mp4boxFile, info: await infoPromise, virtualFile: vf };
+}
+
+async function extractAc3Payload(file: ShareFileDownload, targetSec: number, requestedSec: number, signal?: AbortSignal): Promise<Uint8Array> {
+  const { mp4boxFile, info, virtualFile: vf } = await loadMp4Metadata(file, signal);
 
   const audioTrack = info.tracks.find((track) => track.type === "audio" && /^(ac-3|ec-3)$/i.test(track.codec || ""));
   if (!audioTrack) throw new Error("No AC-3 audio track found");
@@ -166,6 +223,7 @@ async function extractAc3Payload(file: ShareFileDownload, targetSec: number, req
 }
 
 export async function hasAc3AudioTrack(file: ShareFileDownload, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   // Cache key: use chunk URLs as signature (stable across mounts)
   const cacheKey = file.is_chunked
     ? file.chunks.map((c) => c.download_url).join("|")
@@ -173,22 +231,7 @@ export async function hasAc3AudioTrack(file: ShareFileDownload, signal?: AbortSi
   const cached = ac3TrackCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const { createFile } = await import("mp4box");
-  const vf = new SidecarVirtualFile(file);
-  const probe = await vf.fetchRange(0, Math.min(PROBE_BYTES, vf.totalSize), signal);
-  const mp4boxFile = createFile();
-
-  const info = await new Promise<import("mp4box").MP4Info>((resolve, reject) => {
-    let settled = false;
-    mp4boxFile.onReady = (value) => { if (!settled) { settled = true; resolve(value); } };
-    mp4boxFile.onError = (err) => { if (!settled) { settled = true; reject(err); } };
-    const ab = probe as ArrayBuffer & { fileStart: number };
-    ab.fileStart = 0;
-    mp4boxFile.appendBuffer(ab);
-    setTimeout(() => { if (!settled) { settled = true; reject(new Error("moov not found in first 8MB")); } }, 5000);
-  });
-
-  const result = info.tracks.some((track) => track.type === "audio" && /^(ac-3|ec-3)$/i.test(track.codec || ""));
+  const result = getAudioCodecs(file.media_metadata).some((codec) => /^(ac-3|ec-3)$/.test(codec));
   ac3TrackCache.set(cacheKey, result);
   return result;
 }

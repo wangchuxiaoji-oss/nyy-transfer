@@ -4,6 +4,7 @@ from app.models.share import (  # noqa: F401
     DownloadLog,
     Share,
     ShareFile,
+    ShareLogicalFile,
 )
 from app.models.system import (  # noqa: F401
     AuditLog,
@@ -21,5 +22,6 @@ __all__ = [
     "Report",
     "Share",
     "ShareFile",
+    "ShareLogicalFile",
     "User",
 ]

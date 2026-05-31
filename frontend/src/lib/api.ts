@@ -13,6 +13,7 @@ export interface UploadInitResponse {
   authorization: string;
   store_uri: string;
   commit_token: string;
+  commit_token_expires_at: string;
 }
 
 export interface CommitFileItem {
@@ -21,6 +22,47 @@ export interface CommitFileItem {
   logical_file_id?: string;
   chunk_index?: number;
   chunk_total?: number;
+}
+
+export interface MediaTrackMetadata {
+  id?: number;
+  type: "video" | "audio" | string;
+  codec: string;
+  codec_tag?: string;
+  duration_seconds?: number;
+  timescale?: number;
+  bitrate?: number;
+  width?: number;
+  height?: number;
+  sample_rate?: number;
+  channel_count?: number;
+}
+
+export interface MediaMetadata {
+  probe_version: number;
+  probe_status: "ok" | "failed" | "skipped";
+  probe_source?: string;
+  probe_error?: string;
+  container?: string;
+  file_size: number;
+  moov_offset?: number;
+  moov_size?: number;
+  is_faststart?: boolean;
+  is_fragmented?: boolean;
+  duration_seconds?: number;
+  brands?: string[];
+  video_tracks?: MediaTrackMetadata[];
+  audio_tracks?: MediaTrackMetadata[];
+  [key: string]: unknown;
+}
+
+export interface CommitLogicalFileItem {
+  logical_file_id: string;
+  file_name: string;
+  file_size: number;
+  content_type?: string;
+  chunk_total: number;
+  media_metadata?: MediaMetadata | null;
 }
 
 export interface UploadCommitResponse {
@@ -45,6 +87,7 @@ export interface ShareFileInfo {
   index: number;
   is_chunked: boolean;
   chunk_count: number;
+  media_metadata?: MediaMetadata | null;
 }
 
 export interface ChunkDownloadInfo {
@@ -72,6 +115,7 @@ export interface ShareFileDownload {
   is_chunked: boolean;
   download_url: string;
   chunks: ChunkDownloadInfo[];
+  media_metadata?: MediaMetadata | null;
 }
 
 export interface ShareDownloadResponse {
@@ -113,7 +157,9 @@ export async function uploadInit(params: {
 }
 
 export async function uploadCommit(params: {
+  upload_batch_id?: string;
   files: CommitFileItem[];
+  logical_files?: CommitLogicalFileItem[];
   empty_dirs?: string[];
   password?: string;
   expires_hours?: number;

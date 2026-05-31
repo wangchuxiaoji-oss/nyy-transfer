@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.share import Share, ShareFile
+from app.models.share import Share, ShareLogicalFile
 from app.models.system import Report
 from app.schemas.share import (
     ChunkDownloadInfo,
@@ -49,7 +49,7 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
     """按短码查 Share + files，不存在 / 已撤销 / 已过期则 404。"""
     stmt = (
         select(Share)
-        .options(selectinload(Share.files))
+        .options(selectinload(Share.files), selectinload(Share.logical_files).selectinload(ShareLogicalFile.files))
         .where(Share.code == code, Share.revoked_at.is_(None), Share.banned_at.is_(None))
     )
     result = await db.execute(stmt)
@@ -63,57 +63,47 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
     return share
 
 
-async def _get_download_urls(files: list[ShareFile]) -> list[ShareFileDownload]:
-    """为所有逻辑文件获取临时下载 URL，按 logical_file_id 聚合。"""
+async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[ShareFileDownload]:
+    """为所有逻辑文件获取临时下载 URL。"""
     client = None
 
-    # 按 logical_file_id 分组
-    from collections import defaultdict
-    grouped: dict[str | None, list[ShareFile]] = defaultdict(list)
-    standalone: list[ShareFile] = []
-
-    for f in files:
-        if f.logical_file_id:
-            grouped[str(f.logical_file_id)].append(f)
-        else:
-            standalone.append(f)
-
     results: list[ShareFileDownload] = []
-
-    # 处理普通文件（无 logical_file_id）
-    for f in sorted(standalone, key=lambda x: x.chunk_index):
-        if f.tos_uri.startswith(_EMPTY_URI_PREFIX):
-            results.append(ShareFileDownload(
-                file_name=f.original_name,
-                file_size=f.size,
-                content_type=f.content_type or "",
-                is_chunked=False,
-                download_url=_EMPTY_FILE_DATA_URL,
-                chunks=[],
-            ))
+    for logical_file in sorted(logical_files, key=lambda item: item.sort_index):
+        chunks_sorted = sorted(logical_file.files, key=lambda item: item.chunk_index)
+        if not chunks_sorted:
             continue
 
-        if client is None:
-            client = await get_doubao_client()
-        try:
-            url = await client.get_download_url(f.tos_uri, expire_seconds=86400)
-        except DoubaoClientError as e:
-            log.error("get_download_url failed for %s: %s", f.tos_uri, e)
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
-        results.append(ShareFileDownload(
-            file_name=f.original_name,
-            file_size=f.size,
-            content_type=f.content_type or "",
-            is_chunked=False,
-            download_url=url,
-            chunks=[],
-        ))
+        if len(chunks_sorted) == 1 and logical_file.chunk_total == 1:
+            chunk = chunks_sorted[0]
+            if chunk.tos_uri.startswith(_EMPTY_URI_PREFIX):
+                results.append(ShareFileDownload(
+                    file_name=logical_file.original_name,
+                    file_size=logical_file.size,
+                    content_type=logical_file.content_type or "",
+                    is_chunked=False,
+                    download_url=_EMPTY_FILE_DATA_URL,
+                    chunks=[],
+                    media_metadata=logical_file.media_metadata,
+                ))
+                continue
 
-    # 处理分片大文件（有 logical_file_id）
-    for lfid, chunks in grouped.items():
-        chunks_sorted = sorted(chunks, key=lambda x: x.chunk_index)
-        first = chunks_sorted[0]
-        total_size = sum(c.size for c in chunks_sorted)
+            if client is None:
+                client = await get_doubao_client()
+            try:
+                url = await client.get_download_url(chunk.tos_uri, expire_seconds=86400)
+            except DoubaoClientError as e:
+                log.error("get_download_url failed for %s: %s", chunk.tos_uri, e)
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
+            results.append(ShareFileDownload(
+                file_name=logical_file.original_name,
+                file_size=logical_file.size,
+                content_type=logical_file.content_type or "",
+                is_chunked=False,
+                download_url=url,
+                chunks=[],
+                media_metadata=logical_file.media_metadata,
+            ))
+            continue
 
         chunk_downloads: list[ChunkDownloadInfo] = []
         for c in chunks_sorted:
@@ -131,58 +121,32 @@ async def _get_download_urls(files: list[ShareFile]) -> list[ShareFileDownload]:
             ))
 
         results.append(ShareFileDownload(
-            file_name=first.original_name,
-            file_size=total_size,
-            content_type=first.content_type or "",
+            file_name=logical_file.original_name,
+            file_size=logical_file.size,
+            content_type=logical_file.content_type or "",
             is_chunked=True,
             download_url="",
             chunks=chunk_downloads,
+            media_metadata=logical_file.media_metadata,
         ))
 
     return results
 
 
-def _aggregate_file_info(files: list[ShareFile]) -> list[ShareFileInfo]:
-    """将 ShareFile 行聚合为逻辑文件列表（用于详情展示）。"""
-    from collections import defaultdict
-    grouped: dict[str, list[ShareFile]] = defaultdict(list)
-    standalone: list[ShareFile] = []
-
-    for f in files:
-        if f.logical_file_id:
-            grouped[str(f.logical_file_id)].append(f)
-        else:
-            standalone.append(f)
-
+def _aggregate_file_info(logical_files: list[ShareLogicalFile]) -> list[ShareFileInfo]:
+    """将逻辑文件行转换为详情展示列表。"""
     results: list[ShareFileInfo] = []
-    idx = 0
-
-    for f in sorted(standalone, key=lambda x: x.chunk_index):
+    for idx, logical_file in enumerate(sorted(logical_files, key=lambda item: item.sort_index)):
         results.append(ShareFileInfo(
-            file_name=f.original_name,
-            file_size=f.size,
-            file_ext=f.original_name.rsplit(".", 1)[-1] if "." in f.original_name else "",
-            content_type=f.content_type or "",
+            file_name=logical_file.original_name,
+            file_size=logical_file.size,
+            file_ext=logical_file.original_name.rsplit(".", 1)[-1] if "." in logical_file.original_name else "",
+            content_type=logical_file.content_type or "",
             index=idx,
-            is_chunked=False,
-            chunk_count=1,
+            is_chunked=logical_file.chunk_total > 1,
+            chunk_count=logical_file.chunk_total,
+            media_metadata=logical_file.media_metadata,
         ))
-        idx += 1
-
-    for lfid, chunks in grouped.items():
-        chunks_sorted = sorted(chunks, key=lambda x: x.chunk_index)
-        first = chunks_sorted[0]
-        total_size = sum(c.size for c in chunks_sorted)
-        results.append(ShareFileInfo(
-            file_name=first.original_name,
-            file_size=total_size,
-            file_ext=first.original_name.rsplit(".", 1)[-1] if "." in first.original_name else "",
-            content_type=first.content_type or "",
-            index=idx,
-            is_chunked=True,
-            chunk_count=len(chunks_sorted),
-        ))
-        idx += 1
 
     return results
 
@@ -246,7 +210,7 @@ async def get_share(code: str, request: Request):
 
     return ShareInfoResponse(
         code=share.code,
-        files=_aggregate_file_info(share.files),
+        files=_aggregate_file_info(share.logical_files),
         empty_dirs=share.empty_dirs or [],
         total_bytes=share.total_bytes,
         created_at=share.created_at,
@@ -278,7 +242,7 @@ async def verify_share(code: str, body: ShareVerifyRequest, request: Request):
         if not share.files and not (share.empty_dirs or []):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
 
-        downloads = await _get_download_urls(share.files)
+        downloads = await _get_download_urls(share.logical_files)
         share.download_count += 1
         await db.commit()
     return ShareVerifyResponse(files=downloads, empty_dirs=share.empty_dirs or [])
@@ -308,7 +272,7 @@ async def download_share(code: str, request: Request):
         if not share.files and not (share.empty_dirs or []):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
 
-        downloads = await _get_download_urls(share.files)
+        downloads = await _get_download_urls(share.logical_files)
         share.download_count += 1
         await db.commit()
     return ShareDownloadResponse(files=downloads, empty_dirs=share.empty_dirs or [])

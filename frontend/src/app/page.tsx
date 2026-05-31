@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { User, FolderOpen, Upload, Inbox, Trash2, Eye, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
@@ -12,6 +12,26 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { isLoggedIn, getMe, logout, type UserInfo } from "@/lib/auth";
 import { guestRevokeShare, getGuestShares, type GuestShareInfo } from "@/lib/api";
 import { ShareDetailModal } from "@/components/share-detail-modal";
+import { formatDebugLine, type DebugLogFn } from "@/lib/debug";
+
+interface DebugEntry {
+  elapsedMs: number;
+  scope: string;
+  event: string;
+  data?: Record<string, unknown>;
+  line: string;
+}
+
+interface UploadDebugStatus {
+  phase: string;
+  uploadedBytes: number | null;
+  totalBytes: number | null;
+  speedBps: number | null;
+  progress: number | null;
+  metadataFiles: number;
+  lastScope: string;
+  lastEvent: string;
+}
 
 function formatCountdownShort(expiresAt: string): string {
   const diff = new Date(expiresAt).getTime() - Date.now();
@@ -28,6 +48,49 @@ export default function Home() {
   const [mode, setMode] = useState<"send" | "receive">("send");
   const [guestShares, setGuestShares] = useState<GuestShareInfo[]>([]);
   const [detailShare, setDetailShare] = useState<GuestShareInfo | null>(null);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugEntries, setDebugEntries] = useState<DebugEntry[]>([]);
+  const [debugCopied, setDebugCopied] = useState(false);
+  const [debugStatus, setDebugStatus] = useState<UploadDebugStatus>({
+    phase: "idle",
+    uploadedBytes: null,
+    totalBytes: null,
+    speedBps: null,
+    progress: null,
+    metadataFiles: 0,
+    lastScope: "",
+    lastEvent: "",
+  });
+  const debugStartPerfRef = useRef(0);
+
+  const ingestDebugEntry = useCallback((entry: Omit<DebugEntry, "line">) => {
+    if (!debugEnabled) return;
+    const line = formatDebugLine(entry.elapsedMs, entry.scope, entry.event, entry.data);
+    setDebugEntries((entries) => [...entries.slice(-499), { ...entry, line }]);
+    setDebugStatus((status) => {
+      let next = status;
+      if (entry.scope === "upload" && entry.event === "start") next = { ...next, phase: "uploading", metadataFiles: 0, uploadedBytes: 0, totalBytes: null, speedBps: null, progress: 0 };
+      if (entry.scope === "commit" && entry.event === "start") next = { ...next, phase: "committing" };
+      if (entry.scope === "upload" && entry.event === "done") next = { ...next, phase: "done" };
+      if (entry.event === "error") next = { ...next, phase: "error" };
+      if (entry.scope === "media" && entry.event === "probe:start") next = { ...next, metadataFiles: next.metadataFiles + 1 };
+      if (entry.scope === "upload" && entry.event === "metrics" && entry.data) {
+        next = {
+          ...next,
+          uploadedBytes: typeof entry.data.uploadedBytes === "number" ? entry.data.uploadedBytes : next.uploadedBytes,
+          totalBytes: typeof entry.data.totalBytes === "number" ? entry.data.totalBytes : next.totalBytes,
+          speedBps: typeof entry.data.speedBps === "number" ? entry.data.speedBps : next.speedBps,
+          progress: typeof entry.data.progress === "number" ? entry.data.progress : next.progress,
+        };
+      }
+      return { ...next, lastScope: entry.scope, lastEvent: entry.event };
+    });
+  }, [debugEnabled]);
+
+  const appendDebugLog = useCallback<DebugLogFn>((scope, event, data) => {
+    const elapsedMs = performance.now() - debugStartPerfRef.current;
+    ingestDebugEntry({ elapsedMs, scope, event, data });
+  }, [ingestDebugEntry]);
 
   const loadGuestShares = () => {
     getGuestShares().then(setGuestShares).catch(() => {});
@@ -44,6 +107,31 @@ export default function Home() {
       loadGuestShares();
     }
   }, []);
+
+  useEffect(() => {
+    setDebugEnabled(new URLSearchParams(window.location.search).get("debug") === "1");
+  }, []);
+
+  useEffect(() => {
+    if (!debugEnabled) return;
+    debugStartPerfRef.current = performance.now();
+    setDebugEntries([]);
+    setDebugStatus({
+      phase: "idle",
+      uploadedBytes: null,
+      totalBytes: null,
+      speedBps: null,
+      progress: null,
+      metadataFiles: 0,
+      lastScope: "",
+      lastEvent: "",
+    });
+    appendDebugLog("page", "debug:on", {
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      connection: getConnectionInfo(),
+    });
+  }, [appendDebugLog, debugEnabled]);
 
   const handleRevokeGuest = async (code: string) => {
     // Try localStorage token first
@@ -81,6 +169,60 @@ export default function Home() {
   const handleLogout = () => {
     logout();
     setUser(null);
+  };
+
+  const formatSize = (bytes: number | null) => {
+    if (bytes === null) return "-";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  };
+
+  const getConnectionInfo = () => {
+    const nav = navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean } };
+    const connection = nav.connection;
+    return connection ? {
+      effectiveType: connection.effectiveType,
+      downlink: connection.downlink,
+      rtt: connection.rtt,
+      saveData: connection.saveData,
+    } : null;
+  };
+
+  const copyText = async (text: string) => {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {}
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(0, text.length);
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  };
+
+  const handleCopyDebugLogs = () => {
+    void copyText(debugEntries.map((entry) => entry.line).join("\n"));
+    setDebugCopied(true);
+    window.setTimeout(() => setDebugCopied(false), 1200);
+  };
+
+  const handleCopyDebugJson = () => {
+    const text = JSON.stringify({
+      status: debugStatus,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      entries: debugEntries.map(({ line: _line, ...entry }) => entry),
+    }, null, 2);
+    void copyText(text);
+    setDebugCopied(true);
+    window.setTimeout(() => setDebugCopied(false), 1200);
   };
 
   return (
@@ -207,7 +349,7 @@ export default function Home() {
               aria-labelledby={mode === "send" ? "send-tab" : "receive-tab"}
             >
               {mode === "send" ? (
-                <FileUploader onUploadDone={loadGuestShares} loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} />
+                <FileUploader key={user ? "user" : "guest"} onUploadDone={loadGuestShares} loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} debugLog={debugEnabled ? appendDebugLog : undefined} />
               ) : (
                 <>
                   <FileRequestCreator embedded loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} />
@@ -218,6 +360,35 @@ export default function Home() {
           </AnimatePresence>
         </div>
       </section>
+
+      {debugEnabled && (
+        <section className="mt-6 w-full max-w-3xl rounded-2xl border border-nyy-200 bg-nyy-50/70 p-3 dark:border-nyy-800 dark:bg-nyy-950/20">
+          <div className="mb-3 rounded-xl bg-white/80 p-3 dark:bg-black/20">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-700 dark:text-gray-300">
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">phase: {debugStatus.phase}</span>
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">progress: {debugStatus.progress ?? "-"}%</span>
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">uploaded: {formatSize(debugStatus.uploadedBytes)} / {formatSize(debugStatus.totalBytes)}</span>
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">speed: {debugStatus.speedBps !== null ? `${formatSize(debugStatus.speedBps)}/s` : "-"}</span>
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">metadata: {debugStatus.metadataFiles}</span>
+              <span className="rounded-full bg-nyy-100 px-2 py-0.5 dark:bg-nyy-900/40">last: {debugStatus.lastScope}/{debugStatus.lastEvent}</span>
+            </div>
+          </div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="type-caption font-semibold text-nyy-900 dark:text-nyy-200">上传 Debug 日志 · {debugEntries.length}</p>
+            <div className="flex gap-2">
+              <button onClick={handleCopyDebugLogs} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+                {debugCopied ? "已复制文本" : "复制文本"}
+              </button>
+              <button onClick={handleCopyDebugJson} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+                复制 JSON
+              </button>
+            </div>
+          </div>
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/90 p-3 text-[11px] leading-relaxed text-green-100">
+            {debugEntries.length ? debugEntries.map((entry) => entry.line).join("\n") : "等待上传日志..."}
+          </pre>
+        </section>
+      )}
 
       {/* Guest shares management */}
       {!user && guestShares.length > 0 && (
@@ -271,4 +442,3 @@ export default function Home() {
     </main>
   );
 }
-

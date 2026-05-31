@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """全局配置。所有字段都可通过环境变量覆盖。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).resolve().parents[2] / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     smtp_host: str = "127.0.0.1"
     smtp_port: int = 25
     email_from: str = "noreply@nyy.app"
+
+    # Debug log ingestion, intended for dev diagnostics only.
+    debug_log_ingest_enabled: bool = False
+    debug_log_dir: str = ""
 
     # 认证
     jwt_secret: str = Field(default="change-me-jwt-secret-at-least-32-bytes!!", min_length=32)

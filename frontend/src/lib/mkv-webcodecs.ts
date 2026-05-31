@@ -282,7 +282,7 @@ function parseVideoBlocks(view: DataView, clusters: EbmlElement[], videoTrack: M
       if (!element) break;
       if (element.id === IDS.clusterTimecode) clusterTimecode = readUnsigned(view, element.contentStart, element.contentEnd);
       if (element.id === IDS.simpleBlock) {
-        const block = parseBlock(view, element.contentStart, element.contentEnd, clusterTimecode, timecodeScaleNs, videoTrack.number, true);
+        const block = parseBlock(view, element.contentStart, element.contentEnd, clusterTimecode, timecodeScaleNs, videoTrack.number);
         if (block) blocks.push(block);
       }
       if (element.id === IDS.blockGroup) {
@@ -314,7 +314,7 @@ function parseBlockGroup(view: DataView, start: number, end: number, clusterTime
   return parseBlock(view, blockElement.contentStart, blockElement.contentEnd, clusterTimecode, timecodeScaleNs, trackNumber, !hasReferenceBlock);
 }
 
-function parseBlock(view: DataView, start: number, end: number, clusterTimecode: number, timecodeScaleNs: number, targetTrackNumber: number, keyframeFromContainer: boolean): MkvVideoBlock | null {
+function parseBlock(view: DataView, start: number, end: number, clusterTimecode: number, timecodeScaleNs: number, targetTrackNumber: number, keyframeOverride?: boolean): MkvVideoBlock | null {
   const track = readVint(view, start, end, true);
   if (!track) return null;
   if (track.value !== targetTrackNumber) return null;
@@ -327,7 +327,7 @@ function parseBlock(view: DataView, start: number, end: number, clusterTimecode:
   const payloadStart = timecodeOffset + 3;
   if (payloadStart >= end) return null;
   const timestampUs = ((clusterTimecode + relativeTimecode) * timecodeScaleNs) / 1000;
-  const keyframe = keyframeFromContainer || Boolean(flags & 0x80);
+  const keyframe = keyframeOverride ?? Boolean(flags & 0x80);
   return {
     timestampUs,
     keyframe,

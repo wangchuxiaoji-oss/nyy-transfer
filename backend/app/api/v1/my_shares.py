@@ -100,7 +100,7 @@ async def list_my_shares(
     # 分页查询
     stmt = (
         select(Share)
-        .options(selectinload(Share.files))
+        .options(selectinload(Share.files), selectinload(Share.logical_files))
         .where(*filters)
         .order_by(order_by)
         .offset(offset)
@@ -113,7 +113,7 @@ async def list_my_shares(
         MyShareItem(
             code=s.code,
             title=s.title,
-            file_count=len(s.files),
+            file_count=len(s.logical_files),
             total_bytes=s.total_bytes,
             has_password=s.password_hash is not None,
             download_count=s.download_count,

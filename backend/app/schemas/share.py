@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,7 @@ class ShareFileInfo(BaseModel):
     index: int = 0          # 文件在分享中的序号
     is_chunked: bool = False  # 是否为分片大文件
     chunk_count: int = 1      # chunk 数量
+    media_metadata: dict[str, Any] | None = None
 
 
 class ChunkDownloadInfo(BaseModel):
@@ -35,6 +37,7 @@ class ShareFileDownload(BaseModel):
     # 分片文件：download_url 为空，chunks 包含所有 chunk URL
     download_url: str = ""
     chunks: list[ChunkDownloadInfo] = Field(default_factory=list)
+    media_metadata: dict[str, Any] | None = None
 
 
 class ShareInfoResponse(BaseModel):

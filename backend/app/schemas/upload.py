@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -29,6 +32,7 @@ class UploadInitResponse(BaseModel):
     authorization: str
     store_uri: str
     commit_token: str  # 前端 commit 时回传
+    commit_token_expires_at: datetime
 
 
 class CommitFileItem(BaseModel):
@@ -41,6 +45,17 @@ class CommitFileItem(BaseModel):
     chunk_total: int = Field(default=1, ge=1, le=50)
 
 
+class CommitLogicalFileItem(BaseModel):
+    """commit 请求中的逻辑文件元数据。"""
+
+    logical_file_id: str = Field(..., min_length=1, max_length=36)
+    file_name: str = Field(..., min_length=1, max_length=512)
+    file_size: int = Field(..., ge=0, le=10 * 1024 * 1024 * 1024)
+    content_type: str = Field(default="", max_length=127)
+    chunk_total: int = Field(default=1, ge=1, le=50)
+    media_metadata: dict[str, Any] | None = None
+
+
 class UploadCommitRequest(BaseModel):
     """POST /api/v1/uploads/commit 请求体。
 
@@ -50,7 +65,9 @@ class UploadCommitRequest(BaseModel):
     - 大文件分片：files 数组包含同一 logical_file_id 的多个 chunk
     - 混合：普通文件 + 大文件 chunk 混合
     """
+    upload_batch_id: str = Field(default="", max_length=64)
     files: list[CommitFileItem] = Field(default_factory=list, max_length=500)
+    logical_files: list[CommitLogicalFileItem] = Field(default_factory=list, max_length=500)
     # 空目录路径（例如 "folder/empty/"），用于下载 ZIP 时恢复目录结构
     empty_dirs: list[str] = Field(default_factory=list, max_length=500)
     # 可选：提取码（4位数字）

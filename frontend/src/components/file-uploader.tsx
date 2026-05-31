@@ -9,8 +9,22 @@ import {
 import QRCode from "qrcode";
 import { cn } from "@/lib/utils";
 import { computeCRC32 } from "@/lib/crc32";
-import { uploadInit, uploadCommit, getQuota, type QuotaInfo, type CommitFileItem } from "@/lib/api";
-import { formatXhrStatusError, getErrorMessage, isSuccessfulHttpStatus } from "@/lib/errors";
+import { uploadInit, uploadCommit, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata } from "@/lib/api";
+import { formatXhrStatusError, getErrorMessage, HttpStatusError, isSuccessfulHttpStatus } from "@/lib/errors";
+import { probeMediaMetadata, shouldProbeMediaMetadata, checkCodecCompatibility } from "@/lib/media-metadata";
+import type { DebugLogFn } from "@/lib/debug";
+import {
+  clearExpiredUploadSessions,
+  createUploadSession,
+  deleteUploadSession,
+  findUploadSession,
+  getUploadFileKey,
+  markUploadChunkComplete,
+  saveUploadSession,
+  type StoredCommitItem,
+  type UploadSession,
+  type UploadSessionFile,
+} from "@/lib/upload-state";
 
 const MAX_RETRIES = 3;
 const MAX_FILE_SIZE_GUEST = 1024 * 1024 * 1024; // 1 GiB (guest limit)
@@ -18,6 +32,12 @@ const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 10 GiB (logged-in limit)
 const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
 const MAX_FILE_COUNT = 500;
 const MAX_EMPTY_DIR_COUNT = 500;
+const CHUNK_XHR_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours per chunk
+const SMALL_FILE_XHR_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours per small file
+const COMMIT_MAX_RETRIES = 3;
+const GLOBAL_UPLOAD_CONCURRENCY = 2;
+const LARGE_FILE_CHUNK_CONCURRENCY = 1;
+const TOKEN_EXPIRY_SAFETY_MS = 5 * 60 * 1000;
 
 const getFileUploadName = (file: File) =>
   (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
@@ -26,6 +46,7 @@ type PickedFile = { file: File; uploadName: string };
 type PickedSelection = { files: PickedFile[]; emptyDirs: string[] };
 
 type FileState = "pending" | "hashing" | "uploading" | "done" | "error";
+type MediaProbeState = "analyzing" | "ready" | "warning" | "failed";
 
 interface FileEntry {
   id: string;
@@ -37,6 +58,8 @@ interface FileEntry {
   retries: number;
   commitToken?: string;
   storeUri?: string;
+  mediaProbeState?: MediaProbeState;
+  mediaProbeMessage?: string;
 }
 
 type OverallState = "idle" | "uploading" | "committing" | "done" | "error";
@@ -48,7 +71,17 @@ interface UploadResult {
   revokeToken?: string | null;
 }
 
-export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: { onUploadDone?: () => void; loggedIn?: boolean; onLoginClick?: () => void } = {}) {
+export function FileUploader({
+  onUploadDone,
+  loggedIn = false,
+  onLoginClick,
+  debugLog,
+}: {
+  onUploadDone?: () => void;
+  loggedIn?: boolean;
+  onLoginClick?: () => void;
+  debugLog?: DebugLogFn;
+} = {}) {
   const idPrefix = useId();
   const shouldReduceMotion = useReducedMotion();
   const [overall, setOverall] = useState<OverallState>("idle");
@@ -64,11 +97,20 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
   const [quota, setQuota] = useState<QuotaInfo | null>(null);
   const [password, setPassword] = useState("");
   const [expiresHours, setExpiresHours] = useState(loggedIn ? 168 : 1);
-  const [maxDownloads, setMaxDownloads] = useState(loggedIn ? 0 : 10);
+  const [maxDownloads, setMaxDownloads] = useState(loggedIn ? 100 : 10);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [supportsDirectoryPicker, setSupportsDirectoryPicker] = useState(false);
+  const [resumeMessage, setResumeMessage] = useState("");
+  const [uploadMetrics, setUploadMetrics] = useState({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<Map<string, XMLHttpRequest>>(new Map());
+  const activeUploadBatchIdRef = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
+  const fileLoadedRef = useRef<Map<string, number>>(new Map());
+  const uploadStartAtRef = useRef(0);
+  const uploadSamplesRef = useRef<Array<{ at: number; bytes: number }>>([]);
+  const lastMetricsUpdateRef = useRef(0);
+  const lastDebugMetricsAtRef = useRef(0);
 
   useEffect(() => {
     getQuota().then(setQuota).catch(() => {});
@@ -83,6 +125,13 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     }
   }, [overall, resultPhase]);
 
+  useEffect(() => {
+    if (overall !== "uploading" && overall !== "committing") return;
+    const timer = window.setInterval(() => updateUploadMetrics(true), 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overall]);
+
   const reset = () => {
     abortRef.current.forEach((xhr) => xhr.abort());
     abortRef.current.clear();
@@ -95,8 +144,18 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     setResultPhase("check");
     setCopied(false);
     setQrUrl("");
+    setResumeMessage("");
+    setUploadMetrics({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
     setShowAllFiles(false);
+    fileLoadedRef.current.clear();
+    uploadStartAtRef.current = 0;
+    uploadSamplesRef.current = [];
+    lastMetricsUpdateRef.current = 0;
+    lastDebugMetricsAtRef.current = 0;
+    cancelledRef.current = false;
+    activeUploadBatchIdRef.current = null;
     getQuota().then(setQuota).catch(() => {});
+    debugLog?.("upload", "reset");
   };
 
   const updateFile = (id: string, patch: Partial<FileEntry>) => {
@@ -125,15 +184,23 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
 
   const addFiles = (newFiles: PickedFile[], newEmptyDirs: string[] = []) => {
     const maxSize = loggedIn ? MAX_FILE_SIZE_USER : MAX_FILE_SIZE_GUEST;
+    debugLog?.("upload", "selection:add", {
+      incomingFiles: newFiles.length,
+      incomingBytes: newFiles.reduce((sum, item) => sum + item.file.size, 0),
+      incomingEmptyDirs: newEmptyDirs.length,
+      loggedIn,
+    });
     // 检查是否有 >1GB 文件且未登录
     const hasLargeFile = newFiles.some(({ file }) => file.size > MAX_FILE_SIZE_GUEST);
     if (hasLargeFile && !loggedIn) {
+      debugLog?.("upload", "selection:blocked", { reason: "large-file-requires-login" });
       setError("超过 1 GB 的大文件需要登录后上传");
       onLoginClick?.();
       return;
     }
     const valid = newFiles.filter(({ file }) => file.size <= maxSize);
     if (valid.length < newFiles.length) {
+      debugLog?.("upload", "selection:skipped", { skippedFiles: newFiles.length - valid.length, maxSize });
       setError(`${newFiles.length - valid.length} 个文件超过 ${loggedIn ? "10" : "1"} GB 已跳过`);
     }
     const normalizedEmptyDirs = newEmptyDirs.map(normalizeDirPath).filter(Boolean);
@@ -259,6 +326,164 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     });
   };
 
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const abortActiveUploads = () => {
+    abortRef.current.forEach((xhr) => xhr.abort());
+    abortRef.current.clear();
+  };
+
+  const updateUploadMetrics = (force = false) => {
+    const now = performance.now();
+    if (!uploadStartAtRef.current) uploadStartAtRef.current = now;
+    const uploadedBytes = Array.from(fileLoadedRef.current.values()).reduce((sum, bytes) => sum + bytes, 0);
+    const samples = uploadSamplesRef.current;
+    samples.push({ at: now, bytes: uploadedBytes });
+    const cutoff = now - 10000;
+    while (samples.length > 1 && samples[0].at < cutoff) samples.shift();
+
+    if (!force && now - lastMetricsUpdateRef.current < 500) return;
+    lastMetricsUpdateRef.current = now;
+    const first = samples[0];
+    const seconds = first && now > first.at ? (now - first.at) / 1000 : 0;
+    const speedBps = seconds > 0 ? Math.max(0, (uploadedBytes - first.bytes) / seconds) : 0;
+    if (debugLog && uploadStartAtRef.current && (force || now - lastDebugMetricsAtRef.current >= 2000)) {
+      lastDebugMetricsAtRef.current = now;
+      const totalBytes = files.reduce((sum, item) => sum + item.file.size, 0);
+      debugLog("upload", "metrics", {
+        uploadedBytes,
+        totalBytes,
+        speedBps: Math.round(speedBps),
+        elapsedMs: Math.round(now - uploadStartAtRef.current),
+        progress: totalBytes > 0 ? Number(((uploadedBytes / totalBytes) * 100).toFixed(2)) : 0,
+      });
+    }
+    setUploadMetrics({ uploadedBytes, speedBps, elapsedMs: now - uploadStartAtRef.current });
+  };
+
+  const recordFileLoaded = (fileId: string, loadedBytes: number, force = false) => {
+    fileLoadedRef.current.set(fileId, Math.max(0, loadedBytes));
+    updateUploadMetrics(force);
+  };
+
+  const cancelUpload = async () => {
+    debugLog?.("upload", "cancel", { uploadBatchId: activeUploadBatchIdRef.current });
+    cancelledRef.current = true;
+    abortActiveUploads();
+    const activeUploadBatchId = activeUploadBatchIdRef.current;
+    if (activeUploadBatchId) await deleteUploadSession(activeUploadBatchId).catch(() => {});
+    activeUploadBatchIdRef.current = null;
+    fileLoadedRef.current.clear();
+    uploadSamplesRef.current = [];
+    uploadStartAtRef.current = 0;
+    lastMetricsUpdateRef.current = 0;
+    setUploadMetrics({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
+    setFiles((prev) => prev.map((entry) => (
+      entry.state === "uploading" || entry.state === "hashing"
+        ? { ...entry, state: "error", error: "上传已取消", progress: 0 }
+        : entry
+    )));
+    setOverall("error");
+    setError("上传已取消");
+  };
+
+  const getErrorStatus = (error: unknown): number | null => {
+    if (error instanceof HttpStatusError) return error.status;
+    const message = getErrorMessage(error, "");
+    const match = message.match(/^(\d+)[:：]/);
+    return match ? Number(match[1]) : null;
+  };
+
+  const isRetryableUploadError = (error: unknown) => {
+    const status = getErrorStatus(error);
+    const message = getErrorMessage(error, "");
+    if (status !== null) {
+      return status === 0 || status === 408 || status >= 500;
+    }
+    return message.includes("超时") || message.includes("网络") || message.includes("timeout");
+  };
+
+  const isStoredCommitItemFresh = (item: StoredCommitItem | null | undefined): item is StoredCommitItem => {
+    if (!item) return false;
+    const expiresAt = Date.parse(item.commit_token_expires_at);
+    return Number.isFinite(expiresAt) && expiresAt - Date.now() > TOKEN_EXPIRY_SAFETY_MS;
+  };
+
+  const stripStoredCommitItem = (item: StoredCommitItem): CommitFileItem => ({
+    commit_token: item.commit_token,
+    store_uri: item.store_uri,
+    logical_file_id: item.logical_file_id,
+    chunk_index: item.chunk_index,
+    chunk_total: item.chunk_total,
+  });
+
+  const makeStoredCommitItem = (item: CommitFileItem, commitTokenExpiresAt: string): StoredCommitItem => ({
+    ...item,
+    commit_token_expires_at: commitTokenExpiresAt,
+  });
+
+  const summarizeMediaMetadata = (metadata: MediaMetadata | null) => {
+    if (!metadata) return "";
+    if (metadata.probe_status !== "ok") return "媒体信息未识别，可继续";
+    const videoCodec = metadata.video_tracks?.[0]?.codec || metadata.video_tracks?.[0]?.codec_tag || "视频";
+    const audioCodecs = (metadata.audio_tracks || [])
+      .map((track) => track.codec || track.codec_tag)
+      .filter(Boolean)
+      .join(" / ");
+    return audioCodecs ? `已识别 ${videoCodec} · ${audioCodecs}` : `已识别 ${videoCodec}`;
+  };
+
+  const getMediaMetadataDebugData = (metadata: MediaMetadata | null) => ({
+    probeStatus: metadata?.probe_status || null,
+    probeError: metadata?.probe_error || null,
+    metadataSource: metadata?.probe_source || null,
+    moovOffset: metadata?.moov_offset ?? null,
+    moovSize: metadata?.moov_size ?? null,
+    isFastStart: metadata?.is_faststart ?? null,
+    durationSeconds: metadata?.duration_seconds ?? null,
+    videoCodecs: (metadata?.video_tracks || []).map((track) => track.codec || track.codec_tag).filter(Boolean),
+    audioCodecs: (metadata?.audio_tracks || []).map((track) => track.codec || track.codec_tag).filter(Boolean),
+  });
+
+  const chunkSizeAt = (fileSize: number, chunkIndex: number) => {
+    const start = chunkIndex * CHUNK_SIZE;
+    return Math.max(0, Math.min(CHUNK_SIZE, fileSize - start));
+  };
+
+  const getCurrentSelectionFileKeys = () => {
+    const seen = new Map<string, number>();
+    return files.map((entry) => {
+      const baseKey = getUploadFileKey(entry.uploadName, entry.file);
+      const occurrence = seen.get(baseKey) || 0;
+      seen.set(baseKey, occurrence + 1);
+      return `${baseKey}#${occurrence}`;
+    });
+  };
+
+  const createSessionForCurrentSelection = (uploadBatchId: string, fileKeys: string[]): UploadSession => {
+    const sessionFiles: UploadSessionFile[] = files.map((entry, index) => {
+      const isChunked = entry.file.size > CHUNK_SIZE;
+      const chunkTotal = isChunked ? Math.ceil(entry.file.size / CHUNK_SIZE) : 1;
+      return {
+        file_key: fileKeys[index],
+        upload_name: entry.uploadName,
+        file_name: entry.file.name,
+        file_size: entry.file.size,
+        last_modified: entry.file.lastModified,
+        logical_file_id: generateUUID(),
+        chunk_total: chunkTotal,
+        commit_items: new Array(chunkTotal).fill(null),
+      };
+    });
+
+    return createUploadSession({
+      uploadBatchId,
+      fileKeys,
+      files: sessionFiles,
+      emptyDirs,
+    });
+  };
+
   /** Upload a single chunk to TOS. Returns commit info for that chunk. */
   const uploadChunk = async (
     entry: FileEntry,
@@ -268,15 +493,25 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     logicalFileId: string,
     logicalFileSize: number,
     contentType: string,
+    crcCache: Map<number, string>,
     onProgress: (loaded: number) => void,
-  ): Promise<CommitFileItem> => {
+  ): Promise<StoredCommitItem> => {
     let lastError = "";
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         // CRC32 是 TOS 必须的（否则返回 Mismatch CRC32）
-        const crc32 = await computeCRC32(blob);
+        let crc32 = crcCache.get(chunkIndex);
+        if (!crc32) {
+          const hashStartedAt = performance.now();
+          debugLog?.("upload", "chunk:hash:start", { fileName: entry.uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
+          crc32 = await computeCRC32(blob);
+          crcCache.set(chunkIndex, crc32);
+          debugLog?.("upload", "chunk:hash:done", { fileName: entry.uploadName, chunkIndex, hashMs: Math.round(performance.now() - hashStartedAt) });
+        }
         const uploadName = entry.uploadName;
         const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
+        const initStartedAt = performance.now();
+        debugLog?.("upload", "chunk:init:start", { fileName: uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
         const initRes = await uploadInit({
           file_name: uploadName,
           file_size: blob.size,
@@ -287,13 +522,22 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
           logical_file_id: logicalFileId,
           logical_file_size: logicalFileSize,
         });
+        debugLog?.("upload", "chunk:init:done", {
+          fileName: uploadName,
+          chunkIndex,
+          initMs: Math.round(performance.now() - initStartedAt),
+          commitTokenExpiresAt: initRes.commit_token_expires_at,
+        });
 
         if (blob.size > 0 && initRes.upload_url) {
+          const uploadStartedAt = performance.now();
+          debugLog?.("upload", "chunk:xhr:start", { fileName: uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
           await new Promise<void>((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             const xhrKey = `${entry.id}_chunk_${chunkIndex}`;
             abortRef.current.set(xhrKey, xhr);
             xhr.open("POST", initRes.upload_url);
+            xhr.timeout = CHUNK_XHR_TIMEOUT;
             xhr.setRequestHeader("Authorization", initRes.authorization);
             xhr.setRequestHeader("Content-CRC32", crc32);
             xhr.upload.onprogress = (e) => {
@@ -314,67 +558,134 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
                   return;
                 }
               } catch { /* non-JSON response is OK */ }
+              debugLog?.("upload", "chunk:xhr:done", {
+                fileName: uploadName,
+                chunkIndex,
+                status: xhr.status,
+                uploadMs: Math.round(performance.now() - uploadStartedAt),
+              });
               resolve();
             };
             xhr.onerror = () => {
               abortRef.current.delete(xhrKey);
+              debugLog?.("upload", "chunk:xhr:error", { fileName: uploadName, chunkIndex, status: 0, uploadMs: Math.round(performance.now() - uploadStartedAt) });
               reject(new Error(formatXhrStatusError(0, "网络错误")));
+            };
+            xhr.ontimeout = () => {
+              abortRef.current.delete(xhrKey);
+              debugLog?.("upload", "chunk:xhr:timeout", { fileName: uploadName, chunkIndex, uploadMs: Math.round(performance.now() - uploadStartedAt) });
+              reject(new Error("上传超时，正在重试"));
+            };
+            xhr.onabort = () => {
+              abortRef.current.delete(xhrKey);
+              debugLog?.("upload", "chunk:xhr:abort", { fileName: uploadName, chunkIndex, uploadMs: Math.round(performance.now() - uploadStartedAt) });
+              reject(new Error("上传已取消"));
             };
             xhr.send(blob);
           });
         }
 
-        return {
+        return makeStoredCommitItem({
           commit_token: initRes.commit_token,
           store_uri: initRes.store_uri,
           logical_file_id: logicalFileId,
           chunk_index: chunkIndex,
           chunk_total: chunkTotal,
-        };
+        }, initRes.commit_token_expires_at);
       } catch (err) {
         lastError = getErrorMessage(err, "上传失败");
+        debugLog?.("upload", "chunk:error", { fileName: entry.uploadName, chunkIndex, chunkTotal, attempt, error: lastError, retryable: isRetryableUploadError(err) });
+        if (cancelledRef.current) throw new Error("上传已取消");
+        if (!isRetryableUploadError(err)) throw new Error(lastError);
         if (attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          await delay(2000 * 2 ** attempt);
         }
       }
     }
     throw new Error(lastError);
   };
 
-  /** Upload a single file (possibly chunked) to TOS with retry. */
-  const uploadSingleFile = async (entry: FileEntry): Promise<CommitFileItem[]> => {
+  /** Upload a single file (possibly chunked) to TOS with retry/resume. */
+  const uploadSingleFile = async (entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean): Promise<StoredCommitItem[]> => {
     const fileSize = entry.file.size;
-    const isLargeFile = fileSize > MAX_FILE_SIZE_GUEST;
+    const isLargeFile = fileSize > CHUNK_SIZE;
     const contentType = entry.file.type || "";
+    const sessionFile = session.files.find((candidate) => candidate.file_key === fileKey);
+    if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
+    if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
+    const crcCache = new Map<number, string>();
+    debugLog?.("upload", "file:start", {
+      fileName: entry.uploadName,
+      fileSize,
+      isChunked: isLargeFile,
+      chunkTotal: sessionFile.chunk_total,
+      logicalFileId: sessionFile.logical_file_id,
+    });
 
     if (!isLargeFile) {
+      const existing = sessionFile.commit_items[0];
+      if (isStoredCommitItemFresh(existing)) {
+        const normalizedExisting = existing.logical_file_id ? existing : {
+          ...existing,
+          logical_file_id: sessionFile.logical_file_id,
+          chunk_index: 0,
+          chunk_total: 1,
+        };
+        sessionFile.commit_items[0] = normalizedExisting;
+        updateFile(entry.id, { state: "done", progress: 100, commitToken: normalizedExisting.commit_token, storeUri: normalizedExisting.store_uri });
+        recordFileLoaded(entry.id, entry.file.size, true);
+        debugLog?.("upload", "file:resume-hit", { fileName: entry.uploadName, chunkIndex: 0, chunkTotal: 1 });
+        return [normalizedExisting];
+      }
+
       // Small file: single upload (original logic)
       let lastError = "";
+      let crc32 = "";
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           updateFile(entry.id, { state: "hashing", progress: 0, retries: attempt });
-          const crc32 = await computeCRC32(entry.file);
+          if (!crc32) {
+            const hashStartedAt = performance.now();
+            debugLog?.("upload", "file:hash:start", { fileName: entry.uploadName, fileSize, attempt });
+            crc32 = await computeCRC32(entry.file);
+            debugLog?.("upload", "file:hash:done", { fileName: entry.uploadName, hashMs: Math.round(performance.now() - hashStartedAt) });
+          }
 
           updateFile(entry.id, { state: "uploading", progress: 0 });
           const uploadName = entry.uploadName;
           const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
+          const initStartedAt = performance.now();
+          debugLog?.("upload", "file:init:start", { fileName: uploadName, fileSize, attempt });
           const initRes = await uploadInit({
             file_name: uploadName,
             file_size: entry.file.size,
             file_ext: ext,
             content_type: contentType,
+            chunk_index: 0,
+            chunk_total: 1,
+            logical_file_id: sessionFile.logical_file_id,
+            logical_file_size: fileSize,
+          });
+          debugLog?.("upload", "file:init:done", {
+            fileName: uploadName,
+            initMs: Math.round(performance.now() - initStartedAt),
+            commitTokenExpiresAt: initRes.commit_token_expires_at,
           });
 
           if (entry.file.size > 0 && initRes.upload_url) {
+            const uploadStartedAt = performance.now();
+            debugLog?.("upload", "file:xhr:start", { fileName: uploadName, fileSize, attempt });
             await new Promise<void>((resolve, reject) => {
               const xhr = new XMLHttpRequest();
               abortRef.current.set(entry.id, xhr);
               xhr.open("POST", initRes.upload_url);
+              xhr.timeout = SMALL_FILE_XHR_TIMEOUT;
               xhr.setRequestHeader("Authorization", initRes.authorization);
               xhr.setRequestHeader("Content-CRC32", crc32);
               xhr.upload.onprogress = (e) => {
                 if (e.lengthComputable) {
                   updateFile(entry.id, { progress: Math.round((e.loaded / e.total) * 100) });
+                  recordFileLoaded(entry.id, e.loaded);
                 }
               };
               xhr.onload = () => {
@@ -388,24 +699,61 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
                   if (body.code && body.code !== 2000) {
                     reject(new Error(body.message || `TOS error: ${body.code}`));
                     return;
-                  }
-                } catch { /* non-JSON response is OK */ }
+                }
+              } catch { /* non-JSON response is OK */ }
+                debugLog?.("upload", "file:xhr:done", { fileName: uploadName, status: xhr.status, uploadMs: Math.round(performance.now() - uploadStartedAt) });
                 resolve();
               };
               xhr.onerror = () => {
                 abortRef.current.delete(entry.id);
+                debugLog?.("upload", "file:xhr:error", { fileName: uploadName, status: 0, uploadMs: Math.round(performance.now() - uploadStartedAt) });
                 reject(new Error(formatXhrStatusError(0, "网络错误")));
+              };
+              xhr.ontimeout = () => {
+                abortRef.current.delete(entry.id);
+                debugLog?.("upload", "file:xhr:timeout", { fileName: uploadName, uploadMs: Math.round(performance.now() - uploadStartedAt) });
+                reject(new Error("上传超时，正在重试"));
+              };
+              xhr.onabort = () => {
+                abortRef.current.delete(entry.id);
+                debugLog?.("upload", "file:xhr:abort", { fileName: uploadName, uploadMs: Math.round(performance.now() - uploadStartedAt) });
+                reject(new Error("上传已取消"));
               };
               xhr.send(entry.file);
             });
           }
 
+          const storedItem = makeStoredCommitItem({
+            commit_token: initRes.commit_token,
+            store_uri: initRes.store_uri,
+            logical_file_id: sessionFile.logical_file_id,
+            chunk_index: 0,
+            chunk_total: 1,
+          }, initRes.commit_token_expires_at);
+          sessionFile.commit_items[0] = storedItem;
+          if (persistSession) {
+            await markUploadChunkComplete(session.upload_batch_id, fileKey, 0, storedItem).catch((err) => {
+              setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
+            });
+          }
           updateFile(entry.id, { state: "done", progress: 100, commitToken: initRes.commit_token, storeUri: initRes.store_uri });
-          return [{ commit_token: initRes.commit_token, store_uri: initRes.store_uri }];
+          recordFileLoaded(entry.id, entry.file.size, true);
+          debugLog?.("upload", "file:done", { fileName: entry.uploadName, fileSize, chunkTotal: 1 });
+          return [storedItem];
         } catch (err) {
           lastError = getErrorMessage(err, "上传失败");
+          debugLog?.("upload", "file:error", { fileName: entry.uploadName, attempt, error: lastError, retryable: isRetryableUploadError(err) });
+          if (cancelledRef.current) {
+            updateFile(entry.id, { state: "error", error: "上传已取消" });
+            throw new Error("上传已取消");
+          }
+          if (!isRetryableUploadError(err)) {
+            abortActiveUploads();
+            updateFile(entry.id, { state: "error", error: lastError });
+            throw new Error(lastError);
+          }
           if (attempt < MAX_RETRIES) {
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            await delay(2000 * 2 ** attempt);
           }
         }
       }
@@ -414,96 +762,322 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     }
 
     // Large file: chunked upload
-    const logicalFileId = generateUUID();
+    const logicalFileId = sessionFile.logical_file_id || generateUUID();
+    sessionFile.logical_file_id = logicalFileId;
     const chunkTotal = Math.ceil(fileSize / CHUNK_SIZE);
-    const chunkResults: CommitFileItem[] = [];
+    const chunkResults: Array<StoredCommitItem | null> = new Array(chunkTotal).fill(null);
     const chunkLoaded: number[] = new Array(chunkTotal).fill(0);
 
-    updateFile(entry.id, { state: "uploading", progress: 0 });
+    sessionFile.commit_items.forEach((item, idx) => {
+      if (idx < chunkTotal && isStoredCommitItemFresh(item)) {
+        const normalizedItem = item.logical_file_id ? item : {
+          ...item,
+          logical_file_id: logicalFileId,
+          chunk_index: idx,
+          chunk_total: chunkTotal,
+        };
+        chunkResults[idx] = normalizedItem;
+        sessionFile.commit_items[idx] = normalizedItem;
+        chunkLoaded[idx] = chunkSizeAt(fileSize, idx);
+      }
+    });
 
-    // Upload chunks with concurrency limit of 2 (avoid memory pressure)
-    const chunkQueue = Array.from({ length: chunkTotal }, (_, i) => i);
-    let chunkError = "";
+    const restoredLoaded = chunkLoaded.reduce((a, b) => a + b, 0);
+    recordFileLoaded(entry.id, restoredLoaded, true);
+    updateFile(entry.id, { state: "uploading", progress: Math.round((restoredLoaded / fileSize) * 100) });
+    if (restoredLoaded > 0) {
+      debugLog?.("upload", "file:resume-hit", {
+        fileName: entry.uploadName,
+        restoredBytes: restoredLoaded,
+        restoredChunks: chunkResults.filter(Boolean).length,
+        chunkTotal,
+      });
+    }
+
+    // 单个大文件默认 1 个 chunk 并发，避免慢网下 512MB 分片互相抢带宽导致超时。
+    const chunkQueue = Array.from({ length: chunkTotal }, (_, i) => i).filter((idx) => !chunkResults[idx]);
+    const chunkErrors: Array<string | null> = new Array(chunkTotal).fill(null);
 
     const chunkWorker = async () => {
-      while (chunkQueue.length > 0 && !chunkError) {
+      while (chunkQueue.length > 0) {
         const idx = chunkQueue.shift()!;
         const start = idx * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, fileSize);
         const blob = entry.file.slice(start, end);
         try {
           const item = await uploadChunk(
-            entry, blob, idx, chunkTotal, logicalFileId, fileSize, contentType,
+            entry, blob, idx, chunkTotal, logicalFileId, fileSize, contentType, crcCache,
             (loaded) => {
               chunkLoaded[idx] = loaded;
               const totalLoaded = chunkLoaded.reduce((a, b) => a + b, 0);
               updateFile(entry.id, { progress: Math.round((totalLoaded / fileSize) * 100) });
+              recordFileLoaded(entry.id, totalLoaded);
             },
           );
-          chunkResults.push(item);
+          chunkResults[idx] = item;
+          chunkErrors[idx] = null;
+          chunkLoaded[idx] = chunkSizeAt(fileSize, idx);
+          sessionFile.commit_items[idx] = item;
+          if (persistSession) {
+            await markUploadChunkComplete(session.upload_batch_id, fileKey, idx, item).catch((err) => {
+              setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
+            });
+          }
         } catch (err) {
-          chunkError = getErrorMessage(err, `分片 ${idx + 1}/${chunkTotal} 上传失败`);
+          const message = getErrorMessage(err, `分片 ${idx + 1}/${chunkTotal} 上传失败`);
+          chunkErrors[idx] = message;
+          if (cancelledRef.current) throw new Error("上传已取消");
+          if (!isRetryableUploadError(err)) {
+            abortActiveUploads();
+            throw new Error(message);
+          }
+          await delay(2000);
         }
       }
     };
 
-    const concurrency = Math.min(2, chunkTotal);
+    const concurrency = Math.min(LARGE_FILE_CHUNK_CONCURRENCY, chunkQueue.length || 1);
+    debugLog?.("upload", "file:chunks:start", {
+      fileName: entry.uploadName,
+      chunkTotal,
+      pendingChunks: chunkQueue.length,
+      concurrency,
+    });
     await Promise.all(Array.from({ length: concurrency }, () => chunkWorker()));
 
-    if (chunkError || chunkResults.length !== chunkTotal) {
-      updateFile(entry.id, { state: "error", error: chunkError || "部分分片上传失败" });
-      throw new Error(chunkError || "部分分片上传失败");
+    const failedChunks = chunkErrors
+      .map((err, idx) => err ? `分片 ${idx + 1}/${chunkTotal}: ${err}` : null)
+      .filter(Boolean);
+    const completedResults = chunkResults.filter((item): item is StoredCommitItem => Boolean(item));
+    if (failedChunks.length > 0 || completedResults.length !== chunkTotal) {
+      const message = failedChunks[0] || "部分分片上传失败";
+      updateFile(entry.id, { state: "error", error: message });
+      throw new Error(message);
     }
 
     updateFile(entry.id, { state: "done", progress: 100 });
-    return chunkResults;
+    recordFileLoaded(entry.id, fileSize, true);
+    debugLog?.("upload", "file:done", { fileName: entry.uploadName, fileSize, chunkTotal });
+    return completedResults;
   };
 
   /** Start uploading all pending files, then commit. */
   const startUpload = async () => {
     if (files.length === 0 && emptyDirs.length === 0) return;
+    cancelledRef.current = false;
+    fileLoadedRef.current.clear();
+    uploadStartAtRef.current = performance.now();
+    uploadSamplesRef.current = [{ at: uploadStartAtRef.current, bytes: 0 }];
+    lastMetricsUpdateRef.current = 0;
+    lastDebugMetricsAtRef.current = 0;
+    setUploadMetrics({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
     setOverall("uploading");
     setError("");
+    setResumeMessage("");
+    debugLog?.("upload", "start", {
+      files: files.length,
+      emptyDirs: emptyDirs.length,
+      totalBytes: files.reduce((sum, item) => sum + item.file.size, 0),
+      globalConcurrency: GLOBAL_UPLOAD_CONCURRENCY,
+      chunkSize: CHUNK_SIZE,
+    });
 
-    // Upload all files concurrently (max 3 parallel)
-    const results: CommitFileItem[] = [];
-    const queue = [...files];
+    const fileKeys = getCurrentSelectionFileKeys();
+    let session: UploadSession;
+    let persistSession = true;
+
+    try {
+      await clearExpiredUploadSessions();
+      const existingSession = await findUploadSession(fileKeys, emptyDirs);
+      if (existingSession) {
+        const completed = existingSession.files.reduce(
+          (total, file) => total + file.commit_items.filter(isStoredCommitItemFresh).length,
+          0,
+        );
+        const total = existingSession.files.reduce((sum, file) => sum + file.chunk_total, 0);
+        debugLog?.("upload", "session:found", { uploadBatchId: existingSession.upload_batch_id, completedChunks: completed, totalChunks: total });
+        const resume = window.confirm(`发现未完成的上传进度（已完成 ${completed}/${total} 个分片），是否继续上传？`);
+        if (resume) {
+          session = existingSession;
+          if (completed > 0) setResumeMessage(`已恢复 ${completed}/${total} 个分片`);
+          debugLog?.("upload", "session:resume", { uploadBatchId: session.upload_batch_id, completedChunks: completed, totalChunks: total });
+        } else {
+          await deleteUploadSession(existingSession.upload_batch_id);
+          session = createSessionForCurrentSelection(generateUUID(), fileKeys);
+          await saveUploadSession(session);
+          debugLog?.("upload", "session:restart", { previousUploadBatchId: existingSession.upload_batch_id, uploadBatchId: session.upload_batch_id });
+        }
+      } else {
+        session = createSessionForCurrentSelection(generateUUID(), fileKeys);
+        await saveUploadSession(session);
+        debugLog?.("upload", "session:create", { uploadBatchId: session.upload_batch_id });
+      }
+    } catch (err) {
+      session = createSessionForCurrentSelection(generateUUID(), fileKeys);
+      persistSession = false;
+      setResumeMessage(`断点续传不可用：${getErrorMessage(err, "无法读取本地上传进度")}`);
+      debugLog?.("upload", "session:error", { uploadBatchId: session.upload_batch_id, error: getErrorMessage(err, "无法读取本地上传进度") });
+    }
+    activeUploadBatchIdRef.current = session.upload_batch_id;
+    let sessionChanged = false;
+    session.files.forEach((file) => {
+      if (!file.logical_file_id) {
+        file.logical_file_id = generateUUID();
+        sessionChanged = true;
+      }
+    });
+    if (sessionChanged && persistSession) await saveUploadSession(session).catch(() => {});
+
+    const mediaMetadataPromises = new Map<string, Promise<MediaMetadata | null>>();
+    files.forEach((entry, index) => {
+      const fileKey = fileKeys[index];
+      if (!shouldProbeMediaMetadata(entry.file, entry.uploadName)) return;
+      const probeStartedAt = performance.now();
+      debugLog?.("media", "probe:start", { fileName: entry.uploadName, fileSize: entry.file.size, contentType: entry.file.type || "" });
+      updateFile(entry.id, { mediaProbeState: "analyzing", mediaProbeMessage: "正在分析媒体信息..." });
+      const promise = probeMediaMetadata(entry.file, entry.uploadName)
+        .then((metadata) => {
+          const summary = summarizeMediaMetadata(metadata);
+          const compatWarning = checkCodecCompatibility(metadata);
+          if (compatWarning) {
+            updateFile(entry.id, {
+              mediaProbeState: "warning",
+              mediaProbeMessage: compatWarning,
+            });
+          } else {
+            updateFile(entry.id, {
+              mediaProbeState: metadata?.probe_status === "ok" ? "ready" : "failed",
+              mediaProbeMessage: summary,
+            });
+          }
+          debugLog?.("media", "probe:done", {
+            fileName: entry.uploadName,
+            probeMs: Math.round(performance.now() - probeStartedAt),
+            ...getMediaMetadataDebugData(metadata),
+          });
+          return metadata;
+        })
+        .catch((err) => {
+          updateFile(entry.id, { mediaProbeState: "failed", mediaProbeMessage: "媒体信息未识别，可继续" });
+          debugLog?.("media", "probe:error", { fileName: entry.uploadName, probeMs: Math.round(performance.now() - probeStartedAt), error: getErrorMessage(err, "媒体信息解析失败") });
+          return {
+            probe_version: 1,
+            probe_status: "failed" as const,
+            probe_source: "client-upload",
+            probe_error: getErrorMessage(err, "媒体信息解析失败"),
+            file_size: entry.file.size,
+          };
+        });
+      mediaMetadataPromises.set(fileKey, promise);
+    });
+
+    if (cancelledRef.current) {
+      if (persistSession) await deleteUploadSession(session.upload_batch_id).catch(() => {});
+      activeUploadBatchIdRef.current = null;
+      setOverall("error");
+      setError("上传已取消");
+      return;
+    }
+
+    // Upload all files with a global concurrency cap to avoid slow-network timeouts.
+    const queue = files.map((entry, index) => ({ entry, fileKey: fileKeys[index] }));
     let hasError = false;
     let uploadError = "";
 
     const worker = async () => {
       while (queue.length > 0 && !hasError) {
-        const entry = queue.shift()!;
+        const { entry, fileKey } = queue.shift()!;
         try {
-          const items = await uploadSingleFile(entry);
-          results.push(...items);
+          await uploadSingleFile(entry, fileKey, session, persistSession);
         } catch (err) {
           hasError = true;
           uploadError = getErrorMessage(err, "部分文件上传失败");
+          if (cancelledRef.current) uploadError = "上传已取消";
+          if (!isRetryableUploadError(err)) abortActiveUploads();
         }
       }
     };
 
-    const concurrency = Math.min(3, files.length);
+    const concurrency = Math.min(GLOBAL_UPLOAD_CONCURRENCY, files.length || 1);
+    debugLog?.("upload", "workers:start", { concurrency, files: files.length, uploadBatchId: session.upload_batch_id });
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-    if (hasError || results.length < files.length) {
+    const expectedItems = session.files.reduce((sum, file) => sum + file.chunk_total, 0);
+    const finalResults = session.files.flatMap((file) => file.commit_items).filter((item): item is StoredCommitItem => Boolean(item));
+    debugLog?.("upload", "workers:done", { hasError, finalItems: finalResults.length, expectedItems, uploadBatchId: session.upload_batch_id });
+    if (hasError || finalResults.length !== expectedItems) {
+      debugLog?.("upload", "error", { stage: "upload", error: uploadError || "部分文件上传失败", finalItems: finalResults.length, expectedItems });
       setOverall("error");
       setError(uploadError || "部分文件上传失败");
       return;
     }
 
+    const metadataByFileKey = new Map<string, MediaMetadata | null>();
+    if (mediaMetadataPromises.size > 0) debugLog?.("media", "probe:wait", { files: mediaMetadataPromises.size });
+    for (const [fileKey, promise] of Array.from(mediaMetadataPromises.entries())) {
+      metadataByFileKey.set(fileKey, await promise);
+    }
+    if (mediaMetadataPromises.size > 0) debugLog?.("media", "probe:wait-done", { files: mediaMetadataPromises.size });
+    if (cancelledRef.current) {
+      if (persistSession) await deleteUploadSession(session.upload_batch_id).catch(() => {});
+      activeUploadBatchIdRef.current = null;
+      setOverall("error");
+      setError("上传已取消");
+      return;
+    }
+
+    const logicalFiles: CommitLogicalFileItem[] = session.files.map((sessionFile, index) => ({
+      logical_file_id: sessionFile.logical_file_id,
+      file_name: sessionFile.upload_name,
+      file_size: sessionFile.file_size,
+      content_type: files[index]?.file.type || "",
+      chunk_total: sessionFile.chunk_total,
+      media_metadata: metadataByFileKey.get(sessionFile.file_key) || null,
+    }));
+
     // Commit all files as one share
     try {
+      updateUploadMetrics(true);
       setOverall("committing");
-      const commitRes = await uploadCommit({
-        files: results,
-        empty_dirs: emptyDirs,
-        password: password || undefined,
-        expires_hours: expiresHours,
-        max_downloads: maxDownloads || undefined,
-      });
+      let commitRes = null;
+      for (let attempt = 0; attempt <= COMMIT_MAX_RETRIES; attempt++) {
+        try {
+          const commitStartedAt = performance.now();
+          debugLog?.("commit", "start", {
+            uploadBatchId: session.upload_batch_id,
+            attempt,
+            chunks: finalResults.length,
+            logicalFiles: logicalFiles.length,
+            emptyDirs: emptyDirs.length,
+          });
+          commitRes = await uploadCommit({
+            upload_batch_id: session.upload_batch_id,
+            files: finalResults.map(stripStoredCommitItem),
+            logical_files: logicalFiles,
+            empty_dirs: emptyDirs,
+            password: password || undefined,
+            expires_hours: expiresHours,
+            max_downloads: maxDownloads || undefined,
+          });
+          debugLog?.("commit", "done", {
+            uploadBatchId: session.upload_batch_id,
+            attempt,
+            commitMs: Math.round(performance.now() - commitStartedAt),
+            shareCode: commitRes.share_code,
+            fileCount: commitRes.file_count,
+          });
+          break;
+        } catch (err) {
+          debugLog?.("commit", "error", { uploadBatchId: session.upload_batch_id, attempt, error: getErrorMessage(err, "提交失败"), retryable: isRetryableUploadError(err) });
+          if (attempt >= COMMIT_MAX_RETRIES || !isRetryableUploadError(err)) throw err;
+          await delay(2000 * 2 ** attempt);
+        }
+      }
+      if (!commitRes) throw new Error("提交失败");
+      if (persistSession) await deleteUploadSession(session.upload_batch_id).catch(() => {});
+      activeUploadBatchIdRef.current = null;
       setOverall("done");
+      debugLog?.("upload", "done", { uploadBatchId: session.upload_batch_id, shareCode: commitRes.share_code, totalBytes: totalSize, elapsedMs: Math.round(performance.now() - uploadStartAtRef.current) });
       setResultPhase("check");
       setResult({ shareCode: commitRes.share_code, shareUrl: commitRes.share_url, fileCount: commitRes.file_count, revokeToken: commitRes.revoke_token });
       QRCode.toDataURL(commitRes.share_url, { width: 160, margin: 2, color: { dark: "#2a1810" } }).then(setQrUrl).catch(() => {});
@@ -518,7 +1092,13 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
       getQuota().then(setQuota).catch(() => {});
       onUploadDone?.();
     } catch (err) {
+      if (cancelledRef.current) {
+        setOverall("error");
+        setError("上传已取消");
+        return;
+      }
       setOverall("error");
+      debugLog?.("upload", "error", { stage: "commit", error: getErrorMessage(err, "提交失败") });
       setError(getErrorMessage(err, "提交失败"));
     }
   };
@@ -568,8 +1148,29 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
     return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
   };
 
+  const formatDuration = (ms: number) => {
+    if (!Number.isFinite(ms) || ms <= 0) return "00:00";
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+      : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  const formatSpeed = (bytesPerSecond: number) => (
+    bytesPerSecond > 0 ? `${formatSize(bytesPerSecond)}/s` : "计算中"
+  );
+
   const isIdle = overall === "idle";
   const totalSize = files.reduce((s, f) => s + f.file.size, 0);
+  const displayedUploadedBytes = overall === "committing" || overall === "done"
+    ? totalSize
+    : Math.min(uploadMetrics.uploadedBytes, totalSize);
+  const totalProgress = totalSize > 0 ? Math.min(100, Math.round((displayedUploadedBytes / totalSize) * 100)) : 0;
+  const remainingBytes = Math.max(0, totalSize - displayedUploadedBytes);
+  const remainingMs = uploadMetrics.speedBps > 0 && remainingBytes > 0 ? (remainingBytes / uploadMetrics.speedBps) * 1000 : 0;
   const totalItemCount = files.length + emptyDirs.length;
   const visibleFiles = showAllFiles ? files : files.slice(0, 5);
   const visibleEmptyDirs = showAllFiles ? emptyDirs : emptyDirs.slice(0, Math.max(0, 5 - visibleFiles.length));
@@ -794,6 +1395,48 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
       </div>
       )}
 
+      {(overall === "uploading" || overall === "committing") && totalSize > 0 && (
+        <div className="mt-4 rounded-2xl border border-warm-200 dark:border-gray-700 bg-white/70 dark:bg-white/[0.04] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="type-label text-gray-700 dark:text-gray-300">总进度</span>
+            <span className="type-body-sm text-gray-500 dark:text-gray-400">
+              {overall === "committing" ? "确认中" : `${totalProgress}%`}
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+            <div className="h-full rounded-full bg-nyy-500 transition-all" style={{ width: `${totalProgress}%` }} />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
+              <p className="type-caption text-gray-400">已上传</p>
+              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatSize(displayedUploadedBytes)} / {formatSize(totalSize)}</p>
+            </div>
+            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
+              <p className="type-caption text-gray-400">实时速度</p>
+              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatSpeed(uploadMetrics.speedBps)}</p>
+            </div>
+            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
+              <p className="type-caption text-gray-400">已用时间</p>
+              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatDuration(uploadMetrics.elapsedMs)}</p>
+            </div>
+            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
+              <p className="type-caption text-gray-400">预计剩余</p>
+              <p className="type-body-sm text-gray-700 dark:text-gray-300">
+                {overall === "committing" ? "即将完成" : remainingMs > 0 ? formatDuration(remainingMs) : "计算中"}
+              </p>
+            </div>
+          </div>
+          {overall === "uploading" && (
+            <button
+              onClick={() => void cancelUpload()}
+              className="type-action mt-3 min-h-[40px] rounded-xl border border-red-200 px-4 text-red-600 transition-all hover:bg-red-50 dark:border-red-800/50 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
+              取消上传
+            </button>
+          )}
+        </div>
+      )}
+
       {/* File list */}
       {totalItemCount > 0 && overall !== "done" && (
         <div className="mt-4 space-y-2 max-h-[240px] overflow-y-auto">
@@ -805,12 +1448,19 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
                 <div className="flex items-center gap-2">
                   <span className="type-file-meta text-gray-400">{formatSize(entry.file.size)}</span>
                   {entry.state === "uploading" && (
-                    <div className="flex-1 h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-nyy-500 rounded-full transition-all" style={{ width: `${entry.progress}%` }} />
-                    </div>
+                    <>
+                      <div className="flex-1 h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-nyy-500 rounded-full transition-all" style={{ width: `${entry.progress}%` }} />
+                      </div>
+                      <span className="type-caption text-gray-400 tabular-nums">{entry.progress}%</span>
+                    </>
                   )}
                   {entry.state === "hashing" && <span className="type-caption text-nyy-500">校验中...</span>}
-                  {entry.state === "done" && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                  {entry.mediaProbeState === "analyzing" && <span className="type-caption text-nyy-500">正在分析媒体信息...</span>}
+                  {entry.mediaProbeState === "ready" && entry.mediaProbeMessage && <span className="type-caption text-green-600 dark:text-green-400 truncate">{entry.mediaProbeMessage}</span>}
+                  {entry.mediaProbeState === "warning" && entry.mediaProbeMessage && <span className="type-caption text-orange-500 dark:text-orange-400 truncate flex items-center gap-0.5"><AlertCircle className="w-3 h-3 shrink-0" />{entry.mediaProbeMessage}</span>}
+                  {entry.mediaProbeState === "failed" && entry.mediaProbeMessage && <span className="type-caption text-yellow-600 dark:text-yellow-400 truncate">{entry.mediaProbeMessage}</span>}
+                  {entry.state === "done" && <><CheckCircle2 className="w-3 h-3 text-green-500" /><span className="type-caption text-green-600 dark:text-green-400">100%</span></>}
                   {entry.state === "error" && (
                     <span className="type-caption text-red-500 flex items-center gap-0.5">
                       <AlertCircle className="w-3 h-3" /> {entry.error}
@@ -883,6 +1533,7 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
               </p>
             )}
             {folderWarning && <p className="type-caption text-yellow-600 dark:text-yellow-400">{folderWarning}</p>}
+            {resumeMessage && <p className="type-caption text-nyy-600 dark:text-nyy-400">{resumeMessage}</p>}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -1014,7 +1665,7 @@ export function FileUploader({ onUploadDone, loggedIn = false, onLoginClick }: {
       {overall === "error" && (
         <div role="alert" className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 dark:border-red-800/40 bg-red-50 dark:bg-red-900/20 p-3">
           <span className="type-body-sm text-red-700 dark:text-red-400">{error}</span>
-          <button onClick={reset} className="type-action flex min-h-[44px] items-center gap-1 rounded-lg px-2 text-nyy-800 dark:text-nyy-400 hover:underline">
+          <button onClick={() => void startUpload()} className="type-action flex min-h-[44px] items-center gap-1 rounded-lg px-2 text-nyy-800 dark:text-nyy-400 hover:underline">
             <RotateCcw className="w-3 h-3" /> 重试
           </button>
         </div>

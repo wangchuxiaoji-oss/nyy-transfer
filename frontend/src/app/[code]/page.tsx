@@ -23,12 +23,18 @@ import { formatDebugLine, toDebugRecord, type DebugLogFn } from "@/lib/debug";
 type PageState = "loading" | "ready" | "not_found" | "expired" | "error";
 
 interface DebugEntry {
+  ts: number;
   elapsedMs: number;
   scope: string;
   event: string;
   data?: Record<string, unknown>;
   line: string;
 }
+
+const DEBUG_LOG_LIMIT = 5000;
+const REMOTE_DEBUG_BATCH_LIMIT = 100;
+const REMOTE_DEBUG_QUEUE_LIMIT = 5000;
+const REMOTE_DEBUG_FLUSH_INTERVAL_MS = 2000;
 
 interface DebugStatus {
   mode: string;
@@ -47,6 +53,10 @@ interface DebugStatus {
   sdpPendingBlocks: number | null;
   sdpCarryBytes: number | null;
   sdpDecodeQueueSize: number | null;
+  sdpBufferedSeconds: number | null;
+  sdpPendingSeconds: number | null;
+  sdpThroughputKbps: number | null;
+  sdpThroughputRatio: number | null;
 }
 
 export default function SharePage() {
@@ -86,15 +96,99 @@ export default function SharePage() {
     sdpPendingBlocks: null,
     sdpCarryBytes: null,
     sdpDecodeQueueSize: null,
+    sdpBufferedSeconds: null,
+    sdpPendingSeconds: null,
+    sdpThroughputKbps: null,
+    sdpThroughputRatio: null,
   });
   const debugStartPerfRef = useRef(0);
   const debugStartWallRef = useRef(0);
+  const remoteDebugQueueRef = useRef<DebugEntry[]>([]);
+  const remoteDebugFlushTimerRef = useRef<number | null>(null);
+  const remoteDebugInFlightRef = useRef(false);
+  const remoteDebugSessionIdRef = useRef<string>("");
   const { showToast } = useToast();
+
+  const ensureRemoteDebugSessionId = useCallback(() => {
+    if (remoteDebugSessionIdRef.current) return remoteDebugSessionIdRef.current;
+    const rawSessionId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    remoteDebugSessionIdRef.current = rawSessionId.replace(/[^A-Za-z0-9._-]/g, "_");
+    return remoteDebugSessionIdRef.current;
+  }, []);
+
+  const flushRemoteDebugLogs = useCallback(async (reason: string, useBeacon = false) => {
+    if (!debugEnabled || !sdpEnabled) return;
+    if (remoteDebugInFlightRef.current && !useBeacon) return;
+
+    const batch = remoteDebugQueueRef.current.splice(0, REMOTE_DEBUG_BATCH_LIMIT);
+    if (batch.length === 0) return;
+
+    const payload = {
+      shareCode: code,
+      sessionId: ensureRemoteDebugSessionId(),
+      pageUrl: window.location.href,
+      userAgent: navigator.userAgent,
+      reason,
+      entries: batch,
+    };
+    const body = JSON.stringify(payload);
+    const endpoint = "/api/v1/debug/logs";
+
+    if (!useBeacon) remoteDebugInFlightRef.current = true;
+    try {
+      if (useBeacon && navigator.sendBeacon) {
+        const beaconOk = navigator.sendBeacon(endpoint, new Blob([body], { type: "application/json" }));
+        if (beaconOk) return;
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: useBeacon,
+      });
+      if (!response.ok) {
+        remoteDebugQueueRef.current = [...batch, ...remoteDebugQueueRef.current];
+      }
+    } catch {
+      remoteDebugQueueRef.current = [...batch, ...remoteDebugQueueRef.current];
+    } finally {
+      if (!useBeacon) remoteDebugInFlightRef.current = false;
+      if (!useBeacon && remoteDebugQueueRef.current.length > 0 && remoteDebugFlushTimerRef.current === null) {
+        remoteDebugFlushTimerRef.current = window.setTimeout(() => {
+          remoteDebugFlushTimerRef.current = null;
+          void flushRemoteDebugLogs("interval");
+        }, REMOTE_DEBUG_FLUSH_INTERVAL_MS);
+      }
+    }
+  }, [code, debugEnabled, ensureRemoteDebugSessionId, sdpEnabled]);
+
+  const scheduleRemoteDebugFlush = useCallback(() => {
+    if (!debugEnabled || !sdpEnabled) return;
+    if (remoteDebugFlushTimerRef.current !== null) return;
+    remoteDebugFlushTimerRef.current = window.setTimeout(() => {
+      remoteDebugFlushTimerRef.current = null;
+      void flushRemoteDebugLogs("interval");
+    }, REMOTE_DEBUG_FLUSH_INTERVAL_MS);
+  }, [debugEnabled, flushRemoteDebugLogs, sdpEnabled]);
+
+  const enqueueRemoteDebugEntry = useCallback((entry: DebugEntry) => {
+    if (!debugEnabled || !sdpEnabled) return;
+    remoteDebugQueueRef.current.push(entry);
+    if (remoteDebugQueueRef.current.length > REMOTE_DEBUG_QUEUE_LIMIT) {
+      remoteDebugQueueRef.current.splice(0, remoteDebugQueueRef.current.length - REMOTE_DEBUG_QUEUE_LIMIT);
+    }
+    scheduleRemoteDebugFlush();
+  }, [debugEnabled, sdpEnabled, scheduleRemoteDebugFlush]);
 
   const ingestDebugEntry = useCallback((entry: Omit<DebugEntry, "line">) => {
     if (!debugEnabled) return;
     const line = formatDebugLine(entry.elapsedMs, entry.scope, entry.event, entry.data);
-    setDebugEntries((entries) => [...entries.slice(-399), { ...entry, line }]);
+    const fullEntry = { ...entry, line };
+    setDebugEntries((entries) => [...entries.slice(-(DEBUG_LOG_LIMIT - 1)), fullEntry]);
+    enqueueRemoteDebugEntry(fullEntry);
     setDebugStatus((status) => {
       let next = status;
       const mode = entry.data && typeof entry.data.mode === "string" ? entry.data.mode : null;
@@ -125,6 +219,8 @@ export default function SharePage() {
         next = {
           ...next,
           sdpReadBytes: typeof entry.data.totalBytesRead === "number" ? entry.data.totalBytesRead : next.sdpReadBytes,
+          sdpThroughputKbps: typeof entry.data.throughputEwmaKbps === "number" ? entry.data.throughputEwmaKbps : next.sdpThroughputKbps,
+          sdpThroughputRatio: typeof entry.data.throughputRatio === "number" ? entry.data.throughputRatio : next.sdpThroughputRatio,
         };
       }
       if (entry.scope === "sdp-mkv" && entry.event === "cluster:parsed" && entry.data) {
@@ -137,6 +233,8 @@ export default function SharePage() {
         next = {
           ...next,
           sdpPendingBlocks: typeof entry.data.pendingBlocks === "number" ? entry.data.pendingBlocks : next.sdpPendingBlocks,
+          sdpPendingSeconds: typeof entry.data.pendingSeconds === "number" ? entry.data.pendingSeconds : next.sdpPendingSeconds,
+          sdpBufferedSeconds: typeof entry.data.bufferedSeconds === "number" ? entry.data.bufferedSeconds : next.sdpBufferedSeconds,
         };
       }
       if (entry.scope === "sdp-mkv" && entry.event === "decoder:queued" && entry.data) {
@@ -144,12 +242,16 @@ export default function SharePage() {
           ...next,
           sdpQueuedBlocks: typeof entry.data.totalQueuedBlocks === "number" ? entry.data.totalQueuedBlocks : next.sdpQueuedBlocks,
           sdpDecodeQueueSize: typeof entry.data.decodeQueueSize === "number" ? entry.data.decodeQueueSize : next.sdpDecodeQueueSize,
+          sdpBufferedSeconds: typeof entry.data.bufferedSeconds === "number" ? entry.data.bufferedSeconds : next.sdpBufferedSeconds,
+          sdpPendingSeconds: typeof entry.data.pendingSeconds === "number" ? entry.data.pendingSeconds : next.sdpPendingSeconds,
         };
       }
       if (entry.scope === "sdp-mkv" && entry.event === "render:progress" && entry.data) {
         next = {
           ...next,
           sdpRenderedFrames: typeof entry.data.renderedFrames === "number" ? entry.data.renderedFrames : next.sdpRenderedFrames,
+          sdpDecodeQueueSize: typeof entry.data.decodeQueueSize === "number" ? entry.data.decodeQueueSize : next.sdpDecodeQueueSize,
+          sdpBufferedSeconds: typeof entry.data.bufferedSeconds === "number" ? entry.data.bufferedSeconds : next.sdpBufferedSeconds,
         };
       }
       if (entry.scope === "sdp" && entry.event === "init" && entry.data) {
@@ -160,11 +262,11 @@ export default function SharePage() {
       }
       return { ...next, lastScope: entry.scope, lastEvent: entry.event };
     });
-  }, [debugEnabled]);
+  }, [debugEnabled, enqueueRemoteDebugEntry]);
 
   const appendDebugLog = useCallback<DebugLogFn>((scope, event, data) => {
     const elapsedMs = performance.now() - debugStartPerfRef.current;
-    ingestDebugEntry({ elapsedMs, scope, event, data });
+    ingestDebugEntry({ ts: Date.now(), elapsedMs, scope, event, data });
   }, [ingestDebugEntry]);
 
   useEffect(() => {
@@ -191,7 +293,8 @@ export default function SharePage() {
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     setDebugEnabled(searchParams.get("debug") === "1");
-    setSdpEnabled(searchParams.get("sdp") === "1");
+    const sdpParam = searchParams.get("sdp");
+    setSdpEnabled(sdpParam === "1" || sdpParam === "2");
   }, []);
 
   useEffect(() => {
@@ -212,6 +315,7 @@ export default function SharePage() {
       const record = toDebugRecord(event.data);
       if (!record) return;
       ingestDebugEntry({
+        ts: record.ts,
         elapsedMs: record.ts - debugStartWallRef.current,
         scope: record.scope,
         event: record.event,
@@ -243,6 +347,39 @@ export default function SharePage() {
       void setVirtualMediaDebugEnabled(false).catch(() => {});
     };
   }, [appendDebugLog, debugEnabled, ingestDebugEntry, sdpEnabled]);
+
+  useEffect(() => {
+    if (!debugEnabled || !sdpEnabled) return;
+
+    const sessionId = ensureRemoteDebugSessionId();
+    appendDebugLog("debug-upload", "session:start", {
+      sessionId,
+      endpoint: "/api/v1/debug/logs",
+      shareCode: code,
+    });
+
+    const onPageHide = () => void flushRemoteDebugLogs("pagehide", true);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        void flushRemoteDebugLogs("hidden", true);
+      }
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (remoteDebugFlushTimerRef.current !== null) {
+        window.clearTimeout(remoteDebugFlushTimerRef.current);
+        remoteDebugFlushTimerRef.current = null;
+      }
+      void flushRemoteDebugLogs("cleanup", true);
+    };
+  }, [appendDebugLog, code, debugEnabled, ensureRemoteDebugSessionId, flushRemoteDebugLogs, sdpEnabled]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -589,9 +726,12 @@ export default function SharePage() {
               {sdpEnabled && debugStatus.sdpReadBytes !== null && (
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-700 dark:text-gray-300">
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">read: {formatSize(debugStatus.sdpReadBytes)}{debugStatus.sdpFileSize ? ` / ${formatSize(debugStatus.sdpFileSize)} (${Math.round(debugStatus.sdpReadBytes / debugStatus.sdpFileSize * 100)}%)` : ""}</span>
+                  {debugStatus.sdpBufferedSeconds !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">buffer: {debugStatus.sdpBufferedSeconds.toFixed(1)}s</span>}
+                  {debugStatus.sdpPendingSeconds !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">pendingSec: {debugStatus.sdpPendingSeconds.toFixed(1)}s</span>}
+                  {debugStatus.sdpThroughputKbps !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">throughput: {debugStatus.sdpThroughputKbps}kbps{debugStatus.sdpThroughputRatio !== null ? ` (${debugStatus.sdpThroughputRatio}x)` : ""}</span>}
                   {debugStatus.sdpRenderedFrames !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">rendered: {debugStatus.sdpRenderedFrames}</span>}
                   {debugStatus.sdpQueuedBlocks !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">queued: {debugStatus.sdpQueuedBlocks}</span>}
-                  {debugStatus.sdpPendingBlocks !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">pending: {debugStatus.sdpPendingBlocks}</span>}
+                  {debugStatus.sdpPendingBlocks !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">pendingBlocks: {debugStatus.sdpPendingBlocks}</span>}
                   {debugStatus.sdpCarryBytes !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">carry: {formatSize(debugStatus.sdpCarryBytes)}</span>}
                   {debugStatus.sdpDecodeQueueSize !== null && <span className="rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-900/40">decodeQ: {debugStatus.sdpDecodeQueueSize}</span>}
                 </div>

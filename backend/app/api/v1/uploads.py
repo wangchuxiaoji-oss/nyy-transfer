@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -33,12 +34,13 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 # commit_token TTL (Redis)
-# 大文件（5GB+）在慢速网络下可能需要数小时上传完毕，
-# 早期分片的 token 必须存活到整个文件 commit 为止。
-_COMMIT_TOKEN_TTL = timedelta(hours=24)
+# 大文件（10GB）在极慢网络下可能上传超过 24 小时，早期分片的
+# commit_token 必须存活到整个批次最终 commit 为止。
+_COMMIT_TOKEN_TTL = timedelta(hours=72)
 _EMPTY_URI_PREFIX = "nyy-empty://"
 _MAX_EMPTY_DIRS = 500
 _MAX_EMPTY_DIR_PATH_LEN = 512
+_MAX_MEDIA_METADATA_BYTES = 64 * 1024
 
 
 def _get_client_ip(request: Request) -> str:
@@ -51,6 +53,55 @@ def _get_client_ip(request: Request) -> str:
 
 def _active_share_limit_message(active_count: int, max_shares: int) -> str:
     return f"活跃分享数量已达上限（{active_count}/{max_shares}），请先撤销已有分享"
+
+
+def _share_logical_file_count(share) -> int:
+    logical_files = share.__dict__.get("logical_files")
+    if logical_files is not None:
+        return len(logical_files)
+    files = share.__dict__.get("files") or []
+    logical_ids = set()
+    standalone_count = 0
+    for file in files:
+        if file.logical_file_id:
+            logical_ids.add(str(file.logical_file_id))
+        else:
+            standalone_count += 1
+    return len(logical_ids) + standalone_count
+
+
+def _upload_commit_response(settings, share, file_count: int | None = None) -> UploadCommitResponse:
+    return UploadCommitResponse(
+        share_code=share.code,
+        share_url=f"{settings.app_base_url}/{share.code}",
+        file_count=file_count if file_count is not None else _share_logical_file_count(share),
+        revoke_token=share.revoke_token,
+    )
+
+
+def _parse_uuid(value: str, field_name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{field_name} 无效") from None
+
+
+def _sanitize_media_metadata(value: dict | None) -> dict | None:
+    if not value:
+        return None
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return {
+            "probe_status": "failed",
+            "probe_error": "metadata_not_json_serializable",
+        }
+    if len(encoded.encode("utf-8")) > _MAX_MEDIA_METADATA_BYTES:
+        return {
+            "probe_status": "failed",
+            "probe_error": "metadata_too_large",
+        }
+    return value
 
 
 def _normalize_empty_dirs(paths: list[str]) -> list[str]:
@@ -286,6 +337,7 @@ async def upload_init(
 
     # --- 生成 commit_token，存 Redis ---
     commit_token = secrets.token_urlsafe(32)
+    commit_token_expires_at = datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL
     if redis is not None:
         await redis.setex(
             f"nyy:commit:{commit_token}",
@@ -298,6 +350,7 @@ async def upload_init(
         authorization=authorization,
         store_uri=store_uri,
         commit_token=commit_token,
+        commit_token_expires_at=commit_token_expires_at,
     )
 
 
@@ -322,6 +375,32 @@ async def upload_commit(
     if not body.files and not empty_dirs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请至少选择一个文件或空文件夹")
 
+    upload_batch_id = body.upload_batch_id.strip() or None
+
+    from app.db.session import get_session_factory
+    from app.models.share import Share, ShareFile, ShareLogicalFile
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import selectinload
+
+    factory = get_session_factory()
+    if upload_batch_id:
+        async with factory() as db:
+            existing_share = await db.scalar(
+                select(Share)
+                .options(selectinload(Share.files), selectinload(Share.logical_files))
+                .where(Share.upload_batch_id == upload_batch_id)
+            )
+            if existing_share:
+                return _upload_commit_response(settings, existing_share)
+
+    logical_file_specs: dict[str, object] = {}
+    for item in body.logical_files:
+        logical_uuid = str(_parse_uuid(item.logical_file_id, "logical_file_id"))
+        if logical_uuid in logical_file_specs:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件重复")
+        logical_file_specs[logical_uuid] = item
+
     # --- 验证所有 commit_token，收集文件信息 ---
     file_infos: list[dict] = []
     for item in body.files:
@@ -333,7 +412,11 @@ async def upload_commit(
         if token_data["store_uri"] != item.store_uri:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
         # 合并 commit 请求中的 chunk 信息（优先使用请求中的值）
-        token_data["_logical_file_id"] = item.logical_file_id or token_data.get("logical_file_id")
+        stored_logical_file_id = token_data.get("logical_file_id")
+        if stored_logical_file_id and item.logical_file_id and stored_logical_file_id != item.logical_file_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
+        logical_file_id = item.logical_file_id or stored_logical_file_id or str(uuid.uuid4())
+        token_data["_logical_file_id"] = str(_parse_uuid(logical_file_id, "logical_file_id"))
         token_data["_chunk_index"] = item.chunk_index
         token_data["_chunk_total"] = item.chunk_total
         file_infos.append(token_data)
@@ -343,11 +426,20 @@ async def upload_commit(
     user_id = file_infos[0].get("user_id") if file_infos else (str(user.id) if user else None)
     total_bytes = sum(f["file_size"] for f in file_infos)
 
-    # --- 活跃分享数限制 ---
-    from app.db.session import get_session_factory
-    from app.models.share import Share, ShareFile
+    file_groups: dict[str, list[dict]] = {}
+    first_seen_logical_ids: list[str] = []
+    for info in file_infos:
+        logical_file_id = info["_logical_file_id"]
+        if logical_file_id not in file_groups:
+            file_groups[logical_file_id] = []
+            first_seen_logical_ids.append(logical_file_id)
+        file_groups[logical_file_id].append(info)
+    missing_logical_files = set(logical_file_specs) - set(file_groups)
+    if missing_logical_files:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件与上传分片不匹配")
 
-    factory = get_session_factory()
+    # --- 活跃分享数限制 ---
+    created_logical_file_count = 0
     async with factory() as db:
         quota_config = await get_quota_config(db)
         active_count = await _count_active_shares(db, user_id=user_id, ip=ip)
@@ -404,31 +496,76 @@ async def upload_commit(
             ip_created_from=ip,
             total_bytes=total_bytes,
             empty_dirs=empty_dirs,
+            upload_batch_id=upload_batch_id,
             password_hash=password_hash,
             expires_at=expires_at,
             max_downloads=body.max_downloads,
             revoke_token=revoke_token,
         )
-        for idx, info in enumerate(file_infos):
-            import uuid as _uuid
-            logical_fid = info.get("_logical_file_id")
-            logical_file_uuid = _uuid.UUID(logical_fid) if logical_fid else None
-            chunk_idx = info.get("_chunk_index", idx)
-            chunk_tot = info.get("_chunk_total", 1)
+        ordered_logical_ids = [
+            str(_parse_uuid(item.logical_file_id, "logical_file_id"))
+            for item in body.logical_files
+            if str(_parse_uuid(item.logical_file_id, "logical_file_id")) in file_groups
+        ]
+        ordered_logical_ids.extend(
+            logical_id for logical_id in first_seen_logical_ids if logical_id not in set(ordered_logical_ids)
+        )
+        created_logical_file_count = len(ordered_logical_ids)
 
-            sf = ShareFile(
+        for sort_index, logical_id in enumerate(ordered_logical_ids):
+            group = sorted(file_groups[logical_id], key=lambda item: item.get("_chunk_index", 0))
+            first = group[0]
+            chunk_total = int(first.get("_chunk_total") or len(group))
+            chunk_indexes = [int(item.get("_chunk_index", 0)) for item in group]
+            if chunk_indexes != list(range(chunk_total)):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "分片不完整，请重新上传")
+            declared = logical_file_specs.get(logical_id)
+            declared_chunk_total = getattr(declared, "chunk_total", chunk_total)
+            if declared_chunk_total != chunk_total:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件与上传分片不匹配")
+            logical_size = sum(int(item["file_size"]) for item in group)
+            declared_size = getattr(declared, "file_size", logical_size)
+            if declared_size != logical_size:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件大小与上传分片不匹配")
+
+            logical_file = ShareLogicalFile(
+                id=uuid.UUID(logical_id),
                 share=share,
-                original_name=info["file_name"],
-                size=info["file_size"],
-                tos_uri=info["store_uri"],
-                content_type=info.get("content_type") or None,
-                chunk_index=chunk_idx,
-                chunk_total=chunk_tot,
-                logical_file_id=logical_file_uuid,
+                sort_index=sort_index,
+                original_name=getattr(declared, "file_name", first["file_name"]),
+                size=logical_size,
+                content_type=(getattr(declared, "content_type", "") or first.get("content_type") or None),
+                chunk_total=chunk_total,
+                media_metadata=_sanitize_media_metadata(getattr(declared, "media_metadata", None)),
             )
-            db.add(sf)
+            db.add(logical_file)
+            for info in group:
+                sf = ShareFile(
+                    share=share,
+                    logical_file=logical_file,
+                    original_name=info["file_name"],
+                    size=info["file_size"],
+                    tos_uri=info["store_uri"],
+                    content_type=info.get("content_type") or None,
+                    chunk_index=info.get("_chunk_index", 0),
+                    chunk_total=chunk_total,
+                    logical_file_id=logical_file.id,
+                )
+                db.add(sf)
         db.add(share)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            if upload_batch_id:
+                existing_share = await db.scalar(
+                    select(Share)
+                    .options(selectinload(Share.files), selectinload(Share.logical_files))
+                    .where(Share.upload_batch_id == upload_batch_id)
+                )
+                if existing_share:
+                    return _upload_commit_response(settings, existing_share)
+            raise
         await db.refresh(share)
 
     # --- 扣减配额 ---
@@ -445,17 +582,7 @@ async def upload_commit(
     for item in body.files:
         await redis.delete(f"nyy:commit:{item.commit_token}")
 
-    share_url = f"{settings.app_base_url}/{share_code}"
-    # 计算逻辑文件数（按 logical_file_id 分组，无 ID 的各算一个）
-    logical_ids = set()
-    standalone_count = 0
-    for info in file_infos:
-        lfid = info.get("_logical_file_id")
-        if lfid:
-            logical_ids.add(lfid)
-        else:
-            standalone_count += 1
-    logical_file_count = len(logical_ids) + standalone_count
+    logical_file_count = created_logical_file_count
     log.info("share created: code=%s logical_files=%d chunks=%d size=%d", share_code, logical_file_count, len(file_infos), total_bytes)
 
-    return UploadCommitResponse(share_code=share_code, share_url=share_url, file_count=logical_file_count, revoke_token=revoke_token)
+    return _upload_commit_response(settings, share, file_count=logical_file_count)

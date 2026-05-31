@@ -21,6 +21,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   const data = event.data || {};
+  const sourceClientId = event.source?.id || null;
   if (data.type === "NYY_DEBUG_ENABLE" && event.source?.id) {
     debugClientIds.add(event.source.id);
     event.ports?.[0]?.postMessage({ ok: true });
@@ -37,13 +38,13 @@ self.addEventListener("message", (event) => {
       fileName: data.file.fileName,
       fileSize: data.file.fileSize,
       chunks: data.file.chunks?.length || 0,
-    });
+    }, sourceClientId);
     event.ports?.[0]?.postMessage({ ok: true, id: data.id });
   } else if (data.type === "UNREGISTER_VIRTUAL_FILE" && data.id) {
     const file = files.get(data.id);
     if (file) purgeRangeCache(file.cacheKey);
     files.delete(data.id);
-    postDebug("sw", "unregister", { id: data.id });
+    postDebug("sw", "unregister", { id: data.id }, sourceClientId);
     event.ports?.[0]?.postMessage({ ok: true, id: data.id });
   }
 });
@@ -51,7 +52,7 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (!url.pathname.startsWith("/__nyy_virtual_media__/")) return;
-  event.respondWith(handleVirtualMediaRequest(event.request, url));
+  event.respondWith(handleVirtualMediaRequest(event.request, url, event.clientId || null));
 });
 
 function normalizeFile(file, id) {
@@ -86,7 +87,7 @@ function purgeRangeCache(cacheKey) {
   rangeCacheBytes = Math.max(0, rangeCacheBytes);
 }
 
-function getRangeCacheEntry(cacheKey, start, end, shouldLog = true) {
+function getRangeCacheEntry(cacheKey, start, end, shouldLog = true, targetClientId = null) {
   const entries = Array.from(rangeCache.entries()).reverse();
   for (const [key, entry] of entries) {
     if (entry.cacheKey !== cacheKey || entry.start > start || entry.end < start) continue;
@@ -101,14 +102,14 @@ function getRangeCacheEntry(cacheKey, start, end, shouldLog = true) {
         bytes: bytes.byteLength,
         cacheBytes: rangeCacheBytes,
         entries: rangeCache.size,
-      });
+      }, targetClientId);
     }
     return { start, end: sliceEnd, bytes };
   }
   return null;
 }
 
-function putRangeCacheEntry(cacheKey, start, end, bytes) {
+function putRangeCacheEntry(cacheKey, start, end, bytes, targetClientId = null) {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength !== end - start + 1) return;
   const existingCover = getRangeCacheEntry(cacheKey, start, end, false);
   if (existingCover && existingCover.end >= end) return;
@@ -130,7 +131,7 @@ function putRangeCacheEntry(cacheKey, start, end, bytes) {
       bytes: oldestEntry.bytes.byteLength,
       cacheBytes: Math.max(0, rangeCacheBytes),
       entries: rangeCache.size,
-    });
+    }, targetClientId);
   }
   postDebug("sw", "cache:store", {
     cursorStart: start,
@@ -138,7 +139,7 @@ function putRangeCacheEntry(cacheKey, start, end, bytes) {
     bytes: bytes.byteLength,
     cacheBytes: Math.max(0, rangeCacheBytes),
     entries: rangeCache.size,
-  });
+  }, targetClientId);
 }
 
 function joinUint8Arrays(chunks, totalBytes) {
@@ -163,11 +164,12 @@ function makeCachedReader(bytes) {
   };
 }
 
-function postDebug(scope, event, data) {
+function postDebug(scope, event, data, targetClientId = null) {
   if (debugClientIds.size === 0) return;
   self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
     for (const client of clients) {
       if (!debugClientIds.has(client.id)) continue;
+      if (targetClientId && client.id !== targetClientId) continue;
       client.postMessage({
         type: "NYY_DEBUG_LOG",
         ts: Date.now(),
@@ -179,7 +181,7 @@ function postDebug(scope, event, data) {
   }).catch(() => {});
 }
 
-async function handleVirtualMediaRequest(request, url) {
+async function handleVirtualMediaRequest(request, url, targetClientId = null) {
   const id = decodeURIComponent(url.pathname.split("/")[2] || "");
   const file = files.get(id);
   if (!file) {
@@ -212,7 +214,7 @@ async function handleVirtualMediaRequest(request, url) {
     return new Response(null, { status: 206, headers });
   }
 
-  const body = makeRangeStream(file, range.start, range.end, request.signal);
+  const body = makeRangeStream(file, range.start, range.end, request.signal, targetClientId);
   return new Response(body, { status: 206, headers });
 }
 
@@ -235,7 +237,8 @@ function parseRange(header, fileSize) {
   return { start, end: Math.min(end, fileSize - 1) };
 }
 
-function makeRangeStream(file, start, end, signal) {
+function makeRangeStream(file, start, end, signal, targetClientId = null) {
+  const debug = (event, data) => postDebug("sw", event, data, targetClientId);
   let cursor = start;
   let activeReader = null;
   let activeSliceMeta = null;
@@ -294,7 +297,7 @@ function makeRangeStream(file, start, end, signal) {
   }
 
   function logConcurrency(reason) {
-    postDebug("sw", "concurrency", {
+    debug("concurrency", {
       reason,
       desiredConcurrency,
       avgMibps: recentThroughputsMibps.length ? Number((recentThroughputsMibps.reduce((sum, value) => sum + value, 0) / recentThroughputsMibps.length).toFixed(2)) : null,
@@ -311,7 +314,7 @@ function makeRangeStream(file, start, end, signal) {
     }
     const previousConcurrency = desiredConcurrency;
     recalculateConcurrency();
-    postDebug("sw", "slice:done", {
+    debug("slice:done", {
       sliceIndex,
       bytesRead,
       durationMs: Math.round(durationMs),
@@ -326,7 +329,7 @@ function makeRangeStream(file, start, end, signal) {
     if (streamClosed) return null;
     if (cursor > end) return null;
     if (signal && signal.aborted) return null;
-    const cached = getRangeCacheEntry(file.cacheKey, cursor, end);
+    const cached = getRangeCacheEntry(file.cacheKey, cursor, end, true, targetClientId);
     if (cached) {
       const currentSliceIndex = sliceIndex++;
       cursor = cached.end + 1;
@@ -343,7 +346,7 @@ function makeRangeStream(file, start, end, signal) {
     const chunk = file.chunks.find((item) => item.start <= cursor && item.end >= cursor);
     if (!chunk) {
       cursor = end + 1;
-      postDebug("sw", "range:error", { start, end, cursor, reason: "no-backing-chunk" });
+      debug("range:error", { start, end, cursor, reason: "no-backing-chunk" });
       return Promise.resolve({ error: new Error(`No backing chunk for offset ${cursor}`) });
     }
     const sliceSize = cursor === start ? FIRST_FETCH_SLICE_SIZE : FETCH_SLICE_SIZE;
@@ -356,7 +359,7 @@ function makeRangeStream(file, start, end, signal) {
     const currentSliceIndex = sliceIndex++;
     cursor = globalEnd + 1;
 
-    postDebug("sw", "slice:start", {
+    debug("slice:start", {
       sliceIndex: currentSliceIndex,
       cursorStart: globalStart,
       cursorEnd: globalEnd,
@@ -385,12 +388,12 @@ function makeRangeStream(file, start, end, signal) {
       signal: abortController.signal,
     }).then((resp) => {
       if (!resp.ok && resp.status !== 206) {
-        postDebug("sw", "slice:response-error", { sliceIndex: currentSliceIndex, status: resp.status });
+        debug("slice:response-error", { sliceIndex: currentSliceIndex, status: resp.status });
         cleanup();
         return { error: new Error(`Backing chunk fetch failed: HTTP ${resp.status}`) };
       }
       if (!resp.body) {
-        postDebug("sw", "slice:response-error", { sliceIndex: currentSliceIndex, reason: "no-body" });
+        debug("slice:response-error", { sliceIndex: currentSliceIndex, reason: "no-body" });
         cleanup();
         return { error: new Error("Backing chunk fetch has no body") };
       }
@@ -399,7 +402,7 @@ function makeRangeStream(file, start, end, signal) {
         cleanup();
         return { done: true };
       }
-      postDebug("sw", "slice:response", { sliceIndex: currentSliceIndex, status: resp.status });
+      debug("slice:response", { sliceIndex: currentSliceIndex, status: resp.status });
       return {
         reader: resp.body.getReader(),
         startedAt,
@@ -467,7 +470,7 @@ function makeRangeStream(file, start, end, signal) {
             cleanup: slot.cleanup,
           };
           fillQueue();
-          postDebug("sw", "slice:reader-open", {
+          debug("slice:reader-open", {
             plannedBytes: slot.plannedBytes,
             desiredConcurrency,
             queueDepth: readerQueue.length,
@@ -487,6 +490,7 @@ function makeRangeStream(file, start, end, signal) {
                     activeSliceMeta.cursorStart,
                     activeSliceMeta.cursorEnd,
                     joinUint8Arrays(activeSliceMeta.cacheChunks, activeSliceMeta.bytesRead),
+                    targetClientId,
                   );
                 }
                 recordSliceThroughput(activeSliceMeta.sliceIndex, activeSliceMeta.bytesRead, performance.now() - activeSliceMeta.startedAt);
@@ -494,7 +498,7 @@ function makeRangeStream(file, start, end, signal) {
             }
             releaseActiveReader();
             fillQueue();
-            postDebug("sw", "slice:stream-done", { desiredConcurrency, queueDepth: readerQueue.length });
+            debug("slice:stream-done", { desiredConcurrency, queueDepth: readerQueue.length });
             continue; // move to next reader in queue
           }
           try {
@@ -509,7 +513,7 @@ function makeRangeStream(file, start, end, signal) {
           }
           if (activeSliceMeta && !activeSliceMeta.firstChunkLogged) {
             activeSliceMeta.firstChunkLogged = true;
-            postDebug("sw", "slice:first-chunk", {
+            debug("slice:first-chunk", {
               sliceIndex: activeSliceMeta.sliceIndex,
               bytes: value.byteLength,
               firstChunkMs: Math.round(performance.now() - activeSliceMeta.startedAt),
@@ -521,7 +525,7 @@ function makeRangeStream(file, start, end, signal) {
           releaseActiveReader();
           if (streamClosed) { markStreamClosed(); return; }
           if (isAbortError(err) || isClosedStreamError(err)) { closeStream(controller); return; }
-          postDebug("sw", "slice:error", { error: err instanceof Error ? err.message : String(err) });
+          debug("slice:error", { error: err instanceof Error ? err.message : String(err) });
           errorStream(controller, err);
           return;
         }
@@ -529,7 +533,7 @@ function makeRangeStream(file, start, end, signal) {
     },
     cancel() {
       markStreamClosed();
-      postDebug("sw", "stream:cancel", { desiredConcurrency });
+      debug("stream:cancel", { desiredConcurrency });
     },
   });
 }

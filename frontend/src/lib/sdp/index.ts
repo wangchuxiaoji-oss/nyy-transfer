@@ -1,0 +1,15 @@
+/**
+ * SDP v2 — Public API
+ */
+export { PlayerEngine } from "./player-engine";
+export { PlaybackClock } from "./clock";
+export { SdpDemuxer } from "./demuxer";
+export { VideoRenderer } from "./video-renderer";
+export { AudioRenderer } from "./audio-renderer";
+export type {
+  PlayerState,
+  PlayerEvents,
+  PlayerConfig,
+  VideoTrackInfo,
+  AudioTrackInfo,
+} from "./types";

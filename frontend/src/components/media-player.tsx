@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useLayoutEffect } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import { createVirtualMediaFileId, registerVirtualMediaFile } from "@/lib/virtual-media";
-import { canNativePlayAc3, decodeAc3Window, hasAc3AudioTrack } from "@/lib/ac3-sidecar";
+import { canNativePlayAc3, decodeAc3Window } from "@/lib/ac3-sidecar";
 import type { DebugLogFn } from "@/lib/debug";
 
 const VIDEO_EXTS = ["mp4", "webm", "ogg", "mov"];
 const AUDIO_EXTS = ["mp3", "aac", "ogg", "wav", "flac", "m4a"];
+const usePlyrEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function getMediaType(fileName: string): "video" | "audio" | null {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
@@ -30,7 +31,7 @@ export function MediaPlayer({ file, className = "", debugLog }: MediaPlayerProps
 
   const mediaType = getMediaType(file.file_name);
 
-  useEffect(() => {
+  usePlyrEffect(() => {
     if (!mediaRef.current || !mediaType) return;
     let cancelled = false;
 
@@ -48,7 +49,7 @@ export function MediaPlayer({ file, className = "", debugLog }: MediaPlayerProps
 
     return () => {
       cancelled = true;
-      plyrRef.current?.destroy();
+      try { plyrRef.current?.destroy(); } catch {}
       plyrRef.current = null;
     };
   }, [mediaType]);
@@ -171,7 +172,8 @@ function NativeRangeChunkedMediaPlayer({
       const virtualFileId = getOrCreateVirtualFileId();
       const url = await registerVirtualMediaFile(file, `range-${file.file_name}`, debugLog, virtualFileId);
       setSourceUrl(url);
-      const needsSidecar = mediaType === "video" && await hasAc3AudioTrack(file) && !canNativePlayAc3();
+      const sidecarDecision = decideSidecar(file, mediaType);
+      const needsSidecar = sidecarDecision.needsSidecar;
       setNeedsSidecarAc3(needsSidecar);
       if (needsSidecar) {
         (el as HTMLVideoElement).muted = true;
@@ -179,6 +181,7 @@ function NativeRangeChunkedMediaPlayer({
       } else {
         setModeLabel("native-muxed");
       }
+      debugLog?.("player", "sidecar:decision", sidecarDecision.debugData);
       debugLog?.("player", "init:done", { sourceUrl: url, needsSidecar });
       setLoading(false);
     } catch (err) {
@@ -376,8 +379,8 @@ function NativeRangeChunkedMediaPlayer({
     };
   }, [debugLog, mediaType, needsSidecarAc3, startSidecarAudioWindow, stopSidecarAudio]);
 
-  useEffect(() => {
-    if (!mediaRef.current || !mediaType) return;
+  usePlyrEffect(() => {
+    if (!mediaRef.current || !mediaType || loading || fallbackToMse || !sourceUrl) return;
     let cancelled = false;
     import("plyr").then(({ default: Plyr }) => {
       if (cancelled || !mediaRef.current) return;
@@ -393,10 +396,10 @@ function NativeRangeChunkedMediaPlayer({
 
     return () => {
       cancelled = true;
-      plyrRef.current?.destroy();
+      try { plyrRef.current?.destroy(); } catch {}
       plyrRef.current = null;
     };
-  }, [mediaType]);
+  }, [fallbackToMse, loading, mediaType, sourceUrl]);
 
   // Sync Plyr volume/mute to sidecar WebAudio GainNode
   // The <video> stays muted (Chrome can't decode AC-3 natively), but Plyr's
@@ -529,6 +532,51 @@ function NativeRangeChunkedMediaPlayer({
 }
 
 // ─── Helpers ───
+
+function decideSidecar(file: ShareFileDownload, mediaType: "video" | "audio"): {
+  needsSidecar: boolean;
+  debugData: Record<string, unknown>;
+} {
+  const metadata = file.media_metadata;
+  const audioCodecs = (metadata?.audio_tracks || [])
+    .map((track) => (track.codec || track.codec_tag || "").toLowerCase())
+    .filter(Boolean);
+  const hasBrowserFriendlyAudio = audioCodecs.some((codec) => /^(mp4a|aac|mp3|opus|vorbis|flac|alac)/.test(codec));
+  const hasAc3Audio = audioCodecs.some((codec) => /^(ac-3|ec-3)$/.test(codec));
+  let sidecarDecision = "native-muxed";
+  let reason = "default-native";
+
+  if (mediaType === "video" && metadata?.probe_status === "ok") {
+    if (hasBrowserFriendlyAudio) {
+      reason = "browser-friendly-audio-track";
+    } else if (hasAc3Audio && !canNativePlayAc3()) {
+      sidecarDecision = "native-video + wasm-ac3";
+      reason = "ac3-without-native-support";
+    } else if (hasAc3Audio) {
+      reason = "native-ac3-supported";
+    } else if (audioCodecs.length > 0) {
+      reason = "unsupported-audio-no-sidecar";
+    } else {
+      reason = "no-audio-metadata";
+    }
+  } else if (metadata?.probe_status === "failed") {
+    reason = "metadata-failed-native-fallback";
+  }
+
+  return {
+    needsSidecar: sidecarDecision === "native-video + wasm-ac3",
+    debugData: {
+      metadataSource: metadata?.probe_source || null,
+      probeStatus: metadata?.probe_status || null,
+      moovOffset: metadata?.moov_offset ?? null,
+      moovSize: metadata?.moov_size ?? null,
+      isFastStart: metadata?.is_faststart ?? null,
+      audioCodecs,
+      sidecarDecision,
+      reason,
+    },
+  };
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";

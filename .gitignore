@@ -10,6 +10,8 @@ pgdata/
 redisdata/
 var/
 logs/
+backend/runtime/
+video-inspect-results/
 *.log
 *.db
 *.sqlite*
