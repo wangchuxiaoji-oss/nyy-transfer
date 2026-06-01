@@ -132,6 +132,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
               step={0.1}
               value={Number.isFinite(sliderValue) ? sliderValue : 0}
               disabled={!view.canSeek}
+              aria-label="播放进度"
               onMouseDown={() => { setScrubbing(true); setScrubValue(view.currentTime); }}
               onTouchStart={() => { setScrubbing(true); setScrubValue(view.currentTime); }}
               onChange={(event) => setScrubValue(Number(event.target.value))}

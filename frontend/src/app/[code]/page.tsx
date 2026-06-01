@@ -59,6 +59,11 @@ interface DebugStatus {
   sdpThroughputRatio: number | null;
 }
 
+type SharePageDebugWindow = Window & {
+  __nyyDebugEntries?: DebugEntry[];
+  __nyyDebugStatus?: DebugStatus;
+};
+
 export default function SharePage() {
   const passwordInputId = useId();
   const shouldReduceMotion = useReducedMotion();
@@ -187,7 +192,11 @@ export default function SharePage() {
     if (!debugEnabled) return;
     const line = formatDebugLine(entry.elapsedMs, entry.scope, entry.event, entry.data);
     const fullEntry = { ...entry, line };
-    setDebugEntries((entries) => [...entries.slice(-(DEBUG_LOG_LIMIT - 1)), fullEntry]);
+    setDebugEntries((entries) => {
+      const nextEntries = [...entries.slice(-(DEBUG_LOG_LIMIT - 1)), fullEntry];
+      (window as SharePageDebugWindow).__nyyDebugEntries = nextEntries;
+      return nextEntries;
+    });
     enqueueRemoteDebugEntry(fullEntry);
     setDebugStatus((status) => {
       let next = status;
@@ -260,7 +269,9 @@ export default function SharePage() {
           sdpFileSize: typeof entry.data.fileSize === "number" ? entry.data.fileSize : next.sdpFileSize,
         };
       }
-      return { ...next, lastScope: entry.scope, lastEvent: entry.event };
+      const nextStatus = { ...next, lastScope: entry.scope, lastEvent: entry.event };
+      (window as SharePageDebugWindow).__nyyDebugStatus = nextStatus;
+      return nextStatus;
     });
   }, [debugEnabled, enqueueRemoteDebugEntry]);
 
@@ -302,7 +313,12 @@ export default function SharePage() {
     debugStartPerfRef.current = performance.now();
     debugStartWallRef.current = Date.now();
     const mode = new URLSearchParams(window.location.search).get("sw") === "legacy" ? "legacy" : "optimized";
-    setDebugStatus((status) => ({ ...status, mode }));
+    (window as SharePageDebugWindow).__nyyDebugEntries = [];
+    setDebugStatus((status) => {
+      const nextStatus = { ...status, mode };
+      (window as SharePageDebugWindow).__nyyDebugStatus = nextStatus;
+      return nextStatus;
+    });
     appendDebugLog("page", "debug:on", {
       url: window.location.href,
       mode,

@@ -17,12 +17,17 @@ import { runAudioContextSuspendProbe } from "./audio-context-probe";
 import { MkvSeekIndex } from "./mkv-seek-index";
 
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
+type MbDecodedSample = InstanceType<typeof import("mediabunny").AudioSample>;
 
 const VIDEO_KEY_CACHE_MAX_ENTRIES = 24;
 const VIDEO_KEY_CACHE_MAX_REWIND_SEC = 15;
 const VIDEO_KEY_INFLIGHT_REUSE_DISTANCE_SEC = 0.25;
 const RECOVERY_BUFFER_TARGET_SEC = 3;
 const SOURCE_READ_SPEED_STALE_MS = 2000;
+const AC3_AUDIO_MAX_BUFFERED_AHEAD_SEC = 30;
+const SOURCE_READ_PARALLEL_PARTS = 8;
+const SOURCE_READ_PARALLEL_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const SEEK_READ_PARALLEL_THRESHOLD_BYTES = 512 * 1024;
 
 interface SeekBufferingState {
   startSec: number | null;
@@ -71,11 +76,7 @@ export class PlayerEngine {
   /** MKV Cues seek index (read-only validation probe; null when absent). */
   private mkvSeekIndex: MkvSeekIndex | null = null;
 
-  /**
-   * Number of parallel connections used to download the target cluster during
-   * seek. 1 disables parallel splitting. Defaults to 4 (validated to be ~2-3x
-   * faster and more stable on rate-capped CDNs).
-   */
+  /** seek 定位目标 cluster 时使用的并发连接数；1 表示关闭并发切分。 */
   private seekParallelParts = 4;
 
   /**
@@ -134,6 +135,7 @@ export class PlayerEngine {
     this.setState("loading");
     try {
       await this.demuxer.init();
+      this.enableNormalSourceReadMode();
     } catch (err) {
       // If disposed during init (e.g. React StrictMode unmount), silently bail
       if (this.disposed) return;
@@ -158,15 +160,17 @@ export class PlayerEngine {
       return;
     }
 
-    if (typeof AudioDecoder === "undefined" || typeof AudioDecoder.isConfigSupported !== "function") {
-      this.handleError("SDP v2 需要 WebCodecs AudioDecoder；当前浏览器不支持音频主时钟");
-      return;
-    }
+    if (!this.audioInfo.needsAlternateDecoder) {
+      if (typeof AudioDecoder === "undefined" || typeof AudioDecoder.isConfigSupported !== "function") {
+        this.handleError("SDP v2 需要 WebCodecs AudioDecoder；当前浏览器不支持音频主时钟");
+        return;
+      }
 
-    const audioSupport = await AudioDecoder.isConfigSupported(this.audioInfo.decoderConfig).catch(() => null);
-    if (!audioSupport?.supported) {
-      this.handleError("SDP v2 需要可解码音频轨；当前音频配置不受支持，已禁用 SDP");
-      return;
+      const audioSupport = await AudioDecoder.isConfigSupported(this.audioInfo.decoderConfig).catch(() => null);
+      if (!audioSupport?.supported) {
+        this.handleError("SDP v2 需要可解码音频轨；当前音频配置不受支持，已禁用 SDP");
+        return;
+    }
     }
 
     // Configure video renderer
@@ -176,17 +180,21 @@ export class PlayerEngine {
 
     // Configure audio renderer
     this.audioRenderer = new AudioRenderer();
-    await this.audioRenderer.configure(this.audioInfo.decoderConfig);
+    if (this.audioInfo.needsAlternateDecoder) {
+      await this.audioRenderer.configureAlternate(this.audioInfo.sampleRate);
+    } else {
+      await this.audioRenderer.configure(this.audioInfo.decoderConfig);
+    }
     this.clock.setAudioTimeProvider(() => this.audioRenderer?.getCurrentAudioTimeSec() ?? -1);
 
-    // Create preload buffers
+    // Create preload buffers (video always; audio only for standard decoder path)
     this.videoBuffer = new PacketBuffer({
       label: "video",
       maxAheadSec: 30,
       onPacket: (packet) => this.cacheVideoKeyPacketIfNeeded(packet),
       debugLog: this.debugLog,
     });
-    this.audioBuffer = new PacketBuffer({
+    this.audioBuffer = this.audioInfo.needsAlternateDecoder ? null : new PacketBuffer({
       label: "audio",
       maxAheadSec: 30,
       debugLog: this.debugLog,
@@ -255,7 +263,11 @@ export class PlayerEngine {
       } else {
         // Fresh start or post-seek — set baseline and start feeding
         await this.audioRenderer.play();
-        void this.feedAudioLoop(epoch, this.resumeAudioPacket ?? undefined);
+        if (this.audioInfo?.needsAlternateDecoder) {
+          void this.feedAc3AudioLoop(epoch);
+        } else {
+          void this.feedAudioLoop(epoch, this.resumeAudioPacket ?? undefined);
+        }
         this.resumeAudioPacket = null;
       }
       runAudioContextSuspendProbe(this.debugLog);
@@ -317,7 +329,15 @@ export class PlayerEngine {
         durationMs: Math.round(performance.now() - startedAt),
       });
       if (packet) {
-        void this.getVideoKeyPacketForSeek(packet.timestamp);
+        void this.getVideoKeyPacketForSeek(packet.timestamp).catch((err) => {
+          if (!this.disposed && generation === this.seekWarmupGeneration && epoch === this.playbackEpoch && !this.seeking) {
+            this.debugLog?.("sdp-v2", "seek:warmup-cache:error", {
+              target: +clamped.toFixed(3),
+              durationMs: Math.round(performance.now() - startedAt),
+              error: errMsg(err),
+            });
+          }
+        });
       }
     } catch (err) {
       if (!this.disposed && generation === this.seekWarmupGeneration && epoch === this.playbackEpoch && !this.seeking) {
@@ -414,7 +434,7 @@ export class PlayerEngine {
       let videoKeyResult: Awaited<ReturnType<PlayerEngine["getVideoKeyPacketForSeek"]>>;
       let audioPacket: MbEncodedPacket | null;
       let audioPacketMs: number;
-      if (this.seekParallelParts > 1) this.demuxer.setParallelMode(this.seekParallelParts);
+      if (this.seekParallelParts > 1) this.demuxer.setParallelMode(this.seekParallelParts, SEEK_READ_PARALLEL_THRESHOLD_BYTES);
       try {
         videoKeyResult = await this.getVideoKeyPacketForSeek(clamped);
 
@@ -424,7 +444,7 @@ export class PlayerEngine {
           : null;
         audioPacketMs = performance.now() - audioPacketStartPerf;
       } finally {
-        if (this.seekParallelParts > 1) this.demuxer.setParallelMode(1);
+        this.enableNormalSourceReadMode();
       }
       const videoKeyPacket = videoKeyResult.packet;
       const videoKeyMs = performance.now() - videoKeyStartPerf;
@@ -486,7 +506,12 @@ export class PlayerEngine {
         await nextAnimationFrame();
         if (this.audioRenderer) {
           await this.audioRenderer.play();
-          void this.feedAudioLoop(epoch, audioPacket ?? undefined);
+          if (this.audioInfo?.needsAlternateDecoder) {
+            this.debugLog?.("sdp-v2", "seek:start-ac3-feed", { epoch });
+            void this.feedAc3AudioLoop(epoch);
+          } else {
+            void this.feedAudioLoop(epoch, audioPacket ?? undefined);
+          }
         }
         this.setState("playing");
         this.clock.play(clamped);
@@ -552,6 +577,10 @@ export class PlayerEngine {
     // Stop buffer filling (which owns the underlying iterators)
     this.videoBuffer?.stopFilling();
     this.audioBuffer?.stopFilling();
+  }
+
+  private enableNormalSourceReadMode(): void {
+    this.demuxer.setParallelMode(SOURCE_READ_PARALLEL_PARTS, SOURCE_READ_PARALLEL_THRESHOLD_BYTES);
   }
 
   private async getVideoKeyPacketForSeek(targetSec: number): Promise<{
@@ -865,6 +894,98 @@ export class PlayerEngine {
       }
     } catch (err) {
       if (!this.disposed && epoch === this.playbackEpoch) {
+        this.debugLog?.("sdp-v2", "audio:error", { error: errMsg(err) });
+      }
+    } finally {
+      if (this.audioFeedEpoch === epoch) {
+        this.feedingAudio = false;
+        this.audioFeedEpoch = null;
+      }
+    }
+  }
+
+  /**
+   * Feed pre-decoded audio samples to the renderer (AC-3 / alternate-decoder path).
+   * No AudioDecoder or PacketBuffer — samples come directly from mediabunny's
+   * AudioSampleSink (which decodes via the registered custom decoder).
+   */
+  private async feedAc3AudioLoop(epoch: number) {
+    const sink = this.demuxer.getAudioSampleSink();
+    if (!sink || !this.audioRenderer) {
+      this.debugLog?.("sdp-v2", "audio:ac3:nosink", { epoch, sink: !!sink, renderer: !!this.audioRenderer });
+      return;
+    }
+    if (this.feedingAudio && this.audioFeedEpoch === epoch) {
+      this.debugLog?.("sdp-v2", "audio:ac3:skip-running", { epoch });
+      return;
+    }
+    this.feedingAudio = true;
+    this.audioFeedEpoch = epoch;
+    this.debugLog?.("sdp-v2", "audio:ac3:begin", { epoch, feedingAudio: this.feedingAudio });
+
+    try {
+      const clockNow = this.clock.getCurrentTimeSec();
+      const startSec = clockNow > 0 ? clockNow : undefined;
+
+      this.debugLog?.("sdp-v2", "audio:ac3:start", {
+        epoch,
+        startSec: startSec !== undefined ? +startSec.toFixed(3) : null,
+        clockSec: +this.clock.getCurrentTimeSec().toFixed(3),
+        state: this.state,
+      });
+
+      if (startSec !== undefined) {
+        this.audioRenderer!.setMediaStartSec(startSec);
+      }
+
+      let currentSample: MbDecodedSample | null = null;
+      let sampleCount = 0;
+      let lastScheduledAtMs = performance.now();
+      for await (currentSample of sink.samples(startSec)) {
+        if (this.disposed || epoch !== this.playbackEpoch) break;
+
+        const sampleTimeSec = currentSample.timestamp / 1_000_000;
+        const nowMs = performance.now();
+        const wallGapMs = Math.round(nowMs - lastScheduledAtMs);
+        lastScheduledAtMs = nowMs;
+
+        sampleCount++;
+        // 回压：如果已排程音频超过高水位，必须等 AudioContext 消耗回高水位以下。
+        // 只睡一次会让缓冲继续线性增长，拖动时需要停止成千上万个 SourceNode。
+        if (sampleCount % 50 === 0) {
+          while (!this.disposed && epoch === this.playbackEpoch) {
+            const snapshot = this.audioRenderer?.getClockSnapshot();
+            const bufferedSec = snapshot?.bufferedAheadSec ?? 0;
+            if (bufferedSec <= AC3_AUDIO_MAX_BUFFERED_AHEAD_SEC) break;
+            await sleep(200);
+          }
+        }
+        if (sampleCount <= 10 || sampleCount % 100 === 0 || wallGapMs > 500) {
+          const audioClock = this.audioRenderer?.getClockSnapshot();
+          this.debugLog?.("sdp-v2", "audio:ac3:schedule", {
+            sampleTime: +sampleTimeSec.toFixed(6),
+            clockSec: +this.clock.getCurrentTimeSec().toFixed(3),
+            audioClockSec: audioClock ? +audioClock.currentTimeSec.toFixed(3) : null,
+            bufferedAhead: audioClock ? +audioClock.bufferedAheadSec.toFixed(3) : null,
+            audioClockClamped: audioClock?.clamped ?? null,
+            count: sampleCount,
+            wallGapMs,
+          });
+        }
+        if (this.disposed || epoch !== this.playbackEpoch) break;
+
+        this.audioRenderer!.scheduleDecodedSample(currentSample);
+        currentSample = null;
+      }
+      // If the loop exited with an unconsumed sample, close it.
+      if (currentSample) {
+        try { currentSample.close(); } catch {}
+      }
+    } catch (err) {
+      // 新 seek 中断旧音频读取是预期取消；不要升级成页面级错误。
+      if (this.disposed || epoch !== this.playbackEpoch) {
+        this.debugLog?.("sdp-v2", "audio:ac3:cancelled", { epoch, error: errMsg(err) });
+      } else {
         this.debugLog?.("sdp-v2", "audio:error", { error: errMsg(err) });
       }
     } finally {

@@ -12,6 +12,10 @@ interface SdpPlayerProps {
   debugLog?: DebugLogFn;
 }
 
+type SdpDebugWindow = Window & {
+  __nyySdpSeek?: (seconds: number) => boolean;
+};
+
 export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PlayerEngine | null>(null);
@@ -44,6 +48,16 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     };
     engine.onError = (msg) => { if (!disposed) setError(msg); };
 
+    const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
+    if (debugEnabled) {
+      (window as SdpDebugWindow).__nyySdpSeek = (seconds) => {
+        const activeEngine = engineRef.current;
+        if (!activeEngine) return false;
+        void activeEngine.seek(seconds);
+        return true;
+      };
+    }
+
     engine.init().then(() => {
       if (!disposed && engine.state === "ready") {
         setDuration(engine.duration);
@@ -65,6 +79,9 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       probeRef.current = null;
       engine.dispose();
       engineRef.current = null;
+      if (debugEnabled && (window as SdpDebugWindow).__nyySdpSeek) {
+        delete (window as SdpDebugWindow).__nyySdpSeek;
+      }
     };
   }, [file, debugLog]);
 

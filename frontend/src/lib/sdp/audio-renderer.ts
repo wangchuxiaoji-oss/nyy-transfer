@@ -32,9 +32,6 @@ export class AudioRenderer {
   /** Configure audio decoder and create AudioContext */
   async configure(config: AudioDecoderConfig): Promise<AudioContext> {
     this.audioCtx = new AudioContext({ sampleRate: config.sampleRate });
-    this.gainNode = this.audioCtx.createGain();
-    this.gainNode.gain.value = this.muted ? 0 : this.volume;
-    this.gainNode.connect(this.audioCtx.destination);
     // Suspend immediately — we'll resume on play()
     // (Chrome auto-suspends anyway until user gesture)
 
@@ -47,6 +44,19 @@ export class AudioRenderer {
       },
     });
     this.decoder.configure(config);
+    return this.audioCtx;
+  }
+
+  /**
+   * Configure only AudioContext (no AudioDecoder). Used when the codec is
+   * not supported by browser's AudioDecoder (AC-3 path — decoded samples
+   * come via scheduleDecodedSample instead).
+   */
+  async configureAlternate(sampleRate: number): Promise<AudioContext> {
+    this.audioCtx = new AudioContext({ sampleRate });
+    this.gainNode = this.audioCtx.createGain();
+    this.gainNode.gain.value = this.muted ? 0 : this.volume;
+    this.gainNode.connect(this.audioCtx.destination);
     return this.audioCtx;
   }
 
@@ -63,6 +73,14 @@ export class AudioRenderer {
   /** Whether a valid playback baseline is set (false after reset) */
   hasBaseline(): boolean {
     return this.ctxStartTime >= 0;
+  }
+
+  /**
+   * Override the media start time anchor. Used when the codec's decoded
+   * samples don't carry meaningful timestamps (e.g. AC-3 via custom decoder).
+   */
+  setMediaStartSec(sec: number) {
+    if (sec >= 0) this.mediaStartSec = sec;
   }
 
   /** Pause audio output */
@@ -88,6 +106,31 @@ export class AudioRenderer {
   decode(chunk: EncodedAudioChunk) {
     if (!this.decoder || this.decoder.state !== "configured") return;
     this.decoder.decode(chunk);
+  }
+
+  /**
+   * Schedule a pre-decoded audio sample directly, bypassing AudioDecoder.
+   * Used when the codec is not supported by the browser's AudioDecoder
+   * (e.g. AC-3 decoded by mediabunny's registered custom decoder).
+   */
+  scheduleDecodedSample(sample: {
+    numberOfChannels: number;
+    numberOfFrames: number;
+    sampleRate: number;
+    timestamp: number;
+    duration: number;
+    copyTo: (destination: AllowSharedBufferSource, options: { planeIndex: number; format: "f32-planar" }) => void;
+    close: () => void;
+  }) {
+    const ctx = this.audioCtx;
+    if (!ctx || this.disposed || sample.numberOfFrames === 0) {
+      sample.close();
+      return;
+    }
+
+    // Use the same media time baseline logic as scheduleAudioData,
+    // but skip AudioData.close() since the caller owns the sample.
+    this.scheduleDecodedSampleInternal(ctx, sample);
   }
 
   /** Schedule decoded audio data for playback */
@@ -144,6 +187,84 @@ export class AudioRenderer {
     // Don't schedule if too far in the past (small jitter tolerance)
     if (scheduleAt < ctx.currentTime - 0.1) {
       return; // drop late audio
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.gainNode ?? ctx.destination);
+    source.onended = () => {
+      this.scheduledSources.delete(source);
+      try { source.disconnect(); } catch {}
+    };
+    this.scheduledSources.add(source);
+    source.start(scheduleAt);
+    this.scheduledEnd = scheduleAt + numberOfFrames / sampleRate;
+  }
+
+  /**
+   * Same scheduling logic as scheduleAudioData, but works on any sample
+   * implementing the Web Audio / mediabunny copyTo interface (f32-planar).
+   */
+  private scheduleDecodedSampleInternal(
+    ctx: AudioContext,
+    sample: {
+      numberOfChannels: number;
+      numberOfFrames: number;
+      sampleRate: number;
+      timestamp: number;
+      duration: number;
+      copyTo: (destination: AllowSharedBufferSource, options: { planeIndex: number; format: "f32-planar" }) => void;
+      close: () => void;
+    },
+  ) {
+    const { sampleRate, numberOfChannels, numberOfFrames, timestamp } = sample;
+
+    const mediaTimeSec = timestamp / 1_000_000;
+    // AC-3 samples carry near-zero timestamps (e.g. 300μs); mediaStartSec
+    // is set externally via setMediaStartSec. Use sequential scheduling.
+    const isSequential = mediaTimeSec < 0.01 && this.mediaStartSec >= 0;
+
+    if (this.mediaStartSec < 0) {
+      this.mediaStartSec = mediaTimeSec;
+    }
+
+    if (this.ctxStartTime < 0) {
+      sample.close();
+      return;
+    }
+
+    const buffer = ctx.createBuffer(numberOfChannels, numberOfFrames, sampleRate);
+    const tempBuf = new Float32Array(numberOfFrames);
+    for (let ch = 0; ch < numberOfChannels; ch++) {
+      sample.copyTo(tempBuf.buffer, { planeIndex: ch, format: "f32-planar" });
+      buffer.copyToChannel(tempBuf, ch);
+    }
+    sample.close();
+
+    let scheduleAt: number;
+    if (isSequential) {
+      scheduleAt = this.scheduledEnd;
+    } else {
+      const relativeMediaTime = mediaTimeSec - this.mediaStartSec;
+      scheduleAt = Math.max(
+        this.ctxStartTime + relativeMediaTime,
+        this.scheduledEnd,
+      );
+    }
+
+    const lagBehindNow = ctx.currentTime - scheduleAt;
+    if (lagBehindNow > 0.15) {
+      const scheduledEndMediaSec = this.mediaStartSec + Math.max(0, this.scheduledEnd - this.ctxStartTime);
+      this.ctxStartTime = ctx.currentTime;
+      if (!isSequential) this.mediaStartSec = mediaTimeSec;
+      else this.mediaStartSec = scheduledEndMediaSec;
+      this.scheduledEnd = ctx.currentTime;
+      scheduleAt = ctx.currentTime;
+    }
+
+    if (scheduleAt < ctx.currentTime - 0.1) {
+      sample.close();
+      return;
     }
 
     const source = ctx.createBufferSource();

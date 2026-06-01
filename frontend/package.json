@@ -10,11 +10,13 @@
     "test:edge-media": "echo 'MSE regression removed — use test:edge-native-range'",
     "test:edge-native-range": "node scripts/edge-native-range-regression.mjs",
     "test:mkv-drift": "node scripts/mkv-drift-regression.mjs",
+    "test:sdp-ac3-stress": "node scripts/sdp-ac3-stress-regression.mjs",
     "test:seek-patient": "node scripts/seek-stress-test.mjs --mode=patient",
     "test:seek-rapid": "node scripts/seek-stress-test.mjs --mode=rapid",
     "bench:buffer": "node scripts/buffer-benchmark.mjs"
   },
   "dependencies": {
+    "@mediabunny/ac3": "^1.45.4",
     "class-variance-authority": "^0.7.0",
     "client-zip": "^2.5.0",
     "clsx": "^2.1.0",
