@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,10 @@ from app.core.config import get_settings
 from app.core.deps import get_current_user_optional
 from app.models.user import User
 from app.schemas.upload import (
+    MultipartInitRequest,
+    MultipartInitResponse,
+    MultipartMergeRequest,
+    MultipartMergeResponse,
     UploadCommitRequest,
     UploadCommitResponse,
     UploadInitRequest,
@@ -41,6 +46,23 @@ _EMPTY_URI_PREFIX = "nyy-empty://"
 _MAX_EMPTY_DIRS = 500
 _MAX_EMPTY_DIR_PATH_LEN = 512
 _MAX_MEDIA_METADATA_BYTES = 64 * 1024
+
+# multipart 上传参数（经真机实测，见 docs/spike-multipart-upload.md）
+_PART_SIZE = 64 * 1024 * 1024            # 64MB 每片
+_MULTIPART_THRESHOLD = 20 * 1024 * 1024  # >20MB 走 multipart（后端阈值）
+_LARGE_FILE_SIZE = 1024 * 1024 * 1024    # 1GB，isLargeFile 分界
+
+# 真机实测：large file（gateway 模式）下，除最后一片外每个 part 必须 ≥ 5MB，
+# 否则 merge 会被服务端拒绝（TLB 500）。_PART_SIZE 远大于此，这里加断言防误改。
+_MIN_NON_LAST_PART_SIZE = 5 * 1024 * 1024
+assert _PART_SIZE >= _MIN_NON_LAST_PART_SIZE, "_PART_SIZE 必须 ≥ 5MB，否则大文件 merge 会 500"
+
+_CRC32_RE = re.compile(r"^[0-9a-f]{8}$")
+
+
+def _is_valid_crc32(value: str) -> bool:
+    """校验 CRC32 格式（8 位小写 hex）。"""
+    return bool(_CRC32_RE.match(value or ""))
 
 
 def _get_client_ip(request: Request) -> str:
@@ -355,6 +377,212 @@ async def upload_init(
 
 
 @router.post(
+    "/multipart-init",
+    response_model=MultipartInitResponse,
+    summary="发起 multipart 上传",
+)
+async def multipart_init(
+    body: MultipartInitRequest,
+    request: Request,
+    user: User | None = Depends(get_current_user_optional),
+):
+    """Step 1-alt: 大文件 multipart 上传初始化，返回 uploadID + TOS 凭证。"""
+    settings = get_settings()
+    ip = _get_client_ip(request)
+
+    # 大文件权限：>1GB 需登录
+    is_large_file = body.file_size > _LARGE_FILE_SIZE
+    if is_large_file and not user:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "上传超过 1GB 的文件需要登录")
+
+    # hCaptcha 校验（dev 环境跳过）
+    if not settings.is_dev and settings.hcaptcha_secret:
+        if not body.captcha_token:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先完成人机验证")
+
+    # 配额检查
+    redis = request.app.state.redis
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
+
+    request_owner_id = None
+    from app.services.quota import QuotaService
+    quota_svc = QuotaService(redis)
+    from app.db.session import get_session_factory
+    async with get_session_factory()() as db:
+        quota_config = await get_quota_config(db)
+        if body.request_code:
+            from sqlalchemy import select
+            from app.models.system import FileRequest
+            from app.utils.security import verify_secret
+            req = await db.scalar(select(FileRequest).where(
+                FileRequest.code == body.request_code, FileRequest.revoked_at.is_(None)
+            ))
+            if not req:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
+            if req.expires_at and req.expires_at < datetime.now(timezone.utc):
+                raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
+            if req.password_hash and not verify_secret(body.request_password, req.password_hash):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
+            request_owner_id = str(req.owner_id)
+        else:
+            active_user_id = str(user.id) if user else None
+            active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip)
+            max_shares = quota_config[
+                "user_max_active_shares" if active_user_id else "guest_max_active_shares"
+            ]
+            if active_count >= max_shares:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    _active_share_limit_message(active_count, max_shares),
+                )
+    if request_owner_id:
+        result = await quota_svc.check_user_with_config(request_owner_id, body.file_size, quota_config)
+    elif user:
+        result = await quota_svc.check_user_with_config(str(user.id), body.file_size, quota_config)
+    else:
+        result = await quota_svc.check_guest_with_config(ip, body.file_size, quota_config)
+    if result is not None and not result.allowed:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
+
+    # 调豆包：prepare/apply 拿 store_uri，再 init_multipart 拿 upload_id
+    try:
+        client = await get_doubao_client()
+        file_ext = body.file_ext or (body.file_name.rsplit(".", 1)[-1] if "." in body.file_name else "")
+        init_result = await client.init_upload(file_size=body.file_size, file_ext=file_ext)
+        upload_id = await client.init_multipart(
+            store_uri=init_result.store_uri,
+            tos_auth=init_result.authorization,
+            tos_host=init_result.tos_host,
+            is_large_file=is_large_file,
+        )
+    except DoubaoClientError as e:
+        log.error("multipart_init failed: %s", e)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试")
+
+    # 生成 commit_token + 存 Redis 会话
+    part_count = (body.file_size + _PART_SIZE - 1) // _PART_SIZE
+    part_number_base = 1 if is_large_file else 0
+    commit_token = secrets.token_urlsafe(32)
+    commit_token_expires_at = datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL
+
+    session_data = {
+        "ip": ip,
+        "user_id": request_owner_id or (str(user.id) if user else None),
+        "request_code": body.request_code or None,
+        "file_name": body.file_name,
+        "file_size": body.file_size,
+        "file_ext": body.file_ext,
+        "content_type": body.content_type,
+        "logical_file_id": body.logical_file_id,
+        "store_uri": init_result.store_uri,
+        "tos_host": init_result.tos_host,
+        "tos_auth": init_result.authorization,
+        "upload_id": upload_id,
+        "is_large_file": is_large_file,
+        "session_key": init_result.session_key,
+        "service_id": init_result.service_id,
+        "access_key": init_result.access_key,
+        "secret_key": init_result.secret_key,
+        "session_token": init_result.session_token,
+        "merged": False,
+        "is_empty": False,
+        "chunk_index": 0,
+        "chunk_total": 1,
+        "logical_file_size": body.file_size,
+    }
+    await redis.setex(
+        f"nyy:mpu:{commit_token}",
+        int(_COMMIT_TOKEN_TTL.total_seconds()),
+        json.dumps(session_data),
+    )
+
+    return MultipartInitResponse(
+        multipart_token=commit_token,
+        tos_host=init_result.tos_host,
+        store_uri=init_result.store_uri,
+        tos_auth=init_result.authorization,
+        upload_id=upload_id,
+        part_size=_PART_SIZE,
+        part_number_base=part_number_base,
+        part_count=part_count,
+        commit_token=commit_token,
+        commit_token_expires_at=commit_token_expires_at,
+    )
+
+
+@router.post(
+    "/multipart-merge",
+    response_model=MultipartMergeResponse,
+    summary="合并 multipart 分片",
+)
+async def multipart_merge(
+    body: MultipartMergeRequest,
+    request: Request,
+):
+    """Step 2-alt: 合并所有 part 为单个 TOS 对象。"""
+    redis = request.app.state.redis
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
+
+    raw = await redis.get(f"nyy:mpu:{body.multipart_token}")
+    if not raw:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传会话已过期，请重新上传")
+    session = json.loads(raw)
+
+    # 幂等：已 merge 直接返回
+    if session.get("merged"):
+        return MultipartMergeResponse(
+            commit_token=body.multipart_token,
+            commit_token_expires_at=datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL,
+        )
+
+    # 校验 part 数量
+    expected = (int(session["file_size"]) + _PART_SIZE - 1) // _PART_SIZE
+    if len(body.crc_list) != expected:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"分片数量不匹配，期望 {expected} 实际 {len(body.crc_list)}",
+        )
+    if any(not _is_valid_crc32(c) for c in body.crc_list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "分片校验值格式错误")
+
+    try:
+        client = await get_doubao_client()
+        await client.merge_multipart(
+            store_uri=session["store_uri"],
+            tos_auth=session["tos_auth"],
+            tos_host=session["tos_host"],
+            upload_id=session["upload_id"],
+            crc_list=body.crc_list,
+            is_large_file=bool(session.get("is_large_file")),
+        )
+    except DoubaoClientError as e:
+        # 记录完整诊断上下文，便于定位大文件 merge 500（part 数/大小/模式/对象）
+        log.error(
+            "multipart_merge failed: %s | file_size=%s parts=%d is_large=%s store_uri=%s upload_id=%s",
+            e,
+            session.get("file_size"),
+            len(body.crc_list),
+            bool(session.get("is_large_file")),
+            session.get("store_uri"),
+            session.get("upload_id"),
+        )
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "分片合并失败，请稍后重试")
+
+    session["merged"] = True
+    await redis.setex(
+        f"nyy:mpu:{body.multipart_token}",
+        int(_COMMIT_TOKEN_TTL.total_seconds()),
+        json.dumps(session),
+    )
+    return MultipartMergeResponse(
+        commit_token=body.multipart_token,
+        commit_token_expires_at=datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL,
+    )
+
+
+@router.post(
     "/commit",
     response_model=UploadCommitResponse,
     status_code=status.HTTP_201_CREATED,
@@ -404,13 +632,19 @@ async def upload_commit(
     # --- 验证所有 commit_token，收集文件信息 ---
     file_infos: list[dict] = []
     for item in body.files:
-        token_key = f"nyy:commit:{item.commit_token}"
-        raw = await redis.get(token_key)
+        raw = await redis.get(f"nyy:commit:{item.commit_token}")
+        is_mpu = False
+        if not raw:
+            raw = await redis.get(f"nyy:mpu:{item.commit_token}")
+            is_mpu = True
         if not raw:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传会话已过期，请重新选择文件上传")
         token_data = json.loads(raw)
+        if is_mpu and not token_data.get("merged"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "分片尚未合并，请先调用 merge")
         if token_data["store_uri"] != item.store_uri:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
+        token_data["_token_redis_key"] = f"nyy:mpu:{item.commit_token}" if is_mpu else f"nyy:commit:{item.commit_token}"
         # 合并 commit 请求中的 chunk 信息（优先使用请求中的值）
         stored_logical_file_id = token_data.get("logical_file_id")
         if stored_logical_file_id and item.logical_file_id and stored_logical_file_id != item.logical_file_id:
@@ -579,8 +813,10 @@ async def upload_commit(
         await quota_svc.consume_guest_with_config(ip, total_bytes, quota_config)
 
     # --- 删除所有 commit_token ---
-    for item in body.files:
-        await redis.delete(f"nyy:commit:{item.commit_token}")
+    for info in file_infos:
+        key = info.get("_token_redis_key")
+        if key:
+            await redis.delete(key)
 
     logical_file_count = created_logical_file_count
     log.info("share created: code=%s logical_files=%d chunks=%d size=%d", share_code, logical_file_count, len(file_infos), total_bytes)

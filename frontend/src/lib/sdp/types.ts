@@ -61,4 +61,7 @@ export interface AudioTrackInfo {
   sampleRate: number;
   numberOfChannels: number;
   decoderConfig: AudioDecoderConfig;
+  /** false when the browser's AudioDecoder can't handle this codec (e.g. AC-3);
+   *  alternate path uses mediabunny's own AudioSampleSink + registered decoder. */
+  needsAlternateDecoder: boolean;
 }

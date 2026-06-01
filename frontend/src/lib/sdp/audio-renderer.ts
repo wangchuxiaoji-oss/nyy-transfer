@@ -32,8 +32,10 @@ export class AudioRenderer {
   /** Configure audio decoder and create AudioContext */
   async configure(config: AudioDecoderConfig): Promise<AudioContext> {
     this.audioCtx = new AudioContext({ sampleRate: config.sampleRate });
-    // Suspend immediately — we'll resume on play()
-    // (Chrome auto-suspends anyway until user gesture)
+    // 创建 gainNode 用于音量控制（必须在 AudioDecoder 之前，确保 scheduleAudioData 能用）
+    this.gainNode = this.audioCtx.createGain();
+    this.gainNode.gain.value = this.muted ? 0 : this.volume;
+    this.gainNode.connect(this.audioCtx.destination);
 
     this.decoder = new AudioDecoder({
       output: (audioData) => {

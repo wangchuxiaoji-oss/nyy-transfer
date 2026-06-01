@@ -9,6 +9,11 @@ export interface StoredCommitItem extends CommitFileItem {
   commit_token_expires_at: string;
 }
 
+export interface MultipartPartState {
+  part_index: number;
+  crc32: string;
+}
+
 export interface UploadSessionFile {
   file_key: string;
   upload_name: string;
@@ -18,6 +23,20 @@ export interface UploadSessionFile {
   logical_file_id: string;
   chunk_total: number;
   commit_items: Array<StoredCommitItem | null>;
+  multipart?: {
+    multipart_token: string;
+    store_uri: string;
+    tos_host: string;
+    tos_auth: string;
+    upload_id: string;
+    part_size: number;
+    part_number_base: number;
+    part_count: number;
+    commit_token: string;
+    commit_token_expires_at: string;
+    parts: Array<MultipartPartState | null>;
+    merged: boolean;
+  };
 }
 
 export interface UploadSession {
@@ -162,6 +181,64 @@ export async function markUploadChunkComplete(
   } finally {
     db.close();
   }
+}
+
+async function mutateSessionFile(
+  uploadBatchId: string, fileKey: string,
+  mutate: (file: UploadSessionFile) => void,
+): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(uploadBatchId);
+      request.onsuccess = () => {
+        const session = request.result as UploadSession | undefined;
+        if (!session) { tx.abort(); return; }
+        const file = session.files.find((c) => c.file_key === fileKey);
+        if (!file) { tx.abort(); return; }
+        mutate(file);
+        session.updated_at = Date.now();
+        store.put(session);
+      };
+      request.onerror = () => tx.abort();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error("断点续传状态保存失败"));
+      tx.onabort = () => reject(tx.error || new Error("断点续传状态保存失败"));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function markMultipartInit(
+  uploadBatchId: string, fileKey: string,
+  mpu: NonNullable<UploadSessionFile["multipart"]>,
+): Promise<void> {
+  return mutateSessionFile(uploadBatchId, fileKey, (file) => { file.multipart = mpu; });
+}
+
+export async function markMultipartPartComplete(
+  uploadBatchId: string, fileKey: string, partIndex: number,
+  part: MultipartPartState,
+): Promise<void> {
+  return mutateSessionFile(uploadBatchId, fileKey, (file) => {
+    if (file.multipart) file.multipart.parts[partIndex] = part;
+  });
+}
+
+export async function markMultipartMerged(
+  uploadBatchId: string, fileKey: string,
+  commitToken: string, commitTokenExpiresAt: string,
+): Promise<void> {
+  return mutateSessionFile(uploadBatchId, fileKey, (file) => {
+    if (file.multipart) {
+      file.multipart.merged = true;
+      file.multipart.commit_token = commitToken;
+      file.multipart.commit_token_expires_at = commitTokenExpiresAt;
+    }
+  });
 }
 
 export function createUploadSession(params: {

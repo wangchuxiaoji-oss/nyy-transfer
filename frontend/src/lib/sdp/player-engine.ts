@@ -548,6 +548,8 @@ export class PlayerEngine {
       if (this.pendingSeekSec !== null) {
         const next = this.pendingSeekSec;
         this.pendingSeekSec = null;
+        // 恢复 playing 状态，让下一个 seek 的 wasPlaying 正确继承
+        if (wasPlaying && !this.disposed) this.setState("playing");
         void this.seek(next);
       } else if (autoResumeAfterError && !this.disposed) {
         void this.play();

@@ -16,6 +16,24 @@ export interface UploadInitResponse {
   commit_token_expires_at: string;
 }
 
+export interface MultipartInitResponse {
+  multipart_token: string;
+  tos_host: string;
+  store_uri: string;
+  tos_auth: string;
+  upload_id: string;
+  part_size: number;
+  part_number_base: number;
+  part_count: number;
+  commit_token: string;
+  commit_token_expires_at: string;
+}
+
+export interface MultipartMergeResponse {
+  commit_token: string;
+  commit_token_expires_at: string;
+}
+
 export interface CommitFileItem {
   commit_token: string;
   store_uri: string;
@@ -175,6 +193,32 @@ export async function uploadCommit(params: {
     body: JSON.stringify(params),
   });
   return handleResponse(res, "确认上传失败");
+}
+
+export async function multipartInit(body: {
+  file_name: string; file_size: number; file_ext: string; content_type: string;
+  logical_file_id: string; captcha_token?: string;
+  request_code?: string; request_password?: string;
+}): Promise<MultipartInitResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/api/v1/uploads/multipart-init`, {
+    method: "POST", headers, body: JSON.stringify(body),
+  });
+  return handleResponse<MultipartInitResponse>(res, "发起分片上传失败");
+}
+
+export async function multipartMerge(body: {
+  multipart_token: string; crc_list: string[];
+}): Promise<MultipartMergeResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/api/v1/uploads/multipart-merge`, {
+    method: "POST", headers, body: JSON.stringify(body),
+  });
+  return handleResponse<MultipartMergeResponse>(res, "分片合并失败");
 }
 
 export async function getShareInfo(code: string): Promise<ShareInfo> {

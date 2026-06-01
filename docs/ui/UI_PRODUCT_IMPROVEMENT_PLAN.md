@@ -81,9 +81,9 @@
 
 ## 后端与 API
 
-- `E:\dev\nyy\app\api\v1\my.py`：补充搜索、筛选、排序、分页。
-- `E:\dev\nyy\app\api\v1\file_requests.py`：补充分页；如需要撤销请求，增加 owner-only revoke API。
-- `E:\dev\nyy\app\api\v1\admin.py`：用户、分享、举报、邮件支持搜索、筛选、排序、分页。
+- `backend/app/api/v1/my.py`：补充搜索、筛选、排序、分页。
+- `backend/app/api/v1/file_requests.py`：补充分页；如需要撤销请求，增加 owner-only revoke API。
+- `backend/app/api/v1/admin.py`：用户、分享、举报、邮件支持搜索、筛选、排序、分页。
 - 相关 schema 需要返回 `total`、`page`、`page_size` 等分页信息。
 - `src/lib/auth.ts` 和 `src/lib/admin.ts` 需要同步支持 query 参数。
 - `tests/e2e_acceptance.py` 需要补充分页、筛选和清理覆盖。
@@ -106,11 +106,11 @@
 
 ### 后端接口
 
-- `E:\dev\nyy\app\api\v1\my.py`
-- `E:\dev\nyy\app\api\v1\file_requests.py`
-- `E:\dev\nyy\app\api\v1\admin.py`
-- `E:\dev\nyy\app\schemas\admin.py`
-- `E:\dev\nyy\app\schemas\file_request.py`
+- `backend/app/api/v1/my.py`
+- `backend/app/api/v1/file_requests.py`
+- `backend/app/api/v1/admin.py`
+- `backend/app/schemas/admin.py`
+- `backend/app/schemas/file_request.py`
 
 ## 移动端标准
 

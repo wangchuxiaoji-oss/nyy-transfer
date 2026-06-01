@@ -17,6 +17,9 @@ type MbEncodedPacketSink = InstanceType<
   typeof import("mediabunny").EncodedPacketSink
 >;
 type MbEncodedPacket = InstanceType<typeof import("mediabunny").EncodedPacket>;
+type MbAudioSampleSink = InstanceType<
+  typeof import("mediabunny").AudioSampleSink
+>;
 
 export interface SourceReadStats {
   seq: number;
@@ -38,6 +41,7 @@ export class SdpDemuxer {
   private activeReadControllers = new Set<AbortController>();
   private videoSink: MbEncodedPacketSink | null = null;
   private audioSink: MbEncodedPacketSink | null = null;
+  private audioSampleSink: MbAudioSampleSink | null = null;
   private sourceReadSeq = 0;
 
   videoInfo: VideoTrackInfo | null = null;
@@ -67,8 +71,14 @@ export class SdpDemuxer {
 
   /** Initialize: parse file header, extract track info */
   async init(): Promise<void> {
-    const { Input, MATROSKA, CustomSource, EncodedPacketSink } =
-      await import("mediabunny");
+    const [{ Input, ALL_FORMATS, CustomSource, EncodedPacketSink, AudioSampleSink },
+      { registerAc3Decoder }] =
+      await Promise.all([
+        import("mediabunny"),
+        import("@mediabunny/ac3"),
+      ]);
+
+    registerAc3Decoder();
 
     const reader = this.reader;
 
@@ -128,11 +138,11 @@ export class SdpDemuxer {
         }
       },
       dispose: () => this.abortController.abort(),
-      prefetchProfile: this.prefetchProfile,
-      maxCacheSize: 16 * 1024 * 1024,
+      prefetchProfile: "network",
+      maxCacheSize: 64 * 1024 * 1024,
     });
 
-    this.input = new Input({ source, formats: [MATROSKA] });
+    this.input = new Input({ source, formats: ALL_FORMATS });
 
     // Extract video track
     const videoTrack = await this.input.getPrimaryVideoTrack();
@@ -153,6 +163,8 @@ export class SdpDemuxer {
     // Extract audio track
     const audioTrack = await this.input.getPrimaryAudioTrack();
     if (audioTrack) {
+      const codec = await audioTrack.getCodec();
+      const needsAlternateDecoder = isAc3Codec(codec);
       const cfg = await audioTrack.getDecoderConfig();
       if (cfg) {
         this.audioInfo = {
@@ -160,7 +172,12 @@ export class SdpDemuxer {
           sampleRate: cfg.sampleRate ?? 0,
           numberOfChannels: cfg.numberOfChannels ?? 0,
           decoderConfig: cfg as AudioDecoderConfig,
+          needsAlternateDecoder,
         };
+      }
+      if (needsAlternateDecoder) {
+        this.audioSampleSink = new AudioSampleSink(audioTrack);
+      } else {
         this.audioSink = new EncodedPacketSink(audioTrack);
       }
     }
@@ -176,9 +193,17 @@ export class SdpDemuxer {
     return this.videoSink;
   }
 
-  /** Get the audio packet sink for iteration */
+  /** Get the audio packet sink for iteration (non-AC-3 tracks only). */
   getAudioSink(): MbEncodedPacketSink | null {
     return this.audioSink;
+  }
+
+  /**
+   * Get the decoded audio sample sink (AC-3 / browser-unsupported tracks).
+   * Returns null for tracks that go through the standard WebCodecs pipeline.
+   */
+  getAudioSampleSink(): MbAudioSampleSink | null {
+    return this.audioSampleSink;
   }
 
   /**
@@ -266,4 +291,11 @@ function readEbmlElementId(buf: Uint8Array): number {
     value = value * 256 + buf[i];
   }
   return value;
+}
+
+/** Detects AC-3 / E-AC-3 codecs that the browser can't decode natively. */
+function isAc3Codec(codec: unknown): boolean {
+  if (!codec) return false;
+  const id = typeof codec === "string" ? codec : String(codec);
+  return /^(ac-3|ac3|ec-3|eac3|e-ac-3|eac-3)$/i.test(id);
 }

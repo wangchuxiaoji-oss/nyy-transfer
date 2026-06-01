@@ -39,6 +39,15 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     const engine = new PlayerEngine({ file, canvas, debugLog, prefetchProfile, seekParallelParts });
     engineRef.current = engine;
 
+    // 抑制 seek cancelled 导致的 unhandled rejection（mediabunny 内部 prefetch 不一定 catch abort 错误）
+    const suppressSeekAbort = (e: PromiseRejectionEvent) => {
+      const msg = e.reason instanceof Error ? e.reason.message : String(e.reason ?? "");
+      if (msg.includes("seek cancelled") || msg.includes("source disposed") || msg.includes("Range fetch aborted")) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", suppressSeekAbort);
+
     engine.onStateChange = (s) => { if (!disposed) setState(s); };
     engine.onBufferingChange = (nextBuffering) => { if (!disposed) setBuffering(nextBuffering); };
     engine.onTimeUpdate = (t) => {
@@ -75,6 +84,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
 
     return () => {
       disposed = true;
+      window.removeEventListener("unhandledrejection", suppressSeekAbort);
       probeRef.current?.stop();
       probeRef.current = null;
       engine.dispose();
@@ -122,7 +132,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
           play: handlePlay,
           pause: handlePause,
           seek: (seconds) => {
-            void engineRef.current?.prewarmSeek(seconds);
+            // prewarmSeek 仅用于拖动预热，commitSeek 时直接 seek 即可
             void engineRef.current?.seek(seconds);
           },
           setVolume: (nextVolume) => {

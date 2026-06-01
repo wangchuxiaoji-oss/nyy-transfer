@@ -8,7 +8,7 @@
 
 ## 已确认决策
 
-- 文档位置：`D:\nyy-frontend\docs\UI_MOBILE_REPAIR_PLAN.md`。
+- 文档位置：`docs/ui/UI_MOBILE_REPAIR_PLAN.md`。
 - 主按钮策略：保留品牌暖橘，主交互按钮改用更深橘，优先满足白字对比度。
 - 移动端 E2E：使用 Chrome MCP 完整验收，不新增前端测试框架。
 - Admin 文案：统一为中文运营风格。
@@ -242,9 +242,9 @@
 
 ### 后端 API
 
-- 更新 `E:\dev\nyy\app\api\v1\my.py`：我的分享支持 `q`、`status`、`sort`、`page`、`page_size`。
-- 更新 `E:\dev\nyy\app\api\v1\file_requests.py`：我的文件请求和收到文件支持分页；如需撤销请求，新增 owner-only revoke API。
-- 更新 `E:\dev\nyy\app\api\v1\admin.py`：用户、分享、举报、邮件支持搜索、筛选、排序、分页。
+- 更新 `backend/app/api/v1/my.py`：我的分享支持 `q`、`status`、`sort`、`page`、`page_size`。
+- 更新 `backend/app/api/v1/file_requests.py`：我的文件请求和收到文件支持分页；如需撤销请求，新增 owner-only revoke API。
+- 更新 `backend/app/api/v1/admin.py`：用户、分享、举报、邮件支持搜索、筛选、排序、分页。
 - 更新相关 schemas：保证响应携带 `total`、`page`、`page_size`。
 - 更新 `tests/e2e_acceptance.py`：覆盖新增分页/筛选参数，并保持 cleanup。
 

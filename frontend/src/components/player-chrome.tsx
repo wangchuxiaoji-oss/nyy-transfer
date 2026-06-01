@@ -94,7 +94,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
               type="button"
               onClick={() => void actions.play()}
               disabled={view.state === "loading"}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-[#f55d8a] text-white shadow-[0_8px_24px_rgba(245,93,138,0.35)] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-[#FF8A3D] text-white shadow-[0_8px_24px_rgba(255,138,61,0.35)] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="播放"
             >
               <Play className="ml-1 h-8 w-8 fill-current stroke-[1.5]" />
@@ -138,7 +138,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
               onChange={(event) => setScrubValue(Number(event.target.value))}
               onMouseUp={commitSeek}
               onTouchEnd={commitSeek}
-              className="min-w-0 flex-1 accent-[#f55d8a] disabled:opacity-40"
+              className="min-w-0 flex-1 accent-[#FF8A3D] disabled:opacity-40"
             />
 
             <span className="shrink-0 whitespace-nowrap text-[14px] font-medium tabular-nums text-white/90">
@@ -151,7 +151,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
                 onClick={toggleVolume}
                 disabled={!view.canVolume}
                 title={reason(view, "volume")}
-                className={`${iconButtonClass(view.canVolume)} ${volumeOpen ? "bg-[#f55d8a] text-white" : ""}`}
+                className={`${iconButtonClass(view.canVolume)} ${volumeOpen ? "bg-[#FF8A3D] text-white" : ""}`}
                 aria-label={view.isMuted ? "取消静音" : "音量"}
               >
                 <Volume2 className="h-5 w-5 stroke-[1.8]" />
@@ -166,7 +166,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
                       step={0.01}
                       value={view.volume}
                       onChange={(event) => actions.setVolume?.(Number(event.target.value))}
-                      className="h-28 w-2 accent-[#f55d8a] [writing-mode:vertical-lr]"
+                      className="h-28 w-2 accent-[#FF8A3D] [writing-mode:vertical-lr]"
                       aria-label="音量"
                     />
                   </div>
@@ -178,7 +178,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
               <button
                 type="button"
                 onClick={toggleSettings}
-                className={`${iconButtonClass(true)} ${settingsOpen ? "bg-[#f55d8a] text-white" : ""}`}
+                className={`${iconButtonClass(true)} ${settingsOpen ? "bg-[#FF8A3D] text-white" : ""}`}
                 aria-label="设置"
               >
                 <Settings2 className="h-5 w-5 stroke-[1.8]" />
@@ -238,7 +238,7 @@ function SettingsRootRow({
       type="button"
       onClick={onClick}
       disabled={!enabled}
-      className={`flex w-full items-center justify-between px-3 py-2 text-left ${enabled ? "hover:bg-[#ff5f90] hover:text-white" : "cursor-not-allowed opacity-45"}`}
+      className={`flex w-full items-center justify-between px-3 py-2 text-left ${enabled ? "hover:bg-[#FF8A3D] hover:text-white" : "cursor-not-allowed opacity-45"}`}
     >
       <span className="text-[15px]">{label}</span>
       <span className="flex items-center gap-2 text-[15px]">
@@ -277,7 +277,7 @@ function QualityList({ view, onPick }: { view: PlayerViewState; onPick: (value: 
           key={String(option.value)}
           type="button"
           onClick={() => onPick(option.value)}
-          className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] ${option.selected ? "bg-[#ff5f90] text-white" : "text-[#5d6577] hover:bg-[#f0f0ed]"}`}
+          className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] ${option.selected ? "bg-[#FF8A3D] text-white" : "text-[#5d6577] hover:bg-[#f0f0ed]"}`}
         >
           <span className={`h-3 w-3 rounded-full border ${option.selected ? "border-white bg-white" : "border-[#c8cad1] bg-transparent"}`} />
           <span className="flex-1">{option.label}</span>
@@ -299,7 +299,7 @@ function SpeedList({ view, onPick }: { view: PlayerViewState; onPick: (rate: num
             key={rate}
             type="button"
             onClick={() => onPick(rate)}
-            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] ${selected ? "bg-[#ff5f90] text-white" : "text-[#5d6577] hover:bg-[#f0f0ed]"}`}
+            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] ${selected ? "bg-[#FF8A3D] text-white" : "text-[#5d6577] hover:bg-[#f0f0ed]"}`}
           >
             <span className={`h-3 w-3 rounded-full border ${selected ? "border-white bg-white" : "border-[#c8cad1] bg-transparent"}`} />
             <span className="flex-1">{rate === 1 ? "普通" : `${rate}x`}</span>

@@ -21,7 +21,7 @@
 
 ## 已完成功能
 
-### 后端 (E:\dev\nyy\app\)
+### 后端 (backend/app/)
 
 #### 核心服务
 - **doubao_client.py** — httpx 封装豆包 TOS：prepare → apply → commit + get_download_url + AWS SigV4 内联签名
@@ -48,7 +48,7 @@
 - `upload_max_retries=3` — 上传重试次数
 - 所有限制项为配置化，留给将来 admin 管理后台
 
-### 前端 (D:\nyy-frontend\)
+### 前端 (frontend/)
 
 #### 上传组件 (file-uploader.tsx)
 - 多文件选择 + 文件夹拖拽/选择（webkitGetAsEntry 递归遍历）
@@ -127,7 +127,7 @@
 | Docker | Docker Desktop 安装在 D:\Docker (NTFS) |
 | PostgreSQL | nyy-postgres-dev 容器，端口 5432 |
 | Redis | nyy-redis-dev 容器，端口 6379 |
-| Python | 3.11.15，venv 在 E:\dev\nyy\.venv |
+| Python | 3.11.15，venv 在 backend/.venv |
 | 域名 | nyy.app (GoDaddy)，NS: ns49.domaincontrol.com |
 
 ## 商业化规划（v1 不开收费）
@@ -161,7 +161,7 @@
 ## 文件索引
 
 ```
-E:\dev\nyy\
+backend/
 ├── app/
 │   ├── api/v1/uploads.py        上传 API（init/commit/quota）
 │   ├── api/v1/shares.py         分享 API（info/verify/download）
@@ -176,13 +176,17 @@ E:\dev\nyy\
 ├── tests/
 │   ├── e2e_full.py              15 项 e2e 测试
 │   └── test_uploads.py          11 项单元测试
-├── docs/
-│   ├── PRD.md                   产品需求文档
-│   ├── PROGRESS.md              本文件
-│   └── spike-cors.md            CORS 验证报告
-└── frontend/                    前端源码同步目录
+└── ...
 
-D:\nyy-frontend\                 前端开发目录（NTFS）
+docs/                            项目文档（已按主题分类，集中在仓库顶层）
+├── product/                     PRD.md、PROGRESS.md（本文件）
+├── spikes/                      技术可行性验证报告（CORS / multipart / 视频处理）
+├── upload/                      上传与 HLS 实施指南、迁移方案
+├── player/                      SDP 自研播放器设计与媒体播放文档
+├── ui/                          UI 与移动端方案、字体审计
+└── brand/                       品牌指南与 logo 资源
+
+frontend/                        前端开发目录（Next.js）
 ├── src/components/file-uploader.tsx  多文件上传组件
 ├── src/app/[code]/page.tsx      分享页
 ├── src/lib/api.ts               API client

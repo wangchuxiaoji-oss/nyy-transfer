@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useParams } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import QRCode from "qrcode";
-import { Download, FileIcon, Clock, AlertCircle, Lock, Play, Package, Files, Flag, QrCode, Copy, X, Folder } from "lucide-react";
+import { Download, FileIcon, Clock, AlertCircle, Lock, Package, Files, Flag, QrCode, Copy, X, Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import { MediaPlayer, getMediaType } from "@/components/media-player";
@@ -17,7 +17,8 @@ import {
 import { supportsChunkedDownload, chunkedDownload, type ChunkedDownloadProgress } from "@/lib/chunked-download";
 import { getErrorMessage, isHttpStatusError } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
-import { prepareVirtualMediaTransport, setVirtualMediaDebugEnabled } from "@/lib/virtual-media";
+import { setVirtualMediaDebugEnabled } from "@/lib/virtual-media";
+
 import { formatDebugLine, toDebugRecord, type DebugLogFn } from "@/lib/debug";
 
 type PageState = "loading" | "ready" | "not_found" | "expired" | "error";
@@ -291,6 +292,27 @@ export default function SharePage() {
       });
   }, [code]);
 
+  // 自动触发媒体预览：有媒体文件且无密码时，加载完成后自动 fetch 下载 URL 并展开播放器
+  const autoPreviewTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!share || share.has_password) return;
+    if (autoPreviewTriggeredRef.current) return;
+    const hasMedia = (sdpEnabled && share.files.length === 1 && share.empty_dirs.length === 0 && share.files.some((f) => getSelfDevelopMediaType(f.file_name) !== null))
+      || share.files.some((f) => getMediaType(f.file_name) !== null);
+    if (!hasMedia) return;
+    autoPreviewTriggeredRef.current = true;
+    appendDebugLog("page", "preview:auto", { code, files: share.files.length });
+    const startedAt = performance.now();
+    fetchDownloadUrls().then((res) => {
+      if (res && res.files.length > 0) {
+        appendDebugLog("page", "preview:ready", { files: res.files.length, firstFile: res.files[0]?.file_name, elapsedMs: Math.round(performance.now() - startedAt) });
+        setDownloads(res.files);
+      } else {
+        autoPreviewTriggeredRef.current = false;
+      }
+    });
+  }, [share, sdpEnabled]);
+
   useEffect(() => {
     QRCode.toDataURL(window.location.href, { margin: 1, width: 180 })
       .then(setQr)
@@ -298,14 +320,10 @@ export default function SharePage() {
   }, []);
 
   useEffect(() => {
-    void prepareVirtualMediaTransport().catch(() => {});
-  }, []);
-
-  useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     setDebugEnabled(searchParams.get("debug") === "1");
     const sdpParam = searchParams.get("sdp");
-    setSdpEnabled(sdpParam === "1" || sdpParam === "2");
+    setSdpEnabled(sdpParam !== "0");  // 默认开，?sdp=0 强制关
   }, []);
 
   useEffect(() => {
@@ -542,17 +560,6 @@ export default function SharePage() {
     setDownloading(false);
   };
 
-  const handlePreview = async () => {
-    if (!share) return;
-    appendDebugLog("page", "preview:click", { code, files: share.files.length, totalBytes: share.total_bytes });
-    const startedAt = performance.now();
-    const res = await fetchDownloadUrls();
-    if (res && res.files.length > 0) {
-      appendDebugLog("page", "preview:ready", { files: res.files.length, firstFile: res.files[0]?.file_name, elapsedMs: Math.round(performance.now() - startedAt) });
-      setDownloads(res.files);
-    }
-  };
-
   const handleCopyDebugLogs = () => {
     const text = debugEntries.map((entry) => entry.line).join("\n");
     void copyText(text);
@@ -618,8 +625,6 @@ export default function SharePage() {
 
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
-  const sdpEligibleSingle = sdpEnabled && isSingle && share.files.some((f) => getSelfDevelopMediaType(f.file_name) !== null);
-  const hasMedia = sdpEligibleSingle || share.files.some((f) => getMediaType(f.file_name) !== null);
 
   return (
     <main className="min-h-dvh bg-warm-50 dark:bg-background flex flex-col items-center justify-center px-4 py-16">
@@ -719,11 +724,6 @@ export default function SharePage() {
           if (!mt) return null;
           return <MediaPlayer key={i} file={dl} className="rounded-2xl overflow-hidden" debugLog={appendDebugLog} />;
         })}
-        {hasMedia && downloads.length === 0 && !share.has_password && (
-          <button onClick={handlePreview} className="type-action flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-nyy-300 dark:border-nyy-700 text-nyy-800 dark:text-nyy-400 hover:bg-nyy-50 dark:hover:bg-nyy-900/20">
-            <Play className="w-4 h-4" /> {sdpEligibleSingle ? "SDP 预览" : "预览"}
-          </button>
-        )}
 
         {debugEnabled && (
           <div className="rounded-2xl border border-nyy-200 bg-nyy-50/70 p-3 dark:border-nyy-800 dark:bg-nyy-950/20">

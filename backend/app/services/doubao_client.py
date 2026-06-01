@@ -90,9 +90,10 @@ class DoubaoClientError(Exception):
 class UploadInitResult:
     """init_upload 返回值，前端用来直传 TOS。"""
     upload_url: str
-    authorization: str  # TOS SpaceKey auth
+    authorization: str  # TOS SpaceKey auth（Init/UploadPart/Merge 三步通用）
     store_uri: str
     session_key: str
+    tos_host: str  # 裸 host，multipart 拼 ?uploads/?partNumber/?uploadID 用
     # 以下用于 commit 阶段
     service_id: str
     access_key: str
@@ -245,6 +246,7 @@ class DoubaoUploadClient:
             authorization=tos_auth,
             store_uri=store_uri,
             session_key=session_key,
+            tos_host=tos_host,
             service_id=service_id,
             access_key=access_key,
             secret_key=secret_key,
@@ -252,7 +254,64 @@ class DoubaoUploadClient:
         )
 
     # ------------------------------------------------------------------
-    # Step 3: commit_upload (浏览器上传完成后调用)
+    # Step 3: multipart 协议（init_multipart / merge_multipart）
+    # ------------------------------------------------------------------
+
+    async def init_multipart(
+        self,
+        store_uri: str,
+        tos_auth: str,
+        tos_host: str,
+        is_large_file: bool,
+    ) -> str:
+        """发起 multipart 上传（PUT ?uploads），返回 uploadID。
+
+        is_large_file（>1GB）时需带 X-Storage-Mode: gateway 头。
+        """
+        url = f"https://{tos_host}/{store_uri}?uploads"
+        headers = {"Authorization": tos_auth}
+        if is_large_file:
+            headers["X-Storage-Mode"] = "gateway"
+        resp = await self.http.put(url, headers=headers)
+        try:
+            body = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            raise DoubaoClientError(f"init_multipart 响应非 JSON: {resp.text[:200]}") from exc
+        upload_id = (body.get("payload") or {}).get("uploadID")
+        if resp.status_code != 200 or not upload_id:
+            raise DoubaoClientError(f"init_multipart 失败: {resp.status_code} {resp.text[:200]}")
+        log.info("init_multipart OK: store_uri=%s upload_id=%s", store_uri, upload_id)
+        return upload_id
+
+    async def merge_multipart(
+        self,
+        store_uri: str,
+        tos_auth: str,
+        tos_host: str,
+        upload_id: str,
+        crc_list: list[str],
+        is_large_file: bool,
+    ) -> None:
+        """合并 multipart（PUT ?uploadID），body 为纯文本 "0:crc,1:crc,..."。
+
+        注意：merge body 索引始终从 0 连续，与上传时 partNumber 是否偏移无关。
+        body 不是 JSON（发 JSON 会得到 InvalidMergeParts）。
+        """
+        if not crc_list:
+            raise DoubaoClientError("merge_multipart: crc_list 为空")
+        merge_body = ",".join(f"{i}:{crc}" for i, crc in enumerate(crc_list))
+        url = f"https://{tos_host}/{store_uri}?uploadID={upload_id}"
+        headers = {"Authorization": tos_auth}
+        if is_large_file:
+            headers["X-Storage-Mode"] = "gateway"
+        resp = await self.http.put(url, content=merge_body.encode(), headers=headers)
+        ok = resp.status_code == 200 and '"success":0' in resp.text.replace(" ", "")
+        if not ok:
+            raise DoubaoClientError(f"merge_multipart 失败: {resp.status_code} {resp.text[:300]}")
+        log.info("merge_multipart OK: store_uri=%s parts=%d", store_uri, len(crc_list))
+
+    # ------------------------------------------------------------------
+    # Step 4: commit_upload (浏览器上传完成后调用)
     # ------------------------------------------------------------------
 
     async def commit_upload(

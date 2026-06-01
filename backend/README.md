@@ -41,21 +41,21 @@
 
 ## 3. 本地目录
 
-本项目当前分成两个实际开发目录：
+本项目统一放在 `/data/nyy` 仓库下，分前后端两个子目录：
 
 | 路径 | 说明 |
 |---|---|
-| `E:\dev\nyy` | 后端主仓库，包含 FastAPI、Alembic、测试、主 README |
-| `D:\nyy-frontend` | 前端开发目录，放在 NTFS 盘，避免 `node_modules` 在 exFAT 上出问题 |
+| `/data/nyy/backend` | 后端主仓库，包含 FastAPI、Alembic、测试、主 README |
+| `/data/nyy/frontend` | 前端开发目录（Next.js） |
 
-重要背景：E 盘为 exFAT，`node_modules` / symlink 支持不稳定，因此前端实际开发放在 D 盘。
+> 历史背景：早期在 Windows 上开发，后端在 `E:\dev\nyy`、前端在 `D:\nyy-frontend`（E 盘 exFAT 对 `node_modules`/symlink 支持不稳定，故前端放 D 盘 NTFS）。现已统一迁移到 Linux 服务器 `/data/nyy`。
 
 ## 4. 快速启动
 
 ### 4.1 启动 Postgres / Redis
 
-```powershell
-cd E:\dev\nyy
+```bash
+cd /data/nyy/backend
 docker compose -f docker-compose.dev.yml up -d
 ```
 
@@ -66,9 +66,9 @@ docker compose -f docker-compose.dev.yml up -d
 
 ### 4.2 启动后端
 
-```powershell
-cd E:\dev\nyy
-.\.venv\Scripts\Activate.ps1
+```bash
+cd /data/nyy/backend
+source .venv/bin/activate
 alembic upgrade head
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -83,8 +83,8 @@ GET http://127.0.0.1:8000/api/docs
 
 ### 4.3 启动前端
 
-```powershell
-cd D:\nyy-frontend
+```bash
+cd /data/nyy/frontend
 npm install
 npm run dev
 ```
@@ -104,15 +104,15 @@ npm run dev
 
 后端：
 
-```powershell
-cd E:\dev\nyy
-.\.venv\Scripts\python.exe -m pytest
+```bash
+cd /data/nyy/backend
+.venv/bin/python -m pytest
 ```
 
 前端类型检查：
 
-```powershell
-cd D:\nyy-frontend
+```bash
+cd /data/nyy/frontend
 npx tsc --noEmit
 ```
 
@@ -120,7 +120,7 @@ npx tsc --noEmit
 
 ## 5. 环境变量
 
-后端参考：`E:\dev\nyy\.env.example`
+后端参考：`/data/nyy/backend/.env.example`
 
 关键变量：
 
@@ -133,7 +133,7 @@ npx tsc --noEmit
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis |
 | `SECRET_KEY` | 至少 32 字节 | 应用密钥 |
 | `JWT_SECRET` | 至少 32 字节 | JWT 密钥 |
-| `DOUBAO_SESSION_FILE` | `E:\dev\DoubaoChatAPI\.doubao_session.json` | 豆包会话文件 |
+| `DOUBAO_SESSION_FILE` | `/data/nyy/backend/.doubao_session.json` | 豆包会话文件 |
 | `SMTP_HOST` | `127.0.0.1` | 邮件发送 SMTP |
 | `EMAIL_FROM` | `noreply@nyy.app` | 邮件发件人 |
 
@@ -147,7 +147,7 @@ npx tsc --noEmit
 
 ### 6.1 首页 / 上传
 
-文件：`D:\nyy-frontend\src\app\page.tsx`、`D:\nyy-frontend\src\components\file-uploader.tsx`
+文件：`frontend/src/app/page.tsx`、`frontend/src/components/file-uploader.tsx`
 
 能力：
 
@@ -171,7 +171,7 @@ npx tsc --noEmit
 
 ### 6.2 游客分享管理
 
-文件：`D:\nyy-frontend\src\app\page.tsx`、`D:\nyy-frontend\src\components\share-detail-modal.tsx`、`E:\dev\nyy\app\api\v1\shares.py`
+文件：`frontend/src/app/page.tsx`、`frontend/src/components/share-detail-modal.tsx`、`backend/app/api/v1/shares.py`
 
 能力：
 
@@ -188,7 +188,7 @@ npx tsc --noEmit
 
 ### 6.3 分享落地页 / 下载
 
-文件：`D:\nyy-frontend\src\app\[code]\page.tsx`、`E:\dev\nyy\app\api\v1\shares.py`
+文件：`frontend/src/app/[code]/page.tsx`、`backend/app/api/v1/shares.py`
 
 能力：
 
@@ -205,7 +205,7 @@ npx tsc --noEmit
 
 ### 6.4 文件请求 / 收文件
 
-文件：`D:\nyy-frontend\src\components\file-request-creator.tsx`、`D:\nyy-frontend\src\app\r\[code]\page.tsx`、`E:\dev\nyy\app\api\v1\file_requests.py`
+文件：`frontend/src/components/file-request-creator.tsx`、`frontend/src/app/r/[code]/page.tsx`、`backend/app/api/v1/file_requests.py`
 
 能力：
 
@@ -217,7 +217,7 @@ npx tsc --noEmit
 
 ### 6.5 用户体系 / 我的工作台
 
-文件：`E:\dev\nyy\app\api\v1\auth.py`、`D:\nyy-frontend\src\components\auth-modal.tsx`、`D:\nyy-frontend\src\app\my\page.tsx`
+文件：`backend/app/api/v1/auth.py`、`frontend/src/components/auth-modal.tsx`、`frontend/src/app/my/page.tsx`
 
 能力：
 
@@ -230,7 +230,7 @@ npx tsc --noEmit
 
 ### 6.6 管理后台
 
-文件：`E:\dev\nyy\app\api\v1\admin.py`、`D:\nyy-frontend\src\app\nyy-console\page.tsx`
+文件：`backend/app/api/v1/admin.py`、`frontend/src/app/nyy-console/page.tsx`
 
 能力：
 
@@ -251,7 +251,7 @@ npx tsc --noEmit
 
 ### 6.7 邮件
 
-文件：`E:\dev\nyy\app\services\email.py`
+文件：`backend/app/services/email.py`
 
 能力：
 
@@ -427,7 +427,7 @@ npx tsc --noEmit
 | `src/lib/url-state.ts` | URL 状态工具 |
 | `src/lib/utils.ts` | `cn` 等工具 |
 | `public/patterns/bg.svg` | 静态背景纹理 |
-| `docs/TYPOGRAPHY_AUDIT.md` | 前端字体字号审计 |
+| `../docs/ui/TYPOGRAPHY_AUDIT.md` | 前端字体字号审计 |
 
 ## 10. UI / 设计系统现状
 
@@ -449,7 +449,7 @@ npx tsc --noEmit
 
 ## 11. 字体 / 字号审计结论
 
-详见前端文档：`D:\nyy-frontend\docs\TYPOGRAPHY_AUDIT.md`
+详见前端文档：`../docs/ui/TYPOGRAPHY_AUDIT.md`
 
 当前统计：
 
@@ -608,7 +608,7 @@ const blob = await downloadZip(responses).blob();
 ## 15. 继任者建议路线
 
 1. 先运行后端测试和前端类型检查，确认环境可用。
-2. 浏览 `docs/PRD.md` 和本 README，理解 v1 / v1.1 / v1.2 范围。
+2. 浏览 `../docs/product/PRD.md` 和本 README，理解 v1 / v1.1 / v1.2 范围。
 3. 优先不要重写上传主流程，当前闭环已经可用。
 4. UI 继续改时优先处理字号语义化，不要继续堆 `text-xs`。
 5. 动画修改前先保留当前 one-take 勾勾方案，避免重新引入跳动。
@@ -617,9 +617,9 @@ const blob = await downloadZip(responses).blob();
 
 ## 16. 相关文档
 
-- `docs/PRD.md`：产品需求文档。
-- `docs/PROGRESS.md`：早期开发进展记录，部分数据已过时，但保留历史上下文。
-- `docs/spike-cors.md`：TOS CORS 验证。
-- `docs/brand/brand-guide.md`：品牌指南。
+- `../docs/product/PRD.md`：产品需求文档。
+- `../docs/product/PROGRESS.md`：早期开发进展记录，部分数据已过时，但保留历史上下文。
+- `../docs/spikes/spike-cors.md`：TOS CORS 验证。
+- `../docs/brand/brand-guide.md`：品牌指南。
 - `deploy/README.md`：部署说明草案。
-- `D:\nyy-frontend\docs\TYPOGRAPHY_AUDIT.md`：前端字体字号审计。
+- `../docs/ui/TYPOGRAPHY_AUDIT.md`：前端字体字号审计。

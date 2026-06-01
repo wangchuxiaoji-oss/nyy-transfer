@@ -7,7 +7,7 @@
 
 ## 背景:为什么现在会漂移
 
-`docs/sdp-rewrite-plan.md` 原定方案就是「AudioContext.currentTime 主时钟 + perf.now
+`docs/player/sdp-rewrite-plan.md` 原定方案就是「AudioContext.currentTime 主时钟 + perf.now
 fallback」。但实现时 `clock.ts` 退化为**纯 wall-clock**(`performance.now()`),理由是
 「AudioContext 在标签页隐藏时仍走时,导致跳变」。这个退化引入了三个独立时间源:
 

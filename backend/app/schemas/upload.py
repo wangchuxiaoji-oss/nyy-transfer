@@ -88,6 +88,44 @@ class UploadCommitResponse(BaseModel):
     revoke_token: str | None = None
 
 
+class MultipartInitRequest(BaseModel):
+    """POST /api/v1/uploads/multipart-init 请求体（每个大文件调一次）。"""
+    file_name: str = Field(..., min_length=1, max_length=255)
+    file_size: int = Field(..., gt=0, le=10 * 1024 * 1024 * 1024)
+    file_ext: str = Field(default="", max_length=16)
+    content_type: str = Field(default="", max_length=127)
+    captcha_token: str = Field(default="", max_length=4096)
+    logical_file_id: str = Field(..., min_length=1, max_length=36)
+    request_code: str = Field(default="", max_length=16)
+    request_password: str = Field(default="", max_length=4)
+
+
+class MultipartInitResponse(BaseModel):
+    """POST /api/v1/uploads/multipart-init 响应体。"""
+    multipart_token: str
+    tos_host: str
+    store_uri: str
+    tos_auth: str
+    upload_id: str
+    part_size: int
+    part_number_base: int
+    part_count: int
+    commit_token: str
+    commit_token_expires_at: datetime
+
+
+class MultipartMergeRequest(BaseModel):
+    """POST /api/v1/uploads/multipart-merge 请求体。"""
+    multipart_token: str = Field(..., min_length=1, max_length=512)
+    crc_list: list[str] = Field(..., min_length=1, max_length=2000)
+
+
+class MultipartMergeResponse(BaseModel):
+    """POST /api/v1/uploads/multipart-merge 响应体。"""
+    commit_token: str
+    commit_token_expires_at: datetime
+
+
 class ErrorResponse(BaseModel):
     """通用错误响应。"""
     detail: str

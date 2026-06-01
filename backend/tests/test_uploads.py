@@ -49,6 +49,7 @@ def _mock_init_result() -> UploadInitResult:
         authorization="SpaceKey/test/auth",
         store_uri="tos-cn-i-test/abc123.bin",
         session_key="eyJ0ZXN0Ijp0cnVlfQ==",
+        tos_host="tos-test.example.com",
         service_id="testservice",
         access_key="AK_TEST",
         secret_key="SK_TEST",
@@ -91,15 +92,36 @@ async def test_upload_init_success(client, redis):
 
 @pytest.mark.asyncio
 async def test_upload_init_quota_exceeded(client, redis):
-    """配额超限时返回 429。"""
+    """配额超限时返回 429。
+
+    注意：固定 mock 配额配置，避免依赖 DB 中运营可调整的 AppConfig
+    （生产 DB 的 guest 上限已被调高，若读真实配置该用例会失真）。
+    """
+    fixed_quota = {
+        "guest_max_file_bytes": 200 * 1024 * 1024,
+        "guest_max_active_shares": 9999,
+        "guest_ttl_hours": 24,
+        "user_max_file_bytes": 1024 * 1024 * 1024,
+        "user_max_active_shares": 9999,
+        "user_ttl_hours": 720,
+    }
     # 预设已用 199 MB
     await redis.set("nyy:quota:ip:127.0.0.1:bytes", str(199 * 1024 * 1024))
 
-    resp = await client.post("/api/v1/uploads/init", json={
-        "file_name": "big.bin",
-        "file_size": 2 * 1024 * 1024,  # 2 MB，超过剩余 1 MB
-        "file_ext": "bin",
-    })
+    with patch(
+        "app.api.v1.uploads.get_quota_config",
+        new_callable=AsyncMock,
+        return_value=fixed_quota,
+    ), patch(
+        "app.api.v1.uploads._count_active_shares",
+        new_callable=AsyncMock,
+        return_value=0,
+    ):
+        resp = await client.post("/api/v1/uploads/init", json={
+            "file_name": "big.bin",
+            "file_size": 2 * 1024 * 1024,  # 2 MB，超过剩余 1 MB
+            "file_ext": "bin",
+        })
     assert resp.status_code == 429
 
 

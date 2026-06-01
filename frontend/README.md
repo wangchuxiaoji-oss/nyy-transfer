@@ -2,7 +2,7 @@
 
 这是 `nyy.app`（拿呀呀）文件中转站的 Next.js 前端开发目录。
 
-主项目 README 位于：`E:\dev\nyy\README.md`
+主项目 README 位于：`../backend/README.md`
 
 ## 技术栈
 
@@ -17,8 +17,8 @@
 
 ## 本地启动
 
-```powershell
-cd D:\nyy-frontend
+```bash
+cd /data/nyy/frontend
 npm install
 npm run dev
 ```
@@ -69,7 +69,7 @@ npm run build
 
 ## 字体字号
 
-详见：`docs/TYPOGRAPHY_AUDIT.md`
+详见：`../docs/ui/TYPOGRAPHY_AUDIT.md`
 
 当前原则：
 

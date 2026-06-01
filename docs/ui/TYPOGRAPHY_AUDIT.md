@@ -1,7 +1,7 @@
 # 拿呀呀前端字体与字号审计
 
 > 更新时间：2026-05-28
-> 适用范围：`D:\nyy-frontend` Next.js 前端。
+> 适用范围：`/data/nyy/frontend` Next.js 前端。
 
 ## 结论
 

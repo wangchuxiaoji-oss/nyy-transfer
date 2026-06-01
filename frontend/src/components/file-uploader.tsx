@@ -9,7 +9,7 @@ import {
 import QRCode from "qrcode";
 import { cn } from "@/lib/utils";
 import { computeCRC32 } from "@/lib/crc32";
-import { uploadInit, uploadCommit, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata } from "@/lib/api";
+import { uploadInit, uploadCommit, multipartInit, multipartMerge, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata, type MultipartInitResponse } from "@/lib/api";
 import { formatXhrStatusError, getErrorMessage, HttpStatusError, isSuccessfulHttpStatus } from "@/lib/errors";
 import { probeMediaMetadata, shouldProbeMediaMetadata, checkCodecCompatibility } from "@/lib/media-metadata";
 import type { DebugLogFn } from "@/lib/debug";
@@ -20,6 +20,9 @@ import {
   findUploadSession,
   getUploadFileKey,
   markUploadChunkComplete,
+  markMultipartInit,
+  markMultipartPartComplete,
+  markMultipartMerged,
   saveUploadSession,
   type StoredCommitItem,
   type UploadSession,
@@ -32,12 +35,13 @@ const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 10 GiB (logged-in limit)
 const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
 const MAX_FILE_COUNT = 500;
 const MAX_EMPTY_DIR_COUNT = 500;
-const CHUNK_XHR_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours per chunk
 const SMALL_FILE_XHR_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours per small file
 const COMMIT_MAX_RETRIES = 3;
 const GLOBAL_UPLOAD_CONCURRENCY = 2;
-const LARGE_FILE_CHUNK_CONCURRENCY = 1;
 const TOKEN_EXPIRY_SAFETY_MS = 5 * 60 * 1000;
+const MULTIPART_THRESHOLD = 512 * 1024 * 1024; // >512MB 走 multipart
+const MULTIPART_PART_CONCURRENCY = 3;
+const PART_XHR_TIMEOUT = 30 * 60 * 1000;
 
 const getFileUploadName = (file: File) =>
   (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
@@ -445,10 +449,8 @@ export function FileUploader({
     audioCodecs: (metadata?.audio_tracks || []).map((track) => track.codec || track.codec_tag).filter(Boolean),
   });
 
-  const chunkSizeAt = (fileSize: number, chunkIndex: number) => {
-    const start = chunkIndex * CHUNK_SIZE;
-    return Math.max(0, Math.min(CHUNK_SIZE, fileSize - start));
-  };
+  const chunkSizeAtPart = (fileSize: number, partSize: number, i: number) =>
+    Math.min(partSize, fileSize - i * partSize);
 
   const getCurrentSelectionFileKeys = () => {
     const seen = new Map<string, number>();
@@ -462,8 +464,6 @@ export function FileUploader({
 
   const createSessionForCurrentSelection = (uploadBatchId: string, fileKeys: string[]): UploadSession => {
     const sessionFiles: UploadSessionFile[] = files.map((entry, index) => {
-      const isChunked = entry.file.size > CHUNK_SIZE;
-      const chunkTotal = isChunked ? Math.ceil(entry.file.size / CHUNK_SIZE) : 1;
       return {
         file_key: fileKeys[index],
         upload_name: entry.uploadName,
@@ -471,8 +471,8 @@ export function FileUploader({
         file_size: entry.file.size,
         last_modified: entry.file.lastModified,
         logical_file_id: generateUUID(),
-        chunk_total: chunkTotal,
-        commit_items: new Array(chunkTotal).fill(null),
+        chunk_total: 1,
+        commit_items: new Array(1).fill(null),
       };
     });
 
@@ -484,145 +484,207 @@ export function FileUploader({
     });
   };
 
-  /** Upload a single chunk to TOS. Returns commit info for that chunk. */
-  const uploadChunk = async (
+  /** 直传单个 part 到 TOS，返回该片 CRC32。 */
+  const uploadPart = async (
     entry: FileEntry,
     blob: Blob,
-    chunkIndex: number,
-    chunkTotal: number,
-    logicalFileId: string,
-    logicalFileSize: number,
-    contentType: string,
-    crcCache: Map<number, string>,
+    partIndex: number,
+    mpu: MultipartInitResponse,
     onProgress: (loaded: number) => void,
-  ): Promise<StoredCommitItem> => {
+  ): Promise<string> => {
     let lastError = "";
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        // CRC32 是 TOS 必须的（否则返回 Mismatch CRC32）
-        let crc32 = crcCache.get(chunkIndex);
-        if (!crc32) {
-          const hashStartedAt = performance.now();
-          debugLog?.("upload", "chunk:hash:start", { fileName: entry.uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
-          crc32 = await computeCRC32(blob);
-          crcCache.set(chunkIndex, crc32);
-          debugLog?.("upload", "chunk:hash:done", { fileName: entry.uploadName, chunkIndex, hashMs: Math.round(performance.now() - hashStartedAt) });
-        }
-        const uploadName = entry.uploadName;
-        const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
-        const initStartedAt = performance.now();
-        debugLog?.("upload", "chunk:init:start", { fileName: uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
-        const initRes = await uploadInit({
-          file_name: uploadName,
-          file_size: blob.size,
-          file_ext: ext,
-          content_type: contentType,
-          chunk_index: chunkIndex,
-          chunk_total: chunkTotal,
-          logical_file_id: logicalFileId,
-          logical_file_size: logicalFileSize,
-        });
-        debugLog?.("upload", "chunk:init:done", {
-          fileName: uploadName,
-          chunkIndex,
-          initMs: Math.round(performance.now() - initStartedAt),
-          commitTokenExpiresAt: initRes.commit_token_expires_at,
-        });
-
-        if (blob.size > 0 && initRes.upload_url) {
-          const uploadStartedAt = performance.now();
-          debugLog?.("upload", "chunk:xhr:start", { fileName: uploadName, chunkIndex, chunkTotal, chunkSize: blob.size, attempt });
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            const xhrKey = `${entry.id}_chunk_${chunkIndex}`;
-            abortRef.current.set(xhrKey, xhr);
-            xhr.open("POST", initRes.upload_url);
-            xhr.timeout = CHUNK_XHR_TIMEOUT;
-            xhr.setRequestHeader("Authorization", initRes.authorization);
-            xhr.setRequestHeader("Content-CRC32", crc32);
-            xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) onProgress(e.loaded);
-            };
-            xhr.onload = () => {
-              abortRef.current.delete(xhrKey);
-              if (!isSuccessfulHttpStatus(xhr.status)) {
-                reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+        const crc32 = await computeCRC32(blob);
+        const partNumber = mpu.part_number_base + partIndex;
+        const url = `https://${mpu.tos_host}/${mpu.store_uri}?partNumber=${partNumber}&uploadID=${mpu.upload_id}`;
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const xhrKey = `${entry.id}_part_${partIndex}`;
+          abortRef.current.set(xhrKey, xhr);
+          xhr.open("PUT", url);
+          xhr.timeout = PART_XHR_TIMEOUT;
+          xhr.setRequestHeader("Authorization", mpu.tos_auth);
+          xhr.setRequestHeader("Content-CRC32", crc32);
+          // gateway 模式（大文件 >1GB）：part 上传也必须带此头，否则 merge 时 TOS 找不到分片
+          if (mpu.part_number_base === 1) {
+            xhr.setRequestHeader("X-Storage-Mode", "gateway");
+          }
+          xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+          xhr.onload = () => {
+            abortRef.current.delete(xhrKey);
+            if (!isSuccessfulHttpStatus(xhr.status)) {
+              // CRC 不匹配（TOS 返回 400 MismatchChecksum）当作可重试：重新读 blob 重算 CRC
+              if (xhr.status === 400 && xhr.responseText.includes("MismatchChecksum")) {
+                reject(new Error("CRC_RETRY:分片校验值不匹配，重试"));
                 return;
               }
-              // TOS 可能返回 200 但 body 含错误码（如 CRC32 mismatch）
-              // TOS 成功码: 2000, 错误码: 4007 等
-              try {
-                const body = JSON.parse(xhr.responseText);
-                if (body.code && body.code !== 2000) {
-                  reject(new Error(body.message || `TOS error: ${body.code}`));
-                  return;
-                }
-              } catch { /* non-JSON response is OK */ }
-              debugLog?.("upload", "chunk:xhr:done", {
-                fileName: uploadName,
-                chunkIndex,
-                status: xhr.status,
-                uploadMs: Math.round(performance.now() - uploadStartedAt),
-              });
-              resolve();
-            };
-            xhr.onerror = () => {
-              abortRef.current.delete(xhrKey);
-              debugLog?.("upload", "chunk:xhr:error", { fileName: uploadName, chunkIndex, status: 0, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-              reject(new Error(formatXhrStatusError(0, "网络错误")));
-            };
-            xhr.ontimeout = () => {
-              abortRef.current.delete(xhrKey);
-              debugLog?.("upload", "chunk:xhr:timeout", { fileName: uploadName, chunkIndex, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-              reject(new Error("上传超时，正在重试"));
-            };
-            xhr.onabort = () => {
-              abortRef.current.delete(xhrKey);
-              debugLog?.("upload", "chunk:xhr:abort", { fileName: uploadName, chunkIndex, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-              reject(new Error("上传已取消"));
-            };
-            xhr.send(blob);
-          });
-        }
-
-        return makeStoredCommitItem({
-          commit_token: initRes.commit_token,
-          store_uri: initRes.store_uri,
-          logical_file_id: logicalFileId,
-          chunk_index: chunkIndex,
-          chunk_total: chunkTotal,
-        }, initRes.commit_token_expires_at);
+              reject(new Error(formatXhrStatusError(xhr.status, "分片上传失败"))); return;
+            }
+            // 成功响应必须是 JSON 且 success===0；并校验服务端回算的 crc32 与本地一致
+            try {
+              const body = JSON.parse(xhr.responseText);
+              if (body.success !== undefined && body.success !== 0) {
+                reject(new Error(body.error?.message || "TOS error")); return;
+              }
+              const serverCrc = body?.payload?.crc32;
+              if (serverCrc && String(serverCrc).toLowerCase() !== crc32.toLowerCase()) {
+                // 极少见：CDN 缓存旧响应/代理篡改。本地与服务端 CRC 不一致 → 重传该片
+                reject(new Error("CRC_RETRY:分片落盘校验值不一致，重试"));
+                return;
+              }
+            } catch {
+              // 成功响应应为合法 JSON；解析失败说明响应异常，重试更安全
+              reject(new Error("CRC_RETRY:分片响应异常，重试"));
+              return;
+            }
+            resolve();
+          };
+          xhr.onerror = () => { abortRef.current.delete(xhrKey); reject(new Error("网络错误")); };
+          xhr.ontimeout = () => { abortRef.current.delete(xhrKey); reject(new Error("上传超时，正在重试")); };
+          xhr.onabort = () => { abortRef.current.delete(xhrKey); reject(new Error("上传已取消")); };
+          xhr.send(blob);
+        });
+        return crc32;
       } catch (err) {
-        lastError = getErrorMessage(err, "上传失败");
-        debugLog?.("upload", "chunk:error", { fileName: entry.uploadName, chunkIndex, chunkTotal, attempt, error: lastError, retryable: isRetryableUploadError(err) });
+        lastError = getErrorMessage(err, "分片上传失败");
         if (cancelledRef.current) throw new Error("上传已取消");
-        if (!isRetryableUploadError(err)) throw new Error(lastError);
-        if (attempt < MAX_RETRIES) {
-          await delay(2000 * 2 ** attempt);
-        }
+        // CRC 类错误强制重试（不经过 isRetryableUploadError 的状态码判定）
+        const isCrcRetry = lastError.startsWith("CRC_RETRY:");
+        if (isCrcRetry) lastError = lastError.slice("CRC_RETRY:".length);
+        if (!isCrcRetry && !isRetryableUploadError(err)) throw new Error(lastError);
+        if (attempt < MAX_RETRIES) await delay(2000 * 2 ** attempt);
       }
     }
     throw new Error(lastError);
   };
 
+  /** 大文件 multipart 上传：init → 并发传 part → merge。返回 commit 用的 StoredCommitItem。 */
+  const uploadMultipartFile = async (
+    entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean,
+  ): Promise<StoredCommitItem> => {
+    const fileSize = entry.file.size;
+    const contentType = entry.file.type || "";
+    const sessionFile = session.files.find((f) => f.file_key === fileKey);
+    if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
+    if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
+
+    let mpuState = sessionFile.multipart;
+    const expired = mpuState && new Date(mpuState.commit_token_expires_at).getTime() < Date.now() + TOKEN_EXPIRY_SAFETY_MS;
+    if (!mpuState || expired) {
+      const ext = entry.uploadName.includes(".") ? entry.uploadName.split(".").pop() || "" : "";
+      const res = await multipartInit({
+        file_name: entry.uploadName, file_size: fileSize, file_ext: ext,
+        content_type: contentType, logical_file_id: sessionFile.logical_file_id,
+      });
+      mpuState = { ...res, parts: new Array(res.part_count).fill(null), merged: false };
+      sessionFile.multipart = mpuState;
+      if (persistSession) await markMultipartInit(session.upload_batch_id, fileKey, mpuState);
+    }
+
+    const partSize = mpuState.part_size;
+    const partCount = mpuState.part_count;
+    const partLoaded: number[] = mpuState.parts.map((p, i) => p ? chunkSizeAtPart(fileSize, partSize, i) : 0);
+    recordFileLoaded(entry.id, partLoaded.reduce((a, b) => a + b, 0), true);
+
+    const queue = Array.from({ length: partCount }, (_, i) => i).filter((i) => !mpuState!.parts[i]);
+    const errors: Array<string | null> = new Array(partCount).fill(null);
+    const worker = async () => {
+      while (queue.length > 0) {
+        const i = queue.shift()!;
+        const start = i * partSize;
+        const blob = entry.file.slice(start, Math.min(start + partSize, fileSize));
+        try {
+          const crc = await uploadPart(entry, blob, i, mpuState!, (loaded) => {
+            partLoaded[i] = loaded;
+            updateFile(entry.id, { progress: Math.round((partLoaded.reduce((a, b) => a + b, 0) / fileSize) * 100) });
+            recordFileLoaded(entry.id, partLoaded.reduce((a, b) => a + b, 0));
+          });
+          mpuState!.parts[i] = { part_index: i, crc32: crc };
+          partLoaded[i] = chunkSizeAtPart(fileSize, partSize, i);
+          if (persistSession) await markMultipartPartComplete(session.upload_batch_id, fileKey, i, mpuState!.parts[i]!);
+        } catch (err) {
+          errors[i] = getErrorMessage(err, `分片 ${i + 1}/${partCount} 上传失败`);
+          if (cancelledRef.current) throw new Error("上传已取消");
+          if (!isRetryableUploadError(err)) { abortActiveUploads(); throw new Error(errors[i]!); }
+          await delay(2000);
+        }
+      }
+    };
+    const concurrency = Math.min(MULTIPART_PART_CONCURRENCY, queue.length || 1);
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+    if (mpuState.parts.some((p) => !p)) throw new Error(errors.find(Boolean) || "部分分片上传失败");
+
+    if (!mpuState.merged) {
+      const crcList = mpuState.parts.map((p) => p!.crc32);
+      debugLog?.("upload", "multipart:merge:start", {
+        fileName: entry.uploadName,
+        fileSize,
+        partCount,
+        crcCount: crcList.length,
+        partSize: mpuState.part_size,
+        partNumberBase: mpuState.part_number_base,
+        uploadId: mpuState.upload_id,
+      });
+      try {
+        const mergeRes = await multipartMerge({ multipart_token: mpuState.multipart_token, crc_list: crcList });
+        mpuState.merged = true;
+        mpuState.commit_token = mergeRes.commit_token;
+        mpuState.commit_token_expires_at = mergeRes.commit_token_expires_at;
+        if (persistSession) await markMultipartMerged(session.upload_batch_id, fileKey, mergeRes.commit_token, mergeRes.commit_token_expires_at);
+        debugLog?.("upload", "multipart:merge:done", { fileName: entry.uploadName, partCount });
+      } catch (err) {
+        // merge 失败时记录完整诊断：part 数量、总字节、每片 CRC（便于定位服务端 500）
+        debugLog?.("upload", "multipart:merge:error", {
+          fileName: entry.uploadName,
+          fileSize,
+          partCount,
+          crcCount: crcList.length,
+          crcList: crcList.join(","),
+          uploadId: mpuState.upload_id,
+          error: getErrorMessage(err, "分片合并失败"),
+        });
+        throw err;
+      }
+    }
+
+    updateFile(entry.id, { state: "done", progress: 100 });
+    recordFileLoaded(entry.id, fileSize, true);
+    const storedItem = makeStoredCommitItem({
+      commit_token: mpuState.commit_token,
+      store_uri: mpuState.store_uri,
+      logical_file_id: sessionFile.logical_file_id,
+      chunk_index: 0,
+      chunk_total: 1,
+    }, mpuState.commit_token_expires_at);
+    // 必须写回 session，否则 commit 阶段从 commit_items 收集时找不到
+    sessionFile.commit_items[0] = storedItem;
+    return storedItem;
+  };
+
   /** Upload a single file (possibly chunked) to TOS with retry/resume. */
   const uploadSingleFile = async (entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean): Promise<StoredCommitItem[]> => {
     const fileSize = entry.file.size;
-    const isLargeFile = fileSize > CHUNK_SIZE;
+    const isMultipart = fileSize > MULTIPART_THRESHOLD;
     const contentType = entry.file.type || "";
     const sessionFile = session.files.find((candidate) => candidate.file_key === fileKey);
     if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
     if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
-    const crcCache = new Map<number, string>();
     debugLog?.("upload", "file:start", {
       fileName: entry.uploadName,
       fileSize,
-      isChunked: isLargeFile,
-      chunkTotal: sessionFile.chunk_total,
+      isMultipart,
       logicalFileId: sessionFile.logical_file_id,
     });
 
-    if (!isLargeFile) {
+    if (isMultipart) {
+      const item = await uploadMultipartFile(entry, fileKey, session, persistSession);
+      return [item];
+    }
+
+    // 小文件：单次直传
+    {
       const existing = sessionFile.commit_items[0];
       if (isStoredCommitItemFresh(existing)) {
         const normalizedExisting = existing.logical_file_id ? existing : {
@@ -760,105 +822,6 @@ export function FileUploader({
       updateFile(entry.id, { state: "error", error: lastError });
       throw new Error(lastError);
     }
-
-    // Large file: chunked upload
-    const logicalFileId = sessionFile.logical_file_id || generateUUID();
-    sessionFile.logical_file_id = logicalFileId;
-    const chunkTotal = Math.ceil(fileSize / CHUNK_SIZE);
-    const chunkResults: Array<StoredCommitItem | null> = new Array(chunkTotal).fill(null);
-    const chunkLoaded: number[] = new Array(chunkTotal).fill(0);
-
-    sessionFile.commit_items.forEach((item, idx) => {
-      if (idx < chunkTotal && isStoredCommitItemFresh(item)) {
-        const normalizedItem = item.logical_file_id ? item : {
-          ...item,
-          logical_file_id: logicalFileId,
-          chunk_index: idx,
-          chunk_total: chunkTotal,
-        };
-        chunkResults[idx] = normalizedItem;
-        sessionFile.commit_items[idx] = normalizedItem;
-        chunkLoaded[idx] = chunkSizeAt(fileSize, idx);
-      }
-    });
-
-    const restoredLoaded = chunkLoaded.reduce((a, b) => a + b, 0);
-    recordFileLoaded(entry.id, restoredLoaded, true);
-    updateFile(entry.id, { state: "uploading", progress: Math.round((restoredLoaded / fileSize) * 100) });
-    if (restoredLoaded > 0) {
-      debugLog?.("upload", "file:resume-hit", {
-        fileName: entry.uploadName,
-        restoredBytes: restoredLoaded,
-        restoredChunks: chunkResults.filter(Boolean).length,
-        chunkTotal,
-      });
-    }
-
-    // 单个大文件默认 1 个 chunk 并发，避免慢网下 512MB 分片互相抢带宽导致超时。
-    const chunkQueue = Array.from({ length: chunkTotal }, (_, i) => i).filter((idx) => !chunkResults[idx]);
-    const chunkErrors: Array<string | null> = new Array(chunkTotal).fill(null);
-
-    const chunkWorker = async () => {
-      while (chunkQueue.length > 0) {
-        const idx = chunkQueue.shift()!;
-        const start = idx * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, fileSize);
-        const blob = entry.file.slice(start, end);
-        try {
-          const item = await uploadChunk(
-            entry, blob, idx, chunkTotal, logicalFileId, fileSize, contentType, crcCache,
-            (loaded) => {
-              chunkLoaded[idx] = loaded;
-              const totalLoaded = chunkLoaded.reduce((a, b) => a + b, 0);
-              updateFile(entry.id, { progress: Math.round((totalLoaded / fileSize) * 100) });
-              recordFileLoaded(entry.id, totalLoaded);
-            },
-          );
-          chunkResults[idx] = item;
-          chunkErrors[idx] = null;
-          chunkLoaded[idx] = chunkSizeAt(fileSize, idx);
-          sessionFile.commit_items[idx] = item;
-          if (persistSession) {
-            await markUploadChunkComplete(session.upload_batch_id, fileKey, idx, item).catch((err) => {
-              setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
-            });
-          }
-        } catch (err) {
-          const message = getErrorMessage(err, `分片 ${idx + 1}/${chunkTotal} 上传失败`);
-          chunkErrors[idx] = message;
-          if (cancelledRef.current) throw new Error("上传已取消");
-          if (!isRetryableUploadError(err)) {
-            abortActiveUploads();
-            throw new Error(message);
-          }
-          await delay(2000);
-        }
-      }
-    };
-
-    const concurrency = Math.min(LARGE_FILE_CHUNK_CONCURRENCY, chunkQueue.length || 1);
-    debugLog?.("upload", "file:chunks:start", {
-      fileName: entry.uploadName,
-      chunkTotal,
-      pendingChunks: chunkQueue.length,
-      concurrency,
-    });
-    await Promise.all(Array.from({ length: concurrency }, () => chunkWorker()));
-
-    const failedChunks = chunkErrors
-      .map((err, idx) => err ? `分片 ${idx + 1}/${chunkTotal}: ${err}` : null)
-      .filter(Boolean);
-    const completedResults = chunkResults.filter((item): item is StoredCommitItem => Boolean(item));
-    if (failedChunks.length > 0 || completedResults.length !== chunkTotal) {
-      const message = failedChunks[0] || "部分分片上传失败";
-      updateFile(entry.id, { state: "error", error: message });
-      throw new Error(message);
-    }
-
-    updateFile(entry.id, { state: "done", progress: 100 });
-    recordFileLoaded(entry.id, fileSize, true);
-    debugLog?.("upload", "file:done", { fileName: entry.uploadName, fileSize, chunkTotal });
-    return completedResults;
   };
 
   /** Start uploading all pending files, then commit. */
@@ -894,13 +857,13 @@ export function FileUploader({
           (total, file) => total + file.commit_items.filter(isStoredCommitItemFresh).length,
           0,
         );
-        const total = existingSession.files.reduce((sum, file) => sum + file.chunk_total, 0);
-        debugLog?.("upload", "session:found", { uploadBatchId: existingSession.upload_batch_id, completedChunks: completed, totalChunks: total });
-        const resume = window.confirm(`发现未完成的上传进度（已完成 ${completed}/${total} 个分片），是否继续上传？`);
+        const total = existingSession.files.length;
+        debugLog?.("upload", "session:found", { uploadBatchId: existingSession.upload_batch_id, completedFiles: completed, totalFiles: total });
+        const resume = window.confirm(`发现未完成的上传进度（已完成 ${completed}/${total} 个文件），是否继续上传？`);
         if (resume) {
           session = existingSession;
-          if (completed > 0) setResumeMessage(`已恢复 ${completed}/${total} 个分片`);
-          debugLog?.("upload", "session:resume", { uploadBatchId: session.upload_batch_id, completedChunks: completed, totalChunks: total });
+          if (completed > 0) setResumeMessage(`已恢复 ${completed}/${total} 个文件`);
+          debugLog?.("upload", "session:resume", { uploadBatchId: session.upload_batch_id, completedFiles: completed, totalFiles: total });
         } else {
           await deleteUploadSession(existingSession.upload_batch_id);
           session = createSessionForCurrentSelection(generateUUID(), fileKeys);
