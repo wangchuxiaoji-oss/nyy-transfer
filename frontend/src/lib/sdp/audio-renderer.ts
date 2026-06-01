@@ -15,7 +15,10 @@
 export class AudioRenderer {
   private decoder: AudioDecoder | null = null;
   private audioCtx: AudioContext | null = null;
+  private gainNode: GainNode | null = null;
   private disposed = false;
+  private volume = 1;
+  private muted = false;
 
   // Mapping: media time -> AudioContext time
   private ctxStartTime = -1; // AudioContext.currentTime when play() is called
@@ -29,6 +32,9 @@ export class AudioRenderer {
   /** Configure audio decoder and create AudioContext */
   async configure(config: AudioDecoderConfig): Promise<AudioContext> {
     this.audioCtx = new AudioContext({ sampleRate: config.sampleRate });
+    this.gainNode = this.audioCtx.createGain();
+    this.gainNode.gain.value = this.muted ? 0 : this.volume;
+    this.gainNode.connect(this.audioCtx.destination);
     // Suspend immediately — we'll resume on play()
     // (Chrome auto-suspends anyway until user gesture)
 
@@ -142,7 +148,7 @@ export class AudioRenderer {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    source.connect(this.gainNode ?? ctx.destination);
     source.onended = () => {
       this.scheduledSources.delete(source);
       try { source.disconnect(); } catch {}
@@ -202,6 +208,30 @@ export class AudioRenderer {
     return Math.max(0, this.scheduledEnd - ctx.currentTime);
   }
 
+  setVolume(volume: number) {
+    this.volume = Math.max(0, Math.min(1, volume));
+    this.applyGain();
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    this.applyGain();
+  }
+
+  getVolume(): number {
+    return this.volume;
+  }
+
+  isMuted(): boolean {
+    return this.muted;
+  }
+
+  private applyGain() {
+    const gain = this.gainNode;
+    if (!gain) return;
+    gain.gain.value = this.muted ? 0 : this.volume;
+  }
+
   /** Reset for seek */
   async reset(config: AudioDecoderConfig) {
     // Kill any audio already scheduled on the AudioContext timeline first —
@@ -229,6 +259,7 @@ export class AudioRenderer {
       try { this.audioCtx.close(); } catch {}
       this.audioCtx = null;
     }
+    this.gainNode = null;
   }
 }
 

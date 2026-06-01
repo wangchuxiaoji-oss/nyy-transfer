@@ -137,7 +137,7 @@ async function loadMp4Metadata(file: ShareFileDownload, signal?: AbortSignal): P
         settled = true;
         reject(new Error("mp4 metadata parsing timed out"));
       }
-    }, 5000);
+    }, 15000);
     mp4boxFile.onReady = (value) => {
       if (!settled) {
         settled = true;
@@ -170,6 +170,14 @@ async function loadMp4Metadata(file: ShareFileDownload, signal?: AbortSignal): P
     const moovBuffer = moov as ArrayBuffer & { fileStart: number };
     moovBuffer.fileStart = moovOffset;
     mp4boxFile.appendBuffer(moovBuffer);
+  }
+
+  // Some MP4 layouts need an explicit flush to trigger onReady after the
+  // necessary metadata bytes have been appended.
+  try {
+    mp4boxFile.flush();
+  } catch {
+    // Ignore and continue waiting for onReady / timeout.
   }
 
   return { mp4boxFile, info: await infoPromise, virtualFile: vf };

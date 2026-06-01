@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useLayoutEffect } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import { createVirtualMediaFileId, registerVirtualMediaFile } from "@/lib/virtual-media";
 import { canNativePlayAc3, decodeAc3Window } from "@/lib/ac3-sidecar";
 import type { DebugLogFn } from "@/lib/debug";
+import { PlayerChrome, type PlayerViewState } from "@/components/player-chrome";
 
 const VIDEO_EXTS = ["mp4", "webm", "ogg", "mov"];
 const AUDIO_EXTS = ["mp3", "aac", "ogg", "wav", "flac", "m4a"];
-const usePlyrEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function getMediaType(fileName: string): "video" | "audio" | null {
   const ext = fileName.split(".").pop()?.toLowerCase() || "";
@@ -24,71 +24,45 @@ interface MediaPlayerProps {
 }
 
 export function MediaPlayer({ file, className = "", debugLog }: MediaPlayerProps) {
-  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const plyrRef = useRef<any>(null);
-  const [error, setError] = useState("");
-
   const mediaType = getMediaType(file.file_name);
-
-  usePlyrEffect(() => {
-    if (!mediaRef.current || !mediaType) return;
-    let cancelled = false;
-
-    import("plyr").then(({ default: Plyr }) => {
-      if (cancelled || !mediaRef.current) return;
-      plyrRef.current = new Plyr(mediaRef.current, {
-        controls: [
-          "play-large", "play", "progress", "current-time",
-          "duration", "mute", "volume",
-          ...(mediaType === "video" ? ["fullscreen" as const] : []),
-        ],
-        tooltips: { controls: false, seek: true },
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      try { plyrRef.current?.destroy(); } catch {}
-      plyrRef.current = null;
-    };
-  }, [mediaType]);
-
   if (!mediaType) return null;
 
   if (file.is_chunked && file.chunks?.length > 0) {
     return <NativeRangeChunkedMediaPlayer file={file} mediaType={mediaType} className={className} debugLog={debugLog} />;
   }
 
-  // Small file — direct URL playback
-  if (mediaType === "video") {
-    return (
-      <div className={className}>
-        <video
-          ref={mediaRef as React.RefObject<HTMLVideoElement>}
-          src={file.download_url}
-          crossOrigin="anonymous"
-          preload="metadata"
-          playsInline
-          className="w-full rounded-2xl overflow-hidden"
-          onError={() => setError("视频加载失败")}
-        />
-        {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
-      </div>
-    );
-  }
+  return <NativeDirectMediaPlayer file={file} mediaType={mediaType} className={className} />;
+}
+
+function NativeDirectMediaPlayer({ file, mediaType, className = "" }: { file: ShareFileDownload; mediaType: "video" | "audio"; className?: string }) {
+  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
+  const [error, setError] = useState("");
+  const { view, actions } = useNativeMediaChrome({
+    mediaRef,
+    mediaType,
+    title: file.file_name,
+    modeLabel: mediaType === "video" ? "native-direct" : "native-audio",
+    loading: false,
+    error,
+  });
 
   return (
     <div className={className}>
-      <audio
-        ref={mediaRef as React.RefObject<HTMLAudioElement>}
-        src={file.download_url}
-        crossOrigin="anonymous"
-        preload="metadata"
-        className="w-full"
-        onError={() => setError("音频加载失败")}
-      />
-      {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
+      <PlayerChrome view={view} actions={actions}>
+        {mediaType === "video" ? (
+          <video
+            ref={mediaRef as React.RefObject<HTMLVideoElement>}
+            src={file.download_url}
+            crossOrigin="anonymous"
+            preload="metadata"
+            playsInline
+            className="block w-full bg-black"
+            onError={() => setError("视频加载失败")}
+          />
+        ) : (
+          <AudioSurface mediaRef={mediaRef as React.RefObject<HTMLAudioElement>} src={file.download_url} loading={false} onError={() => setError("音频加载失败")} />
+        )}
+      </PlayerChrome>
     </div>
   );
 }
@@ -106,8 +80,6 @@ function NativeRangeChunkedMediaPlayer({
   debugLog?: DebugLogFn;
 }) {
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const plyrRef = useRef<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [sourceUrl, setSourceUrl] = useState("");
@@ -119,6 +91,8 @@ function NativeRangeChunkedMediaPlayer({
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const sidecarUiVolumeRef = useRef(1);
+  const sidecarUiMutedRef = useRef(false);
   const sidecarTimerRef = useRef<number | null>(null);
   const sidecarStartingRef = useRef(false);
   const sidecarWindowRef = useRef<{ start: number; end: number } | null>(null);
@@ -220,7 +194,6 @@ function NativeRangeChunkedMediaPlayer({
     const startSec = Math.max(0, Math.floor(video.currentTime || 0));
     console.debug("[MediaPlayer] sidecar start", { startSec });
     debugLog?.("sidecar", "decode:start", { startSec, windowSec: 24 });
-    video.pause();
     const windowSec = 24;
     setSidecarStatus(`解码 AC-3 音频窗口：${formatTime(startSec)} → ${formatTime(startSec + windowSec)}`);
 
@@ -229,13 +202,14 @@ function NativeRangeChunkedMediaPlayer({
       const decoded = await decodeAc3Window(file, startSec, windowSec, abort.signal);
       if (abort.signal.aborted || !mediaRef.current) return;
       const windowDuration = decoded.totalSamples / decoded.sampleRate;
-      console.debug("[MediaPlayer] sidecar decoded", { startSec, duration: windowDuration });
+      const decodeMs = Math.round(performance.now() - decodeStartedAt);
+      console.debug("[MediaPlayer] sidecar decoded", { startSec, duration: windowDuration, decodeMs });
       debugLog?.("sidecar", "decode:done", {
         startSec,
         duration: windowDuration,
         sampleRate: decoded.sampleRate,
         channels: decoded.channels,
-        decodeMs: Math.round(performance.now() - decodeStartedAt),
+        decodeMs,
       });
       const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextCtor) throw new Error("当前浏览器不支持 AudioContext");
@@ -251,42 +225,42 @@ function NativeRangeChunkedMediaPlayer({
       if (!audioGainRef.current) {
         audioGainRef.current = ctx.createGain();
         audioGainRef.current.connect(ctx.destination);
-        // Sync initial gain with Plyr's current volume
-        const plyr = plyrRef.current;
-        if (plyr) {
-          audioGainRef.current.gain.value = plyr.muted ? 0 : plyr.volume;
-        }
+        audioGainRef.current.gain.value = sidecarUiMutedRef.current ? 0 : sidecarUiVolumeRef.current;
       }
       src.connect(audioGainRef.current);
       audioSourceRef.current = src;
       sidecarWindowRef.current = { start: startSec, end: startSec + windowDuration };
+      src.onended = () => {
+        if (audioSourceRef.current === src) audioSourceRef.current = null;
+      };
 
-      if (Math.abs(video.currentTime - startSec) > 0.35) {
-        sidecarSeekingRef.current = true;
-        video.currentTime = startSec;
-        sidecarSeekingRef.current = false;
+      // Sync audio to where the video is NOW (it kept playing during decode).
+      // If the video advanced past the start, offset into the decoded buffer.
+      const videoNow = video.currentTime;
+      const offsetSec = Math.max(0, videoNow - startSec);
+      if (offsetSec >= windowDuration) {
+        // Video already past this entire window; discard and let the next refresh handle it.
+        console.debug("[MediaPlayer] sidecar skip (video past window)", { startSec, videoNow, windowDuration });
+        debugLog?.("sidecar", "decode:skip", { startSec, videoNow, windowDuration });
+        return;
       }
-      try {
-        await video.play();
-      } catch (playErr) {
-        if ((playErr as DOMException)?.name === "NotAllowedError") {
-          throw new Error("浏览器阻止了自动播放，请手动点击播放");
-        }
-        throw playErr;
-      }
-      src.start(0);
-      console.debug("[MediaPlayer] sidecar playback started", { startSec });
-      debugLog?.("sidecar", "playback:start", { startSec, windowDuration });
+      src.start(0, offsetSec);
+      console.debug("[MediaPlayer] sidecar playback started", { startSec, offsetSec, videoNow, windowDuration });
+      debugLog?.("sidecar", "playback:start", { startSec, offsetSec, videoNow, windowDuration });
       setSidecarStatus(`AC-3 wasm 音频播放中：${formatTime(startSec)}`);
 
-      const refreshMs = Math.max(2000, (windowDuration - 2) * 1000);
+      const remainingSec = windowDuration - offsetSec;
+      const refreshMs = Math.max(2000, (remainingSec - 2) * 1000);
       sidecarTimerRef.current = window.setTimeout(() => {
         if (!abort.signal.aborted) void startSidecarAudioWindow(true);
       }, refreshMs);
     } catch (err) {
+      sidecarSeekingRef.current = false;
       console.warn("[MediaPlayer] sidecar error", err);
       debugLog?.("sidecar", "error", { error: err instanceof Error ? err.message : String(err), aborted: abort.signal.aborted });
-      if (!abort.signal.aborted) setError(err instanceof Error ? err.message : "AC-3 音频解码失败");
+      if (!abort.signal.aborted) {
+        setSidecarStatus(err instanceof Error ? `AC-3 音频暂不可用：${err.message}` : "AC-3 音频暂不可用");
+      }
     } finally {
       sidecarStartingRef.current = false;
     }
@@ -309,7 +283,6 @@ function NativeRangeChunkedMediaPlayer({
         });
         seekStartRef.current = null;
       }
-      if (needsSidecarAc3 && !audioSourceRef.current && !sidecarStartingRef.current) void startSidecarAudioWindow(true);
     };
     const onPause = () => {
       debugLog?.("player", "pause", { currentTime: Number(video.currentTime.toFixed(3)), readyState: video.readyState });
@@ -337,7 +310,6 @@ function NativeRangeChunkedMediaPlayer({
         paused: video.paused,
         buffered: describeBuffered(video),
       });
-      if (!video.paused) void startSidecarAudioWindow(true);
     };
     const onTimeUpdate = () => {
       const seek = seekStartRef.current;
@@ -379,31 +351,7 @@ function NativeRangeChunkedMediaPlayer({
     };
   }, [debugLog, mediaType, needsSidecarAc3, startSidecarAudioWindow, stopSidecarAudio]);
 
-  usePlyrEffect(() => {
-    if (!mediaRef.current || !mediaType || loading || fallbackToMse || !sourceUrl) return;
-    let cancelled = false;
-    import("plyr").then(({ default: Plyr }) => {
-      if (cancelled || !mediaRef.current) return;
-      plyrRef.current = new Plyr(mediaRef.current, {
-        controls: [
-          "play-large", "play", "progress", "current-time",
-          "duration", "mute", "volume",
-          ...(mediaType === "video" ? ["fullscreen" as const] : []),
-        ],
-        tooltips: { controls: false, seek: true },
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      try { plyrRef.current?.destroy(); } catch {}
-      plyrRef.current = null;
-    };
-  }, [fallbackToMse, loading, mediaType, sourceUrl]);
-
-  // Sync Plyr volume/mute to sidecar WebAudio GainNode
-  // The <video> stays muted (Chrome can't decode AC-3 natively), but Plyr's
-  // volume slider controls the sidecar audio via GainNode.
+  // Keep the native video muted while syncing UI volume/mute to sidecar WebAudio.
   useEffect(() => {
     if (!needsSidecarAc3) return;
     const el = mediaRef.current as HTMLVideoElement | null;
@@ -411,12 +359,8 @@ function NativeRangeChunkedMediaPlayer({
     const syncGain = () => {
       const gain = audioGainRef.current;
       if (!gain) return;
-      const plyr = plyrRef.current;
-      if (plyr) {
-        gain.gain.value = plyr.muted ? 0 : plyr.volume;
-        // Force video muted to prevent garbled AC-3 output
-        if (!el.muted) el.muted = true;
-      }
+      gain.gain.value = sidecarUiMutedRef.current ? 0 : sidecarUiVolumeRef.current;
+      el.muted = true;
     };
     el.addEventListener("volumechange", syncGain);
     return () => el.removeEventListener("volumechange", syncGain);
@@ -477,6 +421,23 @@ function NativeRangeChunkedMediaPlayer({
     return () => clearInterval(timer);
   }, [loading, mediaType, needsSidecarAc3, startSidecarAudioWindow]);
 
+  const { view, actions } = useNativeMediaChrome({
+    mediaRef,
+    mediaType,
+    title: file.file_name,
+    modeLabel,
+    loading,
+    error,
+    forcedNativeMuted: needsSidecarAc3,
+    onUiVolumeChange: (nextVolume, nextMuted) => {
+      sidecarUiVolumeRef.current = nextVolume;
+      sidecarUiMutedRef.current = nextMuted;
+      if (audioGainRef.current) {
+        audioGainRef.current.gain.value = nextMuted ? 0 : nextVolume;
+      }
+    },
+  });
+
   if (fallbackToMse) {
     return (
       <div className={className}>
@@ -485,47 +446,31 @@ function NativeRangeChunkedMediaPlayer({
     );
   }
 
-  if (mediaType === "video") {
-    return (
-      <div className={`relative min-h-48 ${className}`}>
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-black/5 text-gray-400 animate-pulse dark:bg-white/[0.03]">
-            原生 Range 加载中...
-          </div>
-        )}
-        <video
-          ref={mediaRef as React.RefObject<HTMLVideoElement>}
-          src={sourceUrl || undefined}
-          crossOrigin="anonymous"
-          preload="metadata"
-          playsInline
-          className="block w-full rounded-2xl overflow-hidden bg-black"
-          style={{ opacity: loading ? 0 : 1 }}
-          onError={() => { if (sourceUrl) setError("视频加载失败"); }}
-        />
-        {!loading && <p className="type-caption mt-2 text-gray-500 dark:text-gray-400">播放模式：{modeLabel}</p>}
-        {sidecarStatus && <p className="type-caption mt-1 text-gray-500 dark:text-gray-400">音频：{sidecarStatus}</p>}
-        {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
-      </div>
-    );
-  }
-
   return (
     <div className={className}>
-      {loading && (
-        <div className="flex items-center justify-center h-12 text-gray-400 animate-pulse">
-          原生 Range 加载中...
-        </div>
-      )}
-      <audio
-        ref={mediaRef as React.RefObject<HTMLAudioElement>}
-        src={sourceUrl || undefined}
-        crossOrigin="anonymous"
-        preload="metadata"
-        className="w-full"
-        style={{ opacity: loading ? 0 : 1 }}
-        onError={() => setError("音频加载失败")}
-      />
+      <PlayerChrome view={view} actions={actions}>
+        {mediaType === "video" ? (
+          <video
+            ref={mediaRef as React.RefObject<HTMLVideoElement>}
+            src={sourceUrl || undefined}
+            crossOrigin="anonymous"
+            preload="metadata"
+            playsInline
+            className="block w-full bg-black"
+            style={{ opacity: loading ? 0 : 1 }}
+            onError={() => { if (sourceUrl) setError("视频加载失败"); }}
+          />
+        ) : (
+          <AudioSurface
+            mediaRef={mediaRef as React.RefObject<HTMLAudioElement>}
+            src={sourceUrl || undefined}
+            loading={loading}
+            onError={() => setError("音频加载失败")}
+          />
+        )}
+      </PlayerChrome>
+      {!loading && <p className="type-caption mt-2 text-gray-500 dark:text-gray-400">播放模式：{modeLabel}</p>}
+      {sidecarStatus && <p className="type-caption mt-1 text-gray-500 dark:text-gray-400">音频：{sidecarStatus}</p>}
       {error && <p className="text-sm text-red-500 mt-1">{error}</p>}
     </div>
   );
@@ -592,6 +537,219 @@ function describeBuffered(media: HTMLMediaElement): string {
     ranges.push(`${media.buffered.start(i).toFixed(1)}-${media.buffered.end(i).toFixed(1)}`);
   }
   return ranges.join(",");
+}
+
+function useNativeMediaChrome({
+  mediaRef,
+  mediaType,
+  title,
+  modeLabel,
+  loading,
+  error,
+  forcedNativeMuted = false,
+  onUiVolumeChange,
+}: {
+  mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement>;
+  mediaType: "video" | "audio";
+  title: string;
+  modeLabel: string;
+  loading: boolean;
+  error: string;
+  forcedNativeMuted?: boolean;
+  onUiVolumeChange?: (volume: number, muted: boolean) => void;
+}) {
+  const [state, setState] = useState<PlayerViewState["state"]>(loading ? "loading" : "idle");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [uiMuted, setUiMuted] = useState(false);
+  const [uiVolume, setUiVolume] = useState(1);
+  const [playbackRate, setPlaybackRate] = useState(1);
+
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media) return;
+
+    const syncFromMedia = () => {
+      setCurrentTime(media.currentTime || 0);
+      setDuration(Number.isFinite(media.duration) ? media.duration : 0);
+      if (!forcedNativeMuted) {
+        setIsMuted(media.muted);
+        setVolume(media.volume);
+      }
+      setPlaybackRate(media.playbackRate || 1);
+    };
+
+    const updateState = () => {
+      if (media.ended) setState("ended");
+      else if (media.paused) setState(loading ? "loading" : "paused");
+      else setState("playing");
+      syncFromMedia();
+    };
+
+    const onLoadedMetadata = () => {
+      setDuration(Number.isFinite(media.duration) ? media.duration : 0);
+      syncFromMedia();
+      if (!loading) setState(media.paused ? "ready" : "playing");
+    };
+
+    const onError = () => setState("error");
+    const onPlay = () => updateState();
+    const onPause = () => updateState();
+    const onSeeking = () => setState("seeking");
+    const onSeeked = () => updateState();
+    const onTimeUpdate = () => setCurrentTime(media.currentTime || 0);
+    const onVolumeChange = () => syncFromMedia();
+    const onRateChange = () => setPlaybackRate(media.playbackRate || 1);
+    const onWaiting = () => setState("loading");
+    const onCanPlay = () => {
+      syncFromMedia();
+      if (media.paused) setState("ready");
+    };
+
+    media.addEventListener("loadedmetadata", onLoadedMetadata);
+    media.addEventListener("error", onError);
+    media.addEventListener("play", onPlay);
+    media.addEventListener("pause", onPause);
+    media.addEventListener("seeking", onSeeking);
+    media.addEventListener("seeked", onSeeked);
+    media.addEventListener("timeupdate", onTimeUpdate);
+    media.addEventListener("volumechange", onVolumeChange);
+    media.addEventListener("ratechange", onRateChange);
+    media.addEventListener("waiting", onWaiting);
+    media.addEventListener("canplay", onCanPlay);
+
+    if (forcedNativeMuted) media.muted = true;
+    syncFromMedia();
+    setState(loading ? "loading" : media.paused ? "ready" : "playing");
+
+    return () => {
+      media.removeEventListener("loadedmetadata", onLoadedMetadata);
+      media.removeEventListener("error", onError);
+      media.removeEventListener("play", onPlay);
+      media.removeEventListener("pause", onPause);
+      media.removeEventListener("seeking", onSeeking);
+      media.removeEventListener("seeked", onSeeked);
+      media.removeEventListener("timeupdate", onTimeUpdate);
+      media.removeEventListener("volumechange", onVolumeChange);
+      media.removeEventListener("ratechange", onRateChange);
+      media.removeEventListener("waiting", onWaiting);
+      media.removeEventListener("canplay", onCanPlay);
+    };
+  }, [forcedNativeMuted, loading, mediaRef]);
+
+  const view: PlayerViewState = {
+    state: error ? "error" : state,
+    currentTime,
+    duration,
+    buffering: null,
+    error,
+    title,
+    modeLabel,
+    isMuted: forcedNativeMuted ? uiMuted : isMuted,
+    volume: forcedNativeMuted ? uiVolume : volume,
+    playbackRate,
+    canSeek: duration > 0 && state !== "loading" && state !== "idle" && state !== "error",
+    canFullscreen: mediaType === "video",
+    canPictureInPicture: mediaType === "video",
+    canVolume: true,
+    canSpeed: true,
+    canSubtitles: false,
+    canQuality: false,
+    unsupportedReasons: {
+      subtitles: "当前未接入字幕轨",
+      quality: "当前播放源为单轨，不支持手动切画质",
+      pip: mediaType !== "video" ? "音频不支持画中画" : undefined,
+      fullscreen: mediaType !== "video" ? "音频不支持全屏" : undefined,
+    },
+  };
+
+  const actions = {
+    play: () => {
+      void mediaRef.current?.play();
+    },
+    pause: () => mediaRef.current?.pause(),
+    seek: (seconds: number) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      media.currentTime = Math.max(0, seconds);
+    },
+    setVolume: (nextVolume: number) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      const safeVolume = Math.max(0, Math.min(1, nextVolume));
+      media.volume = safeVolume;
+      if (forcedNativeMuted) {
+        media.muted = true;
+        setUiVolume(safeVolume);
+        onUiVolumeChange?.(safeVolume, uiMuted);
+      }
+    },
+    setMuted: (nextMuted: boolean) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      if (forcedNativeMuted) {
+        media.muted = true;
+        setUiMuted(nextMuted);
+        onUiVolumeChange?.(uiVolume, nextMuted);
+        return;
+      }
+      media.muted = nextMuted;
+    },
+    setPlaybackRate: (nextRate: number) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      media.playbackRate = nextRate;
+    },
+    enterFullscreen: async () => {
+      const media = mediaRef.current;
+      const host = media?.parentElement;
+      if (!host?.requestFullscreen) return;
+      await host.requestFullscreen();
+    },
+    togglePictureInPicture: async () => {
+      const media = mediaRef.current as HTMLVideoElement | null;
+      if (!media || mediaType !== "video") return;
+      if (document.pictureInPictureElement === media) {
+        await document.exitPictureInPicture();
+      } else if (media.requestPictureInPicture) {
+        await media.requestPictureInPicture();
+      }
+    },
+  };
+
+  return { view, actions };
+}
+
+function AudioSurface({
+  mediaRef,
+  src,
+  loading,
+  onError,
+}: {
+  mediaRef: React.RefObject<HTMLAudioElement>;
+  src?: string;
+  loading: boolean;
+  onError: () => void;
+}) {
+  return (
+    <div className="flex min-h-48 items-center justify-center bg-gradient-to-br from-black via-neutral-950 to-neutral-800 text-white/70">
+      <div className="text-center">
+        <div className="text-4xl">♪</div>
+        <div className="mt-2 text-xs uppercase tracking-[0.3em] text-white/40">audio</div>
+      </div>
+      <audio
+        ref={mediaRef}
+        src={src}
+        crossOrigin="anonymous"
+        preload="metadata"
+        className="hidden"
+        style={{ opacity: loading ? 0 : 1 }}
+        onError={onError}
+      />
+    </div>
+  );
 }
 
 export { getMediaType };

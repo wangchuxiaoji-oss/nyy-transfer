@@ -284,6 +284,22 @@ export class PlayerEngine {
     this.setState("paused");
   }
 
+  setVolume(volume: number) {
+    this.audioRenderer?.setVolume(volume);
+  }
+
+  setMuted(muted: boolean) {
+    this.audioRenderer?.setMuted(muted);
+  }
+
+  getVolume(): number {
+    return this.audioRenderer?.getVolume() ?? 1;
+  }
+
+  isMuted(): boolean {
+    return this.audioRenderer?.isMuted() ?? false;
+  }
+
   /** Warm keyframe lookup before the user commits a seek. */
   async prewarmSeek(targetSec: number): Promise<void> {
     if (this.disposed || this.seeking || !this.videoInfo || !this.duration) return;
