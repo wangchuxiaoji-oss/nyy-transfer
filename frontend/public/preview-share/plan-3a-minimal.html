@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<title>方案 3A · 极简白 — nyy</title>
+<style>
+  /* === 主题变量 === */
+  :root, [data-theme="light"] {
+    --bg: #ffffff;
+    --bg-soft: #fafafa;
+    --bg-mute: #f5f5f7;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --border-soft: #f3f4f6;
+    --text: #111827;
+    --text-muted: #6b7280;
+    --text-dim: #9ca3af;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 30px rgba(0,0,0,0.08);
+    --orange: #FF8A3D;
+    --orange-dark: #E8762E;
+    --orange-soft: #FFF4EB;
+  }
+  [data-theme="dark"] {
+    --bg: #0a0a0c;
+    --bg-soft: #131316;
+    --bg-mute: #1a1a1d;
+    --card: #16161a;
+    --border: #2a2a2e;
+    --border-soft: #1f1f23;
+    --text: #f5f5f7;
+    --text-muted: #a1a1a6;
+    --text-dim: #6e6e73;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 10px 30px rgba(0,0,0,0.5);
+    --orange: #FF8A3D;
+    --orange-dark: #E8762E;
+    --orange-soft: rgba(255,138,61,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    [data-theme="auto"] {
+      --bg: #0a0a0c;
+      --bg-soft: #131316;
+      --bg-mute: #1a1a1d;
+      --card: #16161a;
+      --border: #2a2a2e;
+      --border-soft: #1f1f23;
+      --text: #f5f5f7;
+      --text-muted: #a1a1a6;
+      --text-dim: #6e6e73;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-lg: 0 10px 30px rgba(0,0,0,0.5);
+      --orange-soft: rgba(255,138,61,0.12);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: var(--bg);
+    color: var(--text);
+  }
+  body { padding: 0; min-height: 100vh; }
+
+  /* === 顶部控制栏 === */
+  .control-bar {
+    position: sticky; top: 0; z-index: 100;
+    height: 56px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+  }
+  .control-bar h1 { font-size: 14px; font-weight: 600; }
+  .control-bar h1 b { color: var(--orange); }
+  .control-bar .sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .control-right { display: flex; align-items: center; gap: 8px; }
+
+  .state-tabs { display: flex; gap: 4px; background: var(--bg-mute); padding: 4px; border-radius: 8px; }
+  .state-tab {
+    padding: 6px 12px; font-size: 12px; font-weight: 500;
+    border-radius: 6px; cursor: pointer;
+    color: var(--text-muted);
+    border: none; background: transparent;
+    transition: all 0.15s;
+  }
+  .state-tab.active { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+  .state-tab:hover:not(.active) { color: var(--text); }
+
+  .theme-toggle {
+    display: flex; gap: 2px; background: var(--bg-mute);
+    padding: 3px; border-radius: 8px;
+  }
+  .theme-btn {
+    width: 32px; height: 28px;
+    border-radius: 5px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    background: transparent; border: none;
+    font-size: 14px;
+    transition: all 0.15s;
+  }
+  .theme-btn.active { background: var(--card); color: var(--orange); box-shadow: var(--shadow); }
+
+  /* === 浏览器外壳 === */
+  .stage {
+    background: var(--bg-soft);
+    min-height: calc(100vh - 56px);
+    padding: 32px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .browser {
+    width: 100%; max-width: 1600px;
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    min-height: 800px;
+  }
+  .chrome {
+    height: 44px;
+    background: linear-gradient(to bottom, #ebebeb, #d6d6d6);
+    display: flex; align-items: center;
+    padding: 0 16px; gap: 14px;
+    border-bottom: 1px solid #b8b8b8;
+    flex-shrink: 0;
+  }
+  [data-theme="dark"] .chrome, [data-theme="auto"] .chrome {
+    background: linear-gradient(to bottom, #1f1f1f, #0d0d0d);
+    border-bottom: 1px solid #000;
+  }
+  .lights { display: flex; gap: 8px; }
+  .lights span { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights .r { background: #ff5f57; box-shadow: inset 0 0 0 0.5px #e0443e; }
+  .lights .y { background: #febc2e; box-shadow: inset 0 0 0 0.5px #dea123; }
+  .lights .g { background: #28c840; box-shadow: inset 0 0 0 0.5px #1aab29; }
+  .toolbar { display: flex; gap: 4px; }
+  .toolbar .btn { width: 28px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #5a5a5a; font-size: 14px; }
+  [data-theme="dark"] .toolbar .btn, [data-theme="auto"] .toolbar .btn { color: #999; }
+  .toolbar .btn.disabled { color: #b8b8b8; }
+  .addr {
+    flex: 1; max-width: 600px; height: 28px;
+    background: white; border-radius: 6px;
+    display: flex; align-items: center;
+    padding: 0 12px; gap: 8px;
+    font-size: 12px; color: #2a2a2a;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15);
+  }
+  [data-theme="dark"] .addr, [data-theme="auto"] .addr {
+    background: #1a1a1a; color: #d0d0d0; box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.1);
+  }
+  .addr .lock { color: #4a4a4a; font-size: 11px; }
+  [data-theme="dark"] .addr .lock, [data-theme="auto"] .addr .lock { color: #999; }
+  .viewport { flex: 1; overflow: hidden; position: relative; background: var(--bg); }
+
+  /* === 状态 === */
+  .state { display: none; height: 100%; }
+  .state.active { display: flex; }
+
+  /* 共享组件 */
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 15px;
+    box-shadow: 0 2px 6px rgba(255,138,61,0.35);
+  }
+  .brand-name { font-size: 17px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+  .code-pill {
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; font-weight: 600; padding: 6px 14px; border-radius: 20px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.08em; font-size: 13px;
+    box-shadow: 0 2px 6px rgba(255,138,61,0.3);
+  }
+  .section-title {
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--text-dim);
+    font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border-soft); }
+  .meta-row { display: flex; flex-direction: column; gap: 12px; }
+  .meta-item { display: flex; flex-direction: column; gap: 2px; }
+  .meta-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .meta-item .value { font-size: 13px; color: var(--text); font-weight: 500; }
+  .meta-item .value.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .btn-orange {
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; border: none; cursor: pointer;
+    font-weight: 600; font-size: 14px;
+    padding: 12px; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(255,138,61,0.35);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%;
+  }
+  .btn-ghost {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+    font-weight: 500; font-size: 13px;
+    padding: 10px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%;
+  }
+  .btn-ghost:hover { background: var(--bg-mute); }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; color: var(--text-muted);
+    border: 1px solid transparent;
+    font-size: 14px;
+  }
+  .icon-btn:hover { background: var(--bg-mute); }
+
+  .qr-box {
+    width: 120px; height: 120px;
+    background: white; border-radius: 6px; padding: 6px;
+    display: grid; grid-template-columns: repeat(21, 1fr); grid-template-rows: repeat(21, 1fr);
+    box-shadow: var(--shadow);
+  }
+  .qr-box i { background: #111; border-radius: 1px; opacity: 0; }
+
+  .preview-cta {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px;
+    background: var(--orange-soft);
+    border: 1px dashed var(--orange);
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .preview-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(255,138,61,0.2); }
+  .preview-cta .play-icon {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(255,138,61,0.4);
+  }
+  .preview-cta .play-icon::before {
+    content: ''; width: 0; height: 0;
+    border-left: 16px solid white;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    margin-left: 4px;
+  }
+  .preview-cta .label { font-size: 14px; font-weight: 600; color: var(--text); margin-top: 10px; }
+  .preview-cta .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  /* === 状态 A: 单文件桌面 === */
+  .state-a { display: none; padding: 32px; gap: 24px; height: 100%; }
+  .state-a.active { display: grid; grid-template-columns: 260px 1fr 320px; }
+  .col {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    overflow: hidden;
+  }
+  .col-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+
+  .poster {
+    width: 100%; aspect-ratio: 16/9; max-width: 640px;
+    background:
+      radial-gradient(ellipse at 30% 30%, #3a2010 0%, transparent 55%),
+      radial-gradient(ellipse at 75% 70%, #1a2438 0%, transparent 60%),
+      linear-gradient(135deg, #0f0f1a 0%, #000 100%);
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: var(--shadow-lg);
+  }
+  .poster .title {
+    font-size: 48px; font-weight: 900; color: white;
+    text-shadow: 0 4px 24px rgba(0,0,0,0.9);
+    letter-spacing: 0.04em;
+  }
+  .poster .sub {
+    position: absolute; bottom: 20px; left: 20px;
+    font-size: 11px; color: rgba(255,255,255,0.7);
+    letter-spacing: 0.2em; font-weight: 500;
+  }
+
+  /* === 状态 B: 多文件 2-5 桌面 === */
+  .state-b { display: none; padding: 24px 32px; gap: 20px; height: 100%; flex-direction: column; }
+  .state-b.active { display: flex; }
+  .topbar-b {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0; gap: 16px;
+  }
+  .topbar-b .left { display: flex; align-items: center; gap: 12px; }
+  .file-summary {
+    background: var(--orange-soft); color: var(--orange-dark);
+    padding: 6px 14px; border-radius: 16px;
+    font-size: 13px; font-weight: 500;
+  }
+  .actions-b { display: flex; gap: 8px; }
+  .actions-b .btn-orange { width: auto; padding: 10px 18px; }
+
+  .b-grid { display: grid; grid-template-columns: 280px 1fr 320px; gap: 20px; flex: 1; min-height: 0; }
+  .file-list { display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+  .file-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .file-item:hover { border-color: var(--orange); }
+  .file-item.active { border-color: var(--orange); background: var(--orange-soft); }
+  .file-icon-mini {
+    width: 32px; height: 32px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: white;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    flex-shrink: 0;
+  }
+  .file-icon-mini.txt { background: linear-gradient(135deg, #6b7280, #4b5563); }
+  .file-info-mini { flex: 1; min-width: 0; }
+  .file-info-mini .name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-info-mini .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .preview-mini-btn {
+    width: 32px; height: 32px; border-radius: 6px;
+    background: var(--orange-soft); color: var(--orange);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0;
+  }
+  .download-mini-btn {
+    width: 32px; height: 32px; border-radius: 6px;
+    background: var(--bg-mute); color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .center-stage {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    min-height: 0;
+  }
+
+  /* === 状态 D: 单文件手机 === */
+  .state-d { display: none; padding: 16px; height: 100%; overflow-y: auto; }
+  .state-d.active { display: block; }
+  .phone-frame {
+    max-width: 380px; margin: 0 auto;
+    background: var(--bg-soft);
+    border-radius: 24px;
+    padding: 12px;
+    box-shadow: var(--shadow-lg);
+    min-height: 720px;
+  }
+  .phone-screen {
+    background: var(--bg);
+    border-radius: 18px;
+    overflow: hidden;
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .phone-top {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .phone-top .brand-mark { width: 28px; height: 28px; font-size: 13px; }
+  .phone-top .brand-name { font-size: 14px; }
+  .phone-code {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    background: var(--bg-mute); padding: 4px 10px; border-radius: 8px;
+    color: var(--text);
+  }
+  .phone-meta { display: flex; flex-direction: column; gap: 2px; padding: 0 4px; }
+  .phone-meta .l { font-size: 11px; color: var(--text-dim); }
+  .phone-meta .v { font-size: 13px; color: var(--text); font-weight: 500; }
+  .phone-poster {
+    aspect-ratio: 16/9;
+    background:
+      radial-gradient(ellipse at 30% 30%, #3a2010 0%, transparent 55%),
+      radial-gradient(ellipse at 75% 70%, #1a2438 0%, transparent 60%),
+      linear-gradient(135deg, #0f0f1a 0%, #000 100%);
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .phone-poster .title { font-size: 32px; font-weight: 900; color: white; text-shadow: 0 2px 12px rgba(0,0,0,0.9); }
+  .phone-poster .play-mini {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 56px; height: 56px; border-radius: 50%;
+    background: rgba(255,138,61,0.95);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(255,138,61,0.5);
+  }
+  .phone-poster .play-mini::before {
+    content: ''; width: 0; height: 0;
+    border-left: 16px solid white;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    margin-left: 3px;
+  }
+  .phone-cta { display: flex; flex-direction: column; gap: 8px; }
+  .phone-cta .btn-orange { padding: 14px; font-size: 14px; }
+  .phone-cta .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .phone-cta .row .btn-ghost { font-size: 12px; padding: 12px; }
+
+  /* === Modal === */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 200;
+    padding: 32px;
+  }
+  .modal-overlay.show { display: flex; }
+  [data-theme="light"] .modal-overlay { background: rgba(255,255,255,0.95); }
+  .modal {
+    width: 100%; max-width: 1200px; height: 100%; max-height: 80vh;
+    background: #000;
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  [data-theme="light"] .modal { box-shadow: 0 30px 80px rgba(0,0,0,0.15); }
+  .modal-close {
+    position: absolute; top: 16px; right: 16px;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(0,0,0,0.5); color: white;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+    font-size: 18px;
+  }
+  .modal-header {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 56px;
+    display: flex; align-items: center;
+    padding: 0 64px 0 24px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+    color: white;
+    z-index: 5;
+  }
+  .modal-header .name { font-size: 13px; font-weight: 500; }
+  .modal-header .counter { font-size: 11px; color: rgba(255,255,255,0.6); margin-left: 8px; font-family: ui-monospace, monospace; }
+  .modal-body { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; position: relative; overflow: hidden; }
+  .viewer { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+
+  .video-viewer { width: 100%; height: 100%; position: relative; background: #000; }
+  .video-viewer canvas { width: 100%; height: 100%; display: block; }
+  .video-mock {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse at 30% 30%, #3a2010 0%, transparent 55%),
+      radial-gradient(ellipse at 75% 70%, #1a2438 0%, transparent 60%),
+      linear-gradient(135deg, #0f0f1a 0%, #000 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .video-mock .title { font-size: 64px; font-weight: 900; color: white; text-shadow: 0 4px 30px rgba(0,0,0,0.9); }
+  .video-mock .play-big {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 80px; height: 80px; border-radius: 50%;
+    background: rgba(255,138,61,0.95);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 24px rgba(255,138,61,0.5);
+  }
+  .video-mock .play-big::before {
+    content: ''; width: 0; height: 0;
+    border-left: 22px solid white;
+    border-top: 14px solid transparent;
+    border-bottom: 14px solid transparent;
+    margin-left: 6px;
+  }
+  .modal-progress {
+    position: absolute; bottom: 60px; left: 0; right: 0;
+    height: 3px; background: rgba(255,255,255,0.2);
+  }
+  .modal-progress-fill { height: 100%; width: 18%; background: var(--orange); }
+  .modal-hud {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 60px;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    display: flex; align-items: center;
+    padding: 0 20px; gap: 16px;
+    color: white;
+  }
+  .modal-hud .btn {
+    background: transparent; color: white; border: none; cursor: pointer;
+    font-size: 16px;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-hud .time { font-size: 12px; font-family: ui-monospace, monospace; }
+  .modal-hud .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  .modal-hud .prev-next { display: flex; gap: 8px; }
+
+  .image-viewer { width: 100%; height: 100%; background: #1a1a1d; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .image-mock {
+    width: 80%; max-width: 800px; aspect-ratio: 16/10;
+    background:
+      linear-gradient(135deg, #2a4a6b 0%, #1a2a3a 60%, #0a1a2a 100%),
+      radial-gradient(ellipse at 40% 30%, rgba(255,200,100,0.4), transparent 50%);
+    border-radius: 4px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    position: relative;
+    overflow: hidden;
+  }
+  .image-mock::before {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 30%;
+    background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+  }
+  .image-mock .label {
+    position: absolute; bottom: 16px; left: 16px;
+    color: rgba(255,255,255,0.9); font-size: 14px; font-weight: 500;
+    z-index: 2;
+  }
+
+  .pdf-viewer { width: 100%; height: 100%; background: #2a2a2e; padding: 20px; overflow: auto; }
+  .pdf-page {
+    width: 70%; max-width: 600px; aspect-ratio: 1/1.41;
+    background: white; margin: 0 auto;
+    border-radius: 2px; padding: 40px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    color: #1a1a1a; font-size: 13px; line-height: 1.6;
+  }
+  .pdf-page h1 { font-size: 22px; margin-bottom: 8px; }
+  .pdf-page h2 { font-size: 16px; margin: 16px 0 6px; color: #555; }
+  .pdf-page p { margin-bottom: 8px; }
+  .pdf-page table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  .pdf-page th, .pdf-page td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  .pdf-page th { background: #f5f5f5; }
+
+  .audio-viewer { width: 100%; height: 100%; background: #0a0a0c; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 40px; }
+  .audio-cover {
+    width: 240px; height: 240px; border-radius: 16px;
+    background: linear-gradient(135deg, #FF8A3D 0%, #E8762E 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 80px; color: white;
+    box-shadow: 0 20px 60px rgba(255,138,61,0.3);
+  }
+  .audio-meta { color: white; text-align: center; }
+  .audio-meta .name { font-size: 18px; font-weight: 600; }
+  .audio-meta .artist { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px; }
+  .audio-wave {
+    width: 80%; max-width: 500px; height: 60px;
+    display: flex; align-items: center; gap: 2px; justify-content: center;
+  }
+  .audio-wave i {
+    width: 3px; background: var(--orange);
+    border-radius: 2px;
+    animation: wave 1.4s ease-in-out infinite;
+  }
+  @keyframes wave { 0%, 100% { height: 8px; } 50% { height: 40px; } }
+  .audio-wave i:nth-child(2) { animation-delay: 0.1s; }
+  .audio-wave i:nth-child(3) { animation-delay: 0.2s; }
+  .audio-wave i:nth-child(4) { animation-delay: 0.3s; }
+  .audio-wave i:nth-child(5) { animation-delay: 0.4s; }
+  .audio-wave i:nth-child(6) { animation-delay: 0.5s; }
+
+  .text-viewer { width: 100%; height: 100%; background: #0a0a0c; padding: 24px; overflow: auto; }
+  .text-content {
+    max-width: 720px; margin: 0 auto;
+    background: #1a1a1d; border-radius: 8px; padding: 24px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; line-height: 1.6;
+    color: #e5e7eb;
+  }
+  .text-content .kw { color: #ff7b72; }
+  .text-content .str { color: #a5d6ff; }
+  .text-content .com { color: #8b949e; }
+  .text-content .num { color: #79c0ff; }
+
+  /* 标签 */
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--orange-soft); color: var(--orange-dark);
+    font-size: 11px; padding: 4px 10px; border-radius: 10px;
+    font-weight: 500;
+  }
+  [data-theme="dark"] .tag, [data-theme="auto"] .tag { color: var(--orange); }
+  .tag .dot { width: 5px; height: 5px; background: var(--orange); border-radius: 50%; }
+
+  .file-block {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg-mute);
+    border-radius: 10px;
+  }
+  .file-block .icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .file-block .info { flex: 1; min-width: 0; }
+  .file-block .info .name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .file-block .info .meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<!-- 控制栏 -->
+<div class="control-bar">
+  <div>
+    <h1>方案 <b>3A</b> · 极简白</h1>
+    <div class="sub">同套布局 · light/dark/auto 三主题现场切换</div>
+  </div>
+  <div class="control-right">
+    <div class="state-tabs" id="stateTabs">
+      <button class="state-tab active" data-state="A">A · 单文件桌面</button>
+      <button class="state-tab" data-state="B">B · 多文件桌面</button>
+      <button class="state-tab" data-state="D">D · 单文件手机</button>
+    </div>
+    <div class="theme-toggle" id="themeToggle">
+      <button class="theme-btn" data-theme="light" title="浅色">☀</button>
+      <button class="theme-btn active" data-theme="auto" title="跟随系统">◐</button>
+      <button class="theme-btn" data-theme="dark" title="深色">☾</button>
+    </div>
+  </div>
+</div>
+
+<!-- 舞台 -->
+<div class="stage">
+  <div class="browser">
+    <div class="chrome">
+      <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <div class="toolbar"><span class="btn">‹</span><span class="btn disabled">›</span></div>
+      <div class="addr"><span class="lock">🔒</span>dev.nyy.app/s/Ab3F7K</div>
+    </div>
+    <div class="viewport">
+
+      <!-- 状态 A: 单文件桌面 -->
+      <div class="state state-a active" id="stateA">
+        <aside class="col">
+          <div class="section-title">分享信息</div>
+          <div class="meta-row">
+            <div class="meta-item"><span class="label">分享者</span><span class="value">小爱同学</span></div>
+            <div class="meta-item"><span class="label">分享时间</span><span class="value">2 天前</span></div>
+            <div class="meta-item"><span class="label">下载次数</span><span class="value">7 / ∞</span></div>
+            <div class="meta-item"><span class="label">过期</span><span class="value">7 天后</span></div>
+            <div class="meta-item">
+              <span class="label">标签</span>
+              <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">
+                <span class="tag"><span class="dot"></span>电影</span>
+                <span class="tag"><span class="dot"></span>1080p</span>
+                <span class="tag"><span class="dot"></span>动作</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <div class="col-center">
+          <div class="poster">
+            <div class="title">碟中谍 8</div>
+            <div class="sub">MISSION: IMPOSSIBLE — THE FINAL RECKONING</div>
+          </div>
+          <div class="preview-cta" onclick="openModal('video')" style="width: 100%; max-width: 640px;">
+            <div class="play-icon"></div>
+            <div class="label">▶ 在线预览视频</div>
+            <div class="sub">点击触发 Modal · 由 SDP 自研引擎驱动</div>
+          </div>
+        </div>
+
+        <aside class="col">
+          <div class="section-title">文件</div>
+          <div class="file-block" style="margin-bottom: 16px;">
+            <div class="icon">MKV</div>
+            <div class="info">
+              <div class="name">碟中谍8-最后的清算.mkv</div>
+              <div class="meta">5.28 GB · H.265 · AC-3</div>
+            </div>
+          </div>
+          <div class="meta-row">
+            <div class="meta-item"><span class="label">分辨率 / 时长</span><span class="value">1920×1080 · 2h 49m</span></div>
+            <div class="meta-item"><span class="label">SHA-256</span><span class="value mono" style="font-size: 11px;">a3f8c2…9b1d</span></div>
+            <div class="meta-item">
+              <span class="label">二维码</span>
+              <div class="qr-box" id="qr1" style="margin-top:6px;"></div>
+            </div>
+          </div>
+          <div style="margin-top: 18px; display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn-orange">⬇ 下载文件 · 5.28 GB</button>
+            <button class="btn-ghost">⤴ 转存到我的网盘</button>
+            <button class="btn-ghost">🔗 复制分享链接</button>
+            <button class="btn-ghost">⚑ 举报内容</button>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 状态 B: 多文件 2-5 桌面 -->
+      <div class="state state-b" id="stateB">
+        <div class="topbar-b">
+          <div class="left">
+            <div class="brand">
+              <div class="brand-mark">拿</div>
+              <div class="brand-name">拿呀呀</div>
+            </div>
+            <span class="file-summary">5 个文件 · 18.2 GB</span>
+            <span class="code-pill">Ab3F7K</span>
+          </div>
+          <div class="actions-b">
+            <button class="btn-ghost" style="width: auto; padding: 10px 16px;">⤴ 全部转存</button>
+            <button class="btn-orange" style="width: auto; padding: 10px 18px;">⬇ 打包下载 · 18.2 GB</button>
+          </div>
+        </div>
+
+        <div class="b-grid">
+          <aside class="col" style="overflow: auto;">
+            <div class="section-title">文件 (5)</div>
+            <div class="file-list">
+              <div class="file-item active" onclick="openModal('video')">
+                <div class="file-icon-mini">MKV</div>
+                <div class="file-info-mini">
+                  <div class="name">碟中谍8-最后的清算.mkv</div>
+                  <div class="meta">5.28 GB · 视频</div>
+                </div>
+                <div class="preview-mini-btn">▶</div>
+              </div>
+              <div class="file-item" onclick="openModal('image')">
+                <div class="file-icon-mini">JPG</div>
+                <div class="file-info-mini">
+                  <div class="name">cover-01.jpg</div>
+                  <div class="meta">2.1 MB · 图片</div>
+                </div>
+                <div class="preview-mini-btn">▶</div>
+              </div>
+              <div class="file-item" onclick="openModal('pdf')">
+                <div class="file-icon-mini">PDF</div>
+                <div class="file-info-mini">
+                  <div class="name">说明文档.pdf</div>
+                  <div class="meta">3.4 MB · PDF</div>
+                </div>
+                <div class="preview-mini-btn">▶</div>
+              </div>
+              <div class="file-item" onclick="openModal('audio')">
+                <div class="file-icon-mini">MP3</div>
+                <div class="file-info-mini">
+                  <div class="name">theme.mp3</div>
+                  <div class="meta">4.8 MB · 音频</div>
+                </div>
+                <div class="preview-mini-btn">▶</div>
+              </div>
+              <div class="file-item" onclick="openModal('text')">
+                <div class="file-icon-mini txt">TXT</div>
+                <div class="file-info-mini">
+                  <div class="name">readme.txt</div>
+                  <div class="meta">1 KB · 文本</div>
+                </div>
+                <div class="download-mini-btn">↓</div>
+              </div>
+            </div>
+          </aside>
+
+          <div class="center-stage">
+            <div class="poster" style="max-width: 100%;">
+              <div class="title">碟中谍 8</div>
+              <div class="sub">当前选中 · 点击 ▶ 触发 Modal</div>
+            </div>
+          </div>
+
+          <aside class="col">
+            <div class="section-title">分享信息</div>
+            <div class="meta-row">
+              <div class="meta-item"><span class="label">分享者</span><span class="value">小爱同学</span></div>
+              <div class="meta-item"><span class="label">过期</span><span class="value">7 天后</span></div>
+              <div class="meta-item"><span class="label">下载次数</span><span class="value">7 / ∞</span></div>
+              <div class="meta-item">
+                <span class="label">二维码</span>
+                <div class="qr-box" id="qr2" style="margin: 6px auto 0;"></div>
+              </div>
+            </div>
+            <div style="margin-top: 18px; display: flex; flex-direction: column; gap: 8px;">
+              <button class="btn-orange">⬇ 打包下载 · 18.2 GB</button>
+              <button class="btn-ghost">⤴ 转存</button>
+              <button class="btn-ghost">🔗 复制</button>
+              <button class="btn-ghost">⚑ 举报</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <!-- 状态 D: 单文件手机 -->
+      <div class="state state-d" id="stateD">
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="phone-top">
+              <div class="brand">
+                <div class="brand-mark">拿</div>
+                <div class="brand-name">拿呀呀</div>
+              </div>
+              <div class="phone-code">Ab3F7K</div>
+            </div>
+            <div class="phone-meta">
+              <div class="l">分享者</div>
+              <div class="v">小爱同学</div>
+              <div class="l" style="margin-top:6px;">5.28 GB · 7 天后过期</div>
+            </div>
+            <div class="phone-poster" onclick="openModal('video')">
+              <div class="title">碟中谍 8</div>
+              <div class="play-mini"></div>
+            </div>
+            <div class="phone-cta">
+              <button class="btn-orange" onclick="openModal('video')">▶ 在线预览</button>
+              <div class="row">
+                <button class="btn-ghost">⬇ 下载</button>
+                <button class="btn-ghost">⤴ 转存</button>
+              </div>
+              <div class="row">
+                <button class="btn-ghost">🔗 复制</button>
+                <button class="btn-ghost">⚑ 举报</button>
+              </div>
+            </div>
+            <div style="text-align: center; padding: 12px; color: var(--text-dim); font-size: 11px;">
+              驱动: SDP 自研 · nyy
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-header">
+      <span class="name" id="modalName">碟中谍8-最后的清算.mkv</span>
+      <span class="counter" id="modalCounter">1 / 5</span>
+    </div>
+    <div class="modal-body">
+      <div class="viewer" id="viewerContainer">
+        <!-- viewer 由 JS 动态注入 -->
+      </div>
+    </div>
+    <div class="modal-progress" id="modalProgress"><div class="modal-progress-fill"></div></div>
+    <div class="modal-hud">
+      <button class="btn">⏮</button>
+      <button class="btn">⏸</button>
+      <button class="btn">⏭</button>
+      <span class="time">00:32:14 / 02:49:36</span>
+      <div class="right">
+        <div class="prev-next">
+          <button class="btn">◀ 上一项</button>
+          <button class="btn">下一项 ▶</button>
+        </div>
+        <button class="btn">🔊</button>
+        <button class="btn">⛶</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// === Theme toggle ===
+const themeToggle = document.getElementById('themeToggle');
+const root = document.documentElement;
+const themes = ['light', 'auto', 'dark'];
+
+function applyTheme(theme) {
+  root.setAttribute('data-theme', theme);
+  document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === theme));
+}
+themeToggle.addEventListener('click', e => {
+  const btn = e.target.closest('.theme-btn');
+  if (btn) applyTheme(btn.dataset.theme);
+});
+applyTheme('auto');
+
+// === State tabs ===
+document.getElementById('stateTabs').addEventListener('click', e => {
+  const btn = e.target.closest('.state-tab');
+  if (!btn) return;
+  document.querySelectorAll('.state-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const state = btn.dataset.state;
+  document.querySelectorAll('.state').forEach(s => s.classList.remove('active'));
+  document.getElementById('state' + state).classList.add('active');
+});
+
+// === Modal ===
+const modal = document.getElementById('modal');
+const viewerContainer = document.getElementById('viewerContainer');
+const viewers = {
+  video: () => `<div class="video-viewer"><div class="video-mock"><div class="title">碟中谍 8</div><div class="play-big"></div></div></div>`,
+  image: () => `<div class="image-viewer"><div class="image-mock"><div class="label">cover-01.jpg · 1920×1080</div></div></div>`,
+  pdf: () => `<div class="pdf-viewer"><div class="pdf-page"><h1>说明文档</h1><h2>1. 介绍</h2><p>这是分享的多文件之一,包含视频、海报、说明文档、主题音乐和 readme。</p><h2>2. 文件清单</h2><table><tr><th>类型</th><th>名称</th><th>大小</th></tr><tr><td>视频</td><td>碟中谍8.mkv</td><td>5.28 GB</td></tr><tr><td>图片</td><td>cover-01.jpg</td><td>2.1 MB</td></tr><tr><td>PDF</td><td>说明文档.pdf</td><td>3.4 MB</td></tr></table><p>更多内容请查看具体文件。</p></div></div>`,
+  audio: () => `<div class="audio-viewer"><div class="audio-cover">♪</div><div class="audio-meta"><div class="name">theme.mp3</div><div class="artist">Lorne Balfe · 320 kbps</div></div><div class="audio-wave">${Array(20).fill(0).map(() => '<i></i>').join('')}</div><div style="color:rgba(255,255,255,0.5); font-size:11px; font-family:ui-monospace,monospace;">01:23 / 04:56</div></div>`,
+  text: () => `<div class="text-viewer"><div class="text-content"><span class="com"># 拿呀呀 · 分享说明</span><br><br>感谢你查看本分享!<br><br>本分享包含 <span class="num">5</span> 个文件:<br>  - 视频主文件(<span class="str">"碟中谍8-最后的清算.mkv"</span>)<br>  - 封面海报(<span class="str">"cover-01.jpg"</span>)<br>  - 说明文档(<span class="str">"说明文档.pdf"</span>)<br>  - 主题音乐(<span class="str">"theme.mp3"</span>)<br>  - 本文件<br><br>使用 <span class="kw">nyy</span> 自研 SDP 引擎播放视频。</div></div>`,
+};
+
+let currentViewer = 'video';
+function openModal(type) {
+  currentViewer = type;
+  viewerContainer.innerHTML = viewers[type]();
+  const progress = document.getElementById('modalProgress');
+  progress.style.display = type === 'video' ? 'block' : 'none';
+  document.getElementById('modalName').textContent = ({
+    video: '碟中谍8-最后的清算.mkv',
+    image: 'cover-01.jpg',
+    pdf: '说明文档.pdf',
+    audio: 'theme.mp3',
+    text: 'readme.txt',
+  })[type];
+  modal.classList.add('show');
+}
+function closeModal() { modal.classList.remove('show'); }
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// === QR Code 渲染 ===
+function renderQR(elId) {
+  const qr = document.getElementById(elId);
+  if (!qr) return;
+  const W = 21, H = 21;
+  let seed = 0x4A3B;
+  const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const fp = (cx, cy) => (xx, yy) => {
+    const xd = Math.abs(xx - cx), yd = Math.abs(yy - cy);
+    if (xd === 3 || yd === 3) return true;
+    if (xd <= 1 && yd <= 1) return true;
+    return false;
+  };
+  const fp1 = fp(3,3), fp2 = fp(17,3), fp3 = fp(3,17);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const el = document.createElement('i');
+      let black = false;
+      if (x < 7 && y < 7) black = fp1(x, y);
+      else if (x > 13 && y < 7) black = fp2(x, y);
+      else if (x < 7 && y > 13) black = fp3(x, y);
+      else black = rnd() > 0.52;
+      if (black) el.style.opacity = '1';
+      qr.appendChild(el);
+    }
+  }
+}
+renderQR('qr1');
+renderQR('qr2');
+</script>
+</body>
+</html>

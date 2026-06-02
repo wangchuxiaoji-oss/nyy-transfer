@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>share 页空间利用率 · 5 套 v3 方案对比</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --text: #111827;
+    --text-muted: #6b7280;
+    --text-dim: #9ca3af;
+    --orange: #FF8A3D;
+    --orange-dark: #E8762E;
+    --orange-soft: #FFF4EB;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: linear-gradient(135deg, #fafafa 0%, #f0f0f3 100%);
+    min-height: 100vh;
+    padding: 48px 40px;
+    color: var(--text);
+  }
+  .page { max-width: 1880px; margin: 0 auto; }
+  .header { margin-bottom: 36px; }
+  .header h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+  .header h1 b { color: var(--orange); }
+  .header .sub { font-size: 14px; color: var(--text-muted); margin-top: 8px; line-height: 1.6; }
+  .header .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; background: white; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; padding: 5px 10px; border-radius: 14px; font-weight: 500; }
+  .badge.primary { background: var(--orange-soft); color: var(--orange-dark); border-color: #ffd9b8; }
+  .badge .dot { width: 5px; height: 5px; background: var(--orange); border-radius: 50%; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    transition: all 0.2s;
+    text-decoration: none;
+    color: inherit;
+    position: relative;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(0,0,0,0.08); border-color: var(--orange); }
+  .card.recommended { border: 2px solid var(--orange); box-shadow: 0 4px 20px rgba(255,138,61,0.15); }
+  .card.recommended::before {
+    content: '⭐ v3 主力';
+    position: absolute; top: 12px; right: 12px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; font-size: 10px; font-weight: 700;
+    padding: 4px 10px; border-radius: 10px;
+    z-index: 5; letter-spacing: 0.05em;
+  }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16/9; background: #1a1a1a; overflow: hidden; }
+  .thumb iframe { position: absolute; top: 0; left: 0; width: 1880px; height: 1080px; border: 0; transform-origin: 0 0; }
+  .thumb-overlay { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.12) 100%); pointer-events: none; }
+  .card-body { padding: 20px 22px 22px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .card-num { font-size: 11px; color: var(--orange); font-weight: 700; letter-spacing: 0.15em; }
+  .card-title { font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+  .card-desc { font-size: 13px; color: var(--text-muted); line-height: 1.55; flex: 1; }
+  .card-meta { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
+  .card-meta .item { display: flex; align-items: center; gap: 4px; }
+  .card-meta b { color: var(--text); font-weight: 600; }
+  .card-meta .dot { width: 4px; height: 4px; background: var(--text-dim); border-radius: 50%; }
+  .card-states { display: flex; gap: 4px; margin-top: 4px; }
+  .state-tag { background: var(--bg); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-weight: 600; }
+
+  .footer { margin-top: 36px; padding: 20px 24px; background: white; border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .footer .left { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .footer .left b { color: var(--text); font-weight: 600; }
+  .footer .right { display: flex; gap: 8px; flex-wrap: wrap; }
+  .footer .btn { background: var(--orange-soft); color: var(--orange-dark); border: 1px solid #ffd9b8; font-size: 12px; font-weight: 600; padding: 8px 16px; border-radius: 8px; text-decoration: none; }
+  .footer .btn:hover { background: var(--orange); color: white; }
+
+  .info-block { margin-top: 24px; padding: 24px; background: var(--orange-soft); border-radius: 12px; border: 1px solid #ffd9b8; }
+  .info-block h2 { font-size: 15px; font-weight: 700; color: var(--orange-dark); margin-bottom: 12px; }
+  .info-block .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .info-block .grid-2 b { color: var(--text); font-weight: 600; }
+  .info-block .grid-2 ul { padding-left: 20px; }
+  .info-block .grid-2 li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <h1>桌面 share 页空间利用率 · <b>5 套 v3 方案</b></h1>
+      <div class="sub">v3 架构已敲定:Modal 双层模型 + 5 密度档(L0/L1/L2/L3)+ 3 断点响应式 + 双主题(light/dark/auto)+ 跨文件操作(打包/手工下一项)+ 5 种 viewer(视频/图片/PDF/音频/文本)<br>每个 HTML 内置主题切换按钮 + 状态切换 tab,现场对比。</div>
+      <div class="badges">
+        <span class="badge primary"><span class="dot"></span>v3 架构已敲定</span>
+        <span class="badge">Modal 预览,不开新页</span>
+        <span class="badge">支持 5 种文件类型预览</span>
+        <span class="badge">light / dark / auto 三主题</span>
+        <span class="badge">桌面 / 平板 / 手机三断点</span>
+        <span class="badge">打包下载 + 手工下一项</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="plan-3a-minimal.html" target="_blank">
+        <div class="thumb"><iframe src="plan-3a-minimal.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+        <div class="card-body">
+          <div class="card-num">PLAN 3A</div>
+          <div class="card-title">极简白</div>
+          <div class="card-desc">白底 + 橙点缀 · 大留白 · 精准对齐。light 下"克制感"突出,dark 下"朴素"。最贴近 nyy 现有品牌调性。</div>
+          <div class="card-states">
+            <span class="state-tag">A 单桌面</span>
+            <span class="state-tag">B 多桌面</span>
+            <span class="state-tag">D 单手机</span>
+          </div>
+          <div class="card-meta">
+            <span class="item">🎨 风格: <b>极简白</b></span>
+            <span class="dot"></span>
+            <span class="item">🌗 双主题</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="card recommended" href="plan-3b-warm.html" target="_blank">
+        <div class="thumb"><iframe src="plan-3b-warm.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+        <div class="card-body">
+          <div class="card-num">PLAN 3B</div>
+          <div class="card-title">温暖米</div>
+          <div class="card-desc">米白 / 深棕 + 暖橙 · 衬线字体 · 大圆角 · 像"白天书桌 / 夜晚壁炉"。双主题都温暖。</div>
+          <div class="card-states">
+            <span class="state-tag">A 单桌面</span>
+            <span class="state-tag">B 多桌面</span>
+            <span class="state-tag">D 单手机</span>
+          </div>
+          <div class="card-meta">
+            <span class="item">🎨 风格: <b>温暖米</b></span>
+            <span class="dot"></span>
+            <span class="item">🌗 双主题都好看</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="card" href="plan-3c-dark-hud.html" target="_blank">
+        <div class="thumb"><iframe src="plan-3c-dark-hud.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+        <div class="card-body">
+          <div class="card-num">PLAN 3C</div>
+          <div class="card-title">深色 HUD</div>
+          <div class="card-desc">深色画布 + 橙色 HUD · dark 主题下影院感最强 · 重点展示 L3 多文件 16+ 网格管理能力。</div>
+          <div class="card-states">
+            <span class="state-tag">A 单桌面</span>
+            <span class="state-tag">C 多 16+ 桌面</span>
+            <span class="state-tag">F 多手机</span>
+          </div>
+          <div class="card-meta">
+            <span class="item">🎨 风格: <b>深色 HUD</b></span>
+            <span class="dot"></span>
+            <span class="item">🌗 dark 优先</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="card" href="plan-3d-cool.html" target="_blank">
+        <div class="thumb"><iframe src="plan-3d-cool.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+        <div class="card-body">
+          <div class="card-num">PLAN 3D</div>
+          <div class="card-title">冷白现代</div>
+          <div class="card-desc">冷白 / 深蓝灰 + 锐利橙 · 数据感 · 表格化文件列表 · 精确对齐 · 适合多文件批量管理(信息密度高)。</div>
+          <div class="card-states">
+            <span class="state-tag">B 多 5 桌面</span>
+            <span class="state-tag">C 多 16+ 桌面</span>
+            <span class="state-tag">E 多手机</span>
+          </div>
+          <div class="card-meta">
+            <span class="item">🎨 风格: <b>冷白现代</b></span>
+            <span class="dot"></span>
+            <span class="item">🌗 锐利双主题</span>
+          </div>
+        </div>
+      </a>
+
+      <a class="card" href="plan-3e-magazine.html" target="_blank">
+        <div class="thumb"><iframe src="plan-3e-magazine.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+        <div class="card-body">
+          <div class="card-num">PLAN 3E</div>
+          <div class="card-title">杂志感</div>
+          <div class="card-desc">米色 / 深棕 + 粗衬线 · 立体卡片(4px 硬阴影)· 印刷质感 · 强排版 · 双主题都"杂志封面"。</div>
+          <div class="card-states">
+            <span class="state-tag">A 单桌面</span>
+            <span class="state-tag">B 多 5 桌面</span>
+            <span class="state-tag">C 多 16+ 桌面</span>
+          </div>
+          <div class="card-meta">
+            <span class="item">🎨 风格: <b>杂志感</b></span>
+            <span class="dot"></span>
+            <span class="item">🌗 双主题都好看</span>
+          </div>
+        </div>
+      </a>
+
+      <div class="card" style="background: linear-gradient(135deg, #fff7f0, #ffe5cc); border-color: #ffd9b8; cursor: default;">
+        <div style="padding: 36px 24px; flex: 1; display: flex; flex-direction: column; gap: 14px; justify-content: center;">
+          <div style="font-size: 11px; color: var(--orange-dark); font-weight: 700; letter-spacing: 0.15em;">SUMMARY</div>
+          <div style="font-size: 20px; font-weight: 600; color: var(--text); letter-spacing: -0.01em;">v3 架构推荐</div>
+          <div style="font-size: 14px; color: var(--text-muted); line-height: 1.6;">
+            <b style="color: var(--text);">3A</b> 最贴 nyy 现有品牌(渐进式改)<br>
+            <b style="color: var(--text);">3B / 3E</b> 双主题都好看,气质稳定<br>
+            <b style="color: var(--text);">3C</b> 适合夜间用户,大文件管理<br>
+            <b style="color: var(--text);">3D</b> 适合效率型用户,信息密度高
+          </div>
+          <div style="font-size: 12px; color: var(--orange-dark); padding-top: 12px; border-top: 1px solid #ffd9b8;">
+            点卡片看具体设计。每个 HTML 内置主题切换 + 状态 tab,现场对比。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-block">
+      <h2>v3 架构 vs v1 架构(5 个关键改进)</h2>
+      <div class="grid-2">
+        <ul>
+          <li><b>Modal 双层</b>:预览不离开 share 页,点 ▶ 弹全屏 Modal(视频/图片/PDF/音频/文本),不新建路由</li>
+          <li><b>5 密度档</b>:L0(1) / L1(2-5) / L2(6-15) / L3(16+) 自动适配,不"1 个嫌空 200 个嫌挤"</li>
+          <li><b>双主题</b>:light / dark / auto 三态,Modal 也适配(原有 share 页未支持)</li>
+          <li><b>跨文件操作</b>:L1+ 出现"打包下载"主 CTA + 列表项"▶ 下一项"手工切换</li>
+          <li><b>5 种 viewer</b>:SDP 视频 / Image / PDF.js / 音频 / 文本,不只视频</li>
+        </ul>
+        <ul>
+          <li><b>3 断点响应式</b>:≥1024 桌面 / 640-1023 平板 / &lt;640 手机,同套代码</li>
+          <li><b>ThemeToggle</b>:右上角 Sun/Moon/Monitor 循环切换(原本漏的,已加)</li>
+          <li><b>16+ 网格</b>:L3 状态显示缩略图墙 + 左侧筛选侧栏 + 批量选择</li>
+          <li><b>免费预览</b>:无付费墙(预留之后补),Modal 入口直接进入</li>
+          <li><b>共享 Modal</b>:多文件共享同一 Modal,"X / N"指示 + 上一项/下一项</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="left">
+        统一数据:<b>碟中谍8-最后的清算.mkv</b> · 5.28 GB · 提取码 <b>Ab3F7K</b> · 分享者 小爱同学 · 多文件场景叠加 JPG / PDF / MP3 / TXT<br>
+        v1 旧预览保留在: <code>plan-1-narrow-card.html</code> · <code>plan-2-three-columns.html</code> · <code>plan-3-topbar-split.html</code> · <code>plan-4-immersive.html</code> · <code>plan-5-split-routes.html</code>
+      </div>
+      <div class="right">
+        <a class="btn" href="plan-3a-minimal.html" target="_blank">▶ 3A 极简白</a>
+        <a class="btn" href="plan-3b-warm.html" target="_blank">▶ 3B 温暖米</a>
+        <a class="btn" href="plan-3c-dark-hud.html" target="_blank">▶ 3C 深色 HUD</a>
+        <a class="btn" href="plan-3d-cool.html" target="_blank">▶ 3D 冷白现代</a>
+        <a class="btn" href="plan-3e-magazine.html" target="_blank">▶ 3E 杂志感</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function resizeThumbs() {
+      const iframes = document.querySelectorAll('.thumb iframe');
+      const designW = 1880, designH = 1080;
+      iframes.forEach(iframe => {
+        const thumb = iframe.parentElement;
+        const cw = thumb.clientWidth, ch = thumb.clientHeight;
+        const scale = Math.min(cw / designW, ch / designH);
+        iframe.style.transform = `scale(${scale})`;
+      });
+    }
+    let loaded = 0;
+    document.querySelectorAll('.thumb iframe').forEach(ifr => {
+      ifr.addEventListener('load', () => { loaded++; if (loaded >= 5) setTimeout(resizeThumbs, 100); });
+    });
+    window.addEventListener('load', resizeThumbs);
+    window.addEventListener('resize', resizeThumbs);
+    setTimeout(resizeThumbs, 500);
+  </script>
+</body>
+</html>

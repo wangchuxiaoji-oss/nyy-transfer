@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 1 · 窄卡片撑满高度 — nyy</title>
+<style>
+  :root {
+    --orange: #FF8A3D;
+    --orange-dark: #E8762E;
+    --orange-soft: #FFF4EB;
+    --bg-page: #0d0d0f;
+    --bg-card: #1a1a1d;
+    --border: #2a2a2e;
+    --text: #f5f5f7;
+    --text-muted: #a1a1a6;
+    --text-dim: #6e6e73;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background: #1a1a1a;
+    padding: 24px;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* === macOS Chrome === */
+  .browser {
+    width: 1880px;
+    height: 1080px;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
+    display: flex;
+    flex-direction: column;
+  }
+  .chrome {
+    height: 44px;
+    background: linear-gradient(to bottom, #ebebeb, #d6d6d6);
+    display: flex; align-items: center;
+    padding: 0 16px; gap: 14px;
+    border-bottom: 1px solid #b8b8b8;
+    flex-shrink: 0;
+  }
+  .lights { display: flex; gap: 8px; }
+  .lights span { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights .r { background: #ff5f57; box-shadow: inset 0 0 0 0.5px #e0443e; }
+  .lights .y { background: #febc2e; box-shadow: inset 0 0 0 0.5px #dea123; }
+  .lights .g { background: #28c840; box-shadow: inset 0 0 0 0.5px #1aab29; }
+  .toolbar { display: flex; gap: 4px; }
+  .toolbar .btn {
+    width: 28px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; color: #5a5a5a; font-size: 14px;
+  }
+  .toolbar .btn.disabled { color: #b8b8b8; }
+  .addr {
+    flex: 1; max-width: 720px;
+    height: 28px; background: white; border-radius: 6px;
+    display: flex; align-items: center;
+    padding: 0 12px; gap: 8px;
+    font-size: 12px; color: #2a2a2a;
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15), inset 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .addr .lock { color: #4a4a4a; font-size: 11px; }
+  .viewport {
+    flex: 1; overflow: hidden; position: relative;
+    background: var(--bg-page);
+  }
+
+  /* === 方案 1:窄卡片撑满高度 === */
+  .layout-1 {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(ellipse at center, #1a1a1d 0%, #0a0a0c 70%);
+  }
+  .card-1 {
+    width: 780px;
+    max-height: 96%;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow:
+      0 40px 80px rgba(0,0,0,0.6),
+      0 0 0 1px rgba(255,255,255,0.04);
+  }
+  .card-head {
+    padding: 28px 32px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 16px;
+    box-shadow: 0 2px 8px rgba(255,138,61,0.4);
+  }
+  .brand-name { font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+  .code-pill {
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; font-weight: 600;
+    padding: 7px 16px; border-radius: 18px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.1em; font-size: 13px;
+    box-shadow: 0 2px 8px rgba(255,138,61,0.4);
+  }
+
+  .card-body {
+    flex: 1;
+    padding: 24px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    overflow: hidden;
+  }
+  .file-block {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px;
+    background: rgba(255,138,61,0.06);
+    border: 1px solid rgba(255,138,61,0.2);
+    border-radius: 10px;
+  }
+  .file-icon {
+    width: 42px; height: 42px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .file-info { flex: 1; min-width: 0; }
+  .file-info .name { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-info .meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+  .file-info .meta b { color: var(--orange); font-weight: 600; }
+
+  /* Player */
+  .player-frame {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    aspect-ratio: 16/9;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  .player-canvas {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse at 25% 30%, #3a2010 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 70%, #1a2438 0%, transparent 60%),
+      linear-gradient(135deg, #0f0f1a 0%, #000 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .movie-poster {
+    position: relative; width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .movie-poster .tag-top {
+    position: absolute; top: 8%; left: 6%;
+    font-size: 10px; letter-spacing: 0.3em; color: rgba(255,138,61,0.9);
+    font-weight: 600;
+  }
+  .movie-poster .title {
+    font-size: 60px; font-weight: 900;
+    color: #fff;
+    text-shadow: 0 4px 24px rgba(0,0,0,0.9), 0 0 60px rgba(255,138,61,0.3);
+    letter-spacing: 0.04em; line-height: 0.95;
+  }
+  .movie-poster .sub {
+    font-size: 12px; color: rgba(255,255,255,0.6);
+    margin-top: 14px; letter-spacing: 0.25em;
+  }
+  .movie-poster .scene {
+    position: absolute; bottom: 18%; right: 6%;
+    width: 200px; height: 110px;
+    background: linear-gradient(135deg, #ff6b35 0%, #c1351f 100%);
+    border-radius: 6px;
+    box-shadow: 0 15px 40px rgba(255,107,53,0.5);
+  }
+  .movie-poster .scene::after {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 70% 30%, rgba(255,200,100,0.6), transparent 60%);
+  }
+  .play-btn-big {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px; height: 80px;
+    background: rgba(255,138,61,0.95);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 24px rgba(255,138,61,0.5);
+  }
+  .play-btn-big::before {
+    content: '';
+    width: 0; height: 0;
+    border-left: 22px solid white;
+    border-top: 14px solid transparent;
+    border-bottom: 14px solid transparent;
+    margin-left: 6px;
+  }
+  .progress-wrap {
+    position: absolute; bottom: 56px; left: 0; right: 0;
+    height: 4px; background: rgba(255,255,255,0.2);
+  }
+  .progress-fill { height: 100%; width: 18%; background: var(--orange); }
+  .progress-handle {
+    position: absolute; bottom: 52px; left: calc(18% - 7px);
+    width: 14px; height: 14px; background: var(--orange);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(255,138,61,0.3);
+  }
+  .player-chrome {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 56px;
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    display: flex; align-items: center; padding: 0 16px; gap: 12px;
+  }
+  .ctrl-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; }
+  .ctrl-time { color: white; font-size: 12px; font-family: ui-monospace, monospace; }
+  .ctrl-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .actions { display: flex; gap: 10px; }
+  .btn-orange {
+    flex: 1;
+    background: linear-gradient(135deg, var(--orange), var(--orange-dark));
+    color: white; border: none; cursor: pointer;
+    font-weight: 600; font-size: 14px;
+    padding: 14px; border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(255,138,61,0.4);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn-ghost {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+    font-weight: 500; font-size: 13px;
+    padding: 14px 18px; border-radius: 10px;
+  }
+
+  .card-foot {
+    padding: 14px 32px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; color: var(--text-muted);
+    background: rgba(0,0,0,0.2);
+  }
+  .card-foot b { color: var(--text); font-weight: 600; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255,138,61,0.1); color: var(--orange);
+    font-size: 11px; padding: 4px 10px; border-radius: 10px;
+    font-weight: 500;
+  }
+  .badge .dot { width: 5px; height: 5px; background: var(--orange); border-radius: 50%; }
+
+  /* 两侧黑色空间提示 */
+  .side-hint {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-dim);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .side-hint.left { left: 80px; }
+  .side-hint.right { right: 80px; }
+  .side-hint::before {
+    content: ''; width: 1px; height: 60px; background: var(--border);
+  }
+  .side-hint::after {
+    content: ''; width: 1px; height: 60px; background: var(--border);
+  }
+</style>
+</head>
+<body>
+  <div class="browser">
+    <div class="chrome">
+      <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <div class="toolbar"><span class="btn">‹</span><span class="btn disabled">›</span></div>
+      <div class="addr"><span class="lock">🔒</span>dev.nyy.app/s/Ab3F7K</div>
+    </div>
+    <div class="viewport">
+      <div class="layout-1">
+        <div class="side-hint left">560px<br>空白</div>
+        <div class="card-1">
+          <div class="card-head">
+            <div class="brand">
+              <div class="brand-mark">拿</div>
+              <div class="brand-name">拿呀呀</div>
+            </div>
+            <span class="code-pill">Ab3F7K</span>
+          </div>
+          <div class="card-body">
+            <div class="file-block">
+              <div class="file-icon">MKV</div>
+              <div class="file-info">
+                <div class="name">碟中谍8-最后的清算.mkv</div>
+                <div class="meta">5.28 GB · H.265 · 1920×1080 · 2h 49m</div>
+              </div>
+            </div>
+            <div class="player-frame">
+              <div class="player-canvas">
+                <div class="movie-poster">
+                  <div class="tag-top">PARAMOUNT · 2025</div>
+                  <div class="title">碟中谍 8</div>
+                  <div class="sub">MISSION: IMPOSSIBLE — THE FINAL RECKONING</div>
+                  <div class="scene"></div>
+                </div>
+                <div class="play-btn-big"></div>
+              </div>
+              <div class="progress-wrap"><div class="progress-fill"></div></div>
+              <div class="progress-handle"></div>
+              <div class="player-chrome">
+                <div class="ctrl-btn">⏸</div>
+                <div class="ctrl-time">00:32:14 / 02:49:36</div>
+                <div class="ctrl-right">
+                  <div class="ctrl-btn">🔊</div>
+                  <div class="ctrl-btn">⚙</div>
+                  <div class="ctrl-btn">⛶</div>
+                </div>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn-orange">⬇  下载文件 · 5.28 GB</button>
+              <button class="btn-ghost">⤴</button>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span><b>小爱同学</b> · 2 天前分享</span>
+            <span class="badge"><span class="dot"></span>7 天后过期</span>
+          </div>
+        </div>
+        <div class="side-hint right">560px<br>空白</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
