@@ -22,6 +22,30 @@
   --muted-foreground: #a09080;
 }
 
+/* ===== 4C 复古未来 Y2K 主题变量 ===== */
+:root[data-theme="dark"] {
+  --yc-bg: #0A0418;
+  --yc-mesh-1: #2A0845;
+  --yc-mesh-2: #6441A5;
+  --yc-glass: rgba(255,255,255,0.06);
+  --yc-glass-s: rgba(255,255,255,0.12);
+  --yc-border: rgba(255,255,255,0.18);
+  --yc-text: #FFFFFF;
+  --yc-text-s: rgba(255,255,255,0.7);
+  --yc-text-t: rgba(255,255,255,0.45);
+}
+:root[data-theme="light"] {
+  --yc-bg: #FFF4EB;
+  --yc-mesh-1: #FFE5D5;
+  --yc-mesh-2: #FFD4B8;
+  --yc-glass: rgba(255,255,255,0.62);
+  --yc-glass-s: rgba(255,255,255,0.85);
+  --yc-border: rgba(10,4,24,0.15);
+  --yc-text: #0A0418;
+  --yc-text-s: rgba(10,4,24,0.7);
+  --yc-text-t: rgba(10,4,24,0.45);
+}
+
 html {
   overflow-y: auto;
   scrollbar-width: none; /* Firefox */

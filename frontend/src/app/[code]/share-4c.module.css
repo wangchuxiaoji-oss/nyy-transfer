@@ -1,0 +1,301 @@
+/* ===== 4C 复古未来 Y2K · 分享页专用样式 ===== */
+
+/* 深空 mesh 背景 */
+.meshBg {
+  background:
+    radial-gradient(circle at 18% 28%, var(--yc-mesh-1, #2A0845) 0%, transparent 48%),
+    radial-gradient(circle at 82% 72%, var(--yc-mesh-2, #6441A5) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, var(--yc-accent, #FF8A3D) 0%, transparent 28%),
+    var(--yc-bg, #0A0418);
+}
+:global([data-theme="light"]) .meshBg {
+  background:
+    radial-gradient(circle at 18% 28%, #FFE5D5 0%, transparent 48%),
+    radial-gradient(circle at 82% 72%, #FFD4B8 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, #FF8A3D 0%, transparent 28%),
+    #FFF4EB;
+}
+
+/* 玻璃态卡片 */
+.glass {
+  background: var(--yc-glass, rgba(255,255,255,0.06));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
+  border-radius: 16px;
+}
+:global([data-theme="light"]) .glass {
+  background: rgba(255,255,255,0.62);
+  border-color: rgba(10,4,24,0.15);
+}
+
+/* 彩虹渐变按钮 */
+.glowBtn {
+  background: linear-gradient(135deg, #FF8A3D, #FF3366);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.5),
+    inset 0 -1px 0 rgba(0,0,0,0.3),
+    0 0 24px rgba(255,138,61,0.5),
+    0 4px 16px rgba(0,0,0,0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+.glowBtn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    inset 0 -1px 0 rgba(0,0,0,0.3),
+    0 0 40px rgba(255,138,61,0.8),
+    0 8px 24px rgba(0,0,0,0.5);
+}
+.glowBtn:active {
+  transform: translateY(0);
+}
+.glowBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 幽灵按钮 */
+.ghostBtn {
+  background: var(--yc-glass, rgba(255,255,255,0.06));
+  color: var(--yc-text-s, rgba(255,255,255,0.7));
+  border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
+  border-radius: 8px;
+  backdrop-filter: blur(20px);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.ghostBtn:hover {
+  border-color: var(--yc-accent, #FF8A3D);
+  color: var(--yc-accent, #FF8A3D);
+  box-shadow: 0 0 16px rgba(255,138,61,0.3);
+}
+:global([data-theme="light"]) .ghostBtn {
+  background: rgba(255,255,255,0.62);
+  color: rgba(10,4,24,0.7);
+  border-color: rgba(10,4,24,0.15);
+}
+
+/* Vault 数字方块 */
+.digitCell {
+  width: 64px;
+  height: 80px;
+  background: var(--yc-glass, rgba(255,255,255,0.06));
+  border: 2px solid var(--yc-border, rgba(255,255,255,0.18));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Orbitron", sans-serif;
+  font-size: 32px;
+  font-weight: 900;
+  color: var(--yc-text, #fff);
+  text-shadow: 0 0 20px var(--yc-accent, #FF8A3D);
+  box-shadow:
+    inset 0 0 20px rgba(255,138,61,0.1),
+    0 0 20px rgba(0,0,0,0.3);
+  transition: all 0.3s;
+}
+.digitCell.filled {
+  border-color: var(--yc-accent, #FF8A3D);
+  box-shadow:
+    inset 0 0 30px rgba(255,138,61,0.3),
+    0 0 40px rgba(255,138,61,0.4);
+}
+.digitCell.error {
+  border-color: #FF3366;
+  animation: digit-shake 0.4s ease;
+}
+:global([data-theme="light"]) .digitCell {
+  background: rgba(255,255,255,0.7);
+  color: #0A0418;
+  text-shadow: none;
+}
+
+@keyframes digit-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* 音频波形动画 */
+.audioWave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 40px;
+}
+.audioWave i {
+  width: 3px;
+  background: var(--yc-accent, #FF8A3D);
+  border-radius: 2px;
+  animation: wave 1.4s ease-in-out infinite;
+}
+@keyframes wave {
+  0%, 100% { height: 8px; }
+  50% { height: 36px; }
+}
+
+/* 舞台播放器 */
+.stagePlayer {
+  position: relative;
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
+  box-shadow: 0 0 40px rgba(255,138,61,0.18), 0 20px 60px rgba(0,0,0,0.5);
+  aspect-ratio: 16/9;
+}
+.stagePlayer:fullscreen {
+  aspect-ratio: auto;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
+
+/* 图片预览区 */
+.imageStage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  position: relative;
+}
+
+/* PDF / 文本滚动区 */
+.pdfScroll {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  background: #0f0a1e;
+}
+.pdfScroll canvas {
+  max-width: 100%;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+  border-radius: 4px;
+}
+:global([data-theme="light"]) .pdfScroll {
+  background: #f5f0ea;
+}
+
+.textScroll {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+  background: #0f0a1e;
+}
+:global([data-theme="light"]) .textScroll {
+  background: #f5f0ea;
+}
+
+.textContent {
+  max-width: 720px;
+  margin: 0 auto;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
+  border-radius: 8px;
+  padding: 22px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e2e8f0;
+}
+:global([data-theme="light"]) .textContent {
+  background: rgba(255,255,255,0.7);
+  color: #0A0418;
+  border-color: rgba(10,4,24,0.15);
+}
+
+/* 扫描线效果(验证中) */
+.scanning {
+  position: relative;
+  overflow: hidden;
+}
+.scanning::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--yc-accent, #FF8A3D);
+  box-shadow: 0 0 20px var(--yc-accent, #FF8A3D);
+  animation: scan-line 1.2s ease-in-out;
+}
+@keyframes scan-line {
+  0% { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* 文件行 hover */
+.fileRow {
+  transition: all 0.25s;
+  cursor: pointer;
+}
+.fileRow:hover {
+  border-color: var(--yc-accent, #FF8A3D);
+}
+.fileRow.active {
+  border-color: var(--yc-accent, #FF8A3D);
+  background: rgba(255,138,61,0.12);
+  box-shadow: 0 0 20px rgba(255,138,61,0.3);
+}
+
+/* QR 码 */
+.qrBox {
+  display: grid;
+  grid-template-columns: repeat(21, 1fr);
+  grid-template-rows: repeat(21, 1fr);
+  width: 92px;
+  height: 92px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 7px;
+  box-shadow: 0 0 20px rgba(255,138,61,0.3);
+}
+.qrBox i {
+  background: transparent;
+}
+.qrBox i[data-on] {
+  background: #0A0418;
+}
+
+/* 主题变量在 globals.css 中定义（:root[data-theme] 不能在 CSS Module 中使用） */
+
+/* 两栏布局：默认桌面两栏 */
+.desktopTwoCol {
+  grid-template-columns: 1fr 380px;
+}
+/* 关键：让 grid 子项可收缩到 fr 分配宽度，
+   否则左列内的 canvas/视频固有宽度会把 1fr track 撑破导致整页横向溢出 */
+.desktopTwoCol > * {
+  min-width: 0;
+}
+
+/* 响应式 */
+@media (max-width: 1023px) {
+  .desktopTwoCol {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 639px) {
+  .digitCell {
+    width: 52px;
+    height: 64px;
+    font-size: 24px;
+  }
+}
