@@ -250,6 +250,27 @@ export default function SharePage() {
     showToast({ title: "链接已复制", type: "success" });
   };
 
+  // 下载单个文件（文件列表行内图标使用）
+  const downloadOneFile = async (file: ShareFileDownload) => {
+    if (file.is_chunked && file.chunks.length > 0) {
+      if (!supportsChunkedDownload()) {
+        showToast({ title: "当前浏览器不支持大文件下载", type: "error" });
+        return;
+      }
+      try {
+        await chunkedDownload(file.file_name, file.file_size, file.chunks, setChunkProgress, appendDebugLog);
+        setChunkProgress(null);
+      } catch (err) {
+        setChunkProgress(null);
+        if (!(err instanceof DOMException && err.name === "AbortError")) showToast({ title: getErrorMessage(err, "下载失败"), type: "error" });
+      }
+    } else {
+      if (!isSafeUrl(file.download_url)) { showToast({ title: "下载链接无效", type: "error" }); return; }
+      const a = document.createElement("a");
+      a.href = file.download_url; a.download = file.file_name; a.rel = "noopener"; a.click();
+    }
+  };
+
   const handleReport = async () => {
     if (!reportReason.trim()) return;
     try { await reportShare(code, reportReason.trim()); setReported(true); setReportOpen(false); setReportReason(""); showToast({ title: "举报已提交", type: "success" }); }
@@ -636,7 +657,8 @@ export default function SharePage() {
               {/* 列表视图 */}
               {viewMode === "list" && downloads.length > 0 && (
                 <div className="flex flex-col gap-1.5">
-                  {displayFiles.map((dl, i) => {
+                  {displayFiles.map((_dl, i) => {
+                    const dl = _dl as ShareFileDownload;
                     const ft = classifyFile(dl.file_name);
                     const isActive = i === selectedIdx;
                     return (
@@ -648,6 +670,11 @@ export default function SharePage() {
                         </div>
                         <span className="text-sm truncate flex-1 font-medium">{dl.file_name}</span>
                         <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
+                        <button onClick={(e) => { e.stopPropagation(); void downloadOneFile(dl); }}
+                          className={`shrink-0 p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
+                          title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     );
                   })}
@@ -664,7 +691,8 @@ export default function SharePage() {
               {viewMode === "grid" && downloads.length > 0 && (
                 <>
                   <div className="grid grid-cols-2 gap-2">
-                    {displayFiles.map((dl, i) => {
+                    {displayFiles.map((_dl, i) => {
+                      const dl = _dl as ShareFileDownload;
                       const ft = classifyFile(dl.file_name);
                       const isActive = i === selectedIdx;
                       return (
@@ -676,6 +704,11 @@ export default function SharePage() {
                           </div>
                           <span className="text-xs truncate font-medium">{dl.file_name}</span>
                           <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
+                          <button onClick={(e) => { e.stopPropagation(); void downloadOneFile(dl); }}
+                            className={`self-end p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
+                            title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       );
                     })}
@@ -747,11 +780,25 @@ export default function SharePage() {
                   {downloading ? "打包中…" : `打包下载 ${formatSize(share.total_bytes)}`}
                 </button>
               )}
+              {downloads.length > 0 && isSingle && (
+                <button onClick={handleDownloadSingle} disabled={downloading}
+                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  <Download className="w-4 h-4" />
+                  {downloading ? "下载中…" : "下载"}
+                </button>
+              )}
               {downloads.length === 0 && !isSingle && (
                 <button onClick={handleDownloadSingle} disabled={downloading}
                   className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Download className="w-4 h-4" />
-                  {downloading ? "获取中…" : hasOnlyEmptyDirs ? "下载文件夹" : isSingle ? "下载" : "获取下载链接"}
+                  {downloading ? "获取中…" : hasOnlyEmptyDirs ? "下载文件夹" : "获取下载链接"}
+                </button>
+              )}
+              {downloads.length === 0 && isSingle && (
+                <button disabled
+                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2 opacity-50 cursor-not-allowed`}>
+                  <Download className="w-4 h-4" />
+                  获取中…
                 </button>
               )}
               {/* 复制链接（提权为主按钮，方便取件） */}

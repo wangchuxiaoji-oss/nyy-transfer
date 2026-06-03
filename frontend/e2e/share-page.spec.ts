@@ -819,14 +819,15 @@ test.describe("单/多文件按钮区布局回归", () => {
 
   // 防闪烁回归：单文件 share 已到、downloads 尚未就绪时，侧栏不应出现
   // 橙色"下载"按钮（因为下一秒就会因 !isSingle 消失）
-  test("单文件 downloads=[] 时侧栏无橙色获取按钮（防闪）", async ({ page }) => {
+  // 防闪烁回归：单文件 share 已到、downloads 未就绪时，侧栏应有禁用态
+  // "获取中…"按钮占住顶部位置，downloads 到达后变"下载"——不消失、不新建、不跳变。
+  test("单文件 dl=0→dl>0 侧栏下载按钮不消失（防闪）", async ({ page }) => {
     let relDl: () => void; const gDl = new Promise<void>((r) => { relDl = r; });
     const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }] };
     const f1 = { file_name: "单.mp4", file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META };
     await page.route("**/api/v1/shares/" + C, (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: C, files: [f1], empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false }) })
     );
-    // downloads 暂不释放（模拟 share 已到但 downloads 未就绪）
     await page.route("**/api/v1/shares/" + C + "/download", async (r) => { await gDl; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [{ file_name: "单.mp4", file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }], empty_dirs: [], expires_in: 3600 }) }); });
     await page.route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" }));
 
@@ -835,18 +836,32 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 此时 share 已到，downloads 还是 []，侧栏操作按钮区不应有"下载"/"获取"字样按钮
+    // dl=0 阶段：侧栏应有 2 个按钮（获取中…+ 复制链接）
     const btnArea = page.locator("aside .flex.flex-col.gap-2.min-h-\\[96px\\]");
     const btns = btnArea.locator("button, a");
-    const count = await btns.count();
-    const texts: string[] = [];
-    for (let i = 0; i < count; i++) {
-      texts.push((await btns.nth(i).textContent())?.trim() || "");
-    }
-    // 只应有"复制链接"，不应有"下载"或"获取下载链接"或"打包下载"
-    expect(texts.filter((t) => t.includes("复制链接")).length).toBe(1);
-    expect(texts.some((t) => t.includes("下载") || t.includes("获取"))).toBe(false);
+    let count = await btns.count();
+    expect(count).toBe(2);
 
+    // 有"获取中…"禁用态按钮
+    await expect(btnArea.getByText("获取中…").first()).toBeVisible();
+    await expect(btnArea.getByText("复制链接").first()).toBeVisible();
+
+    // 记录"获取中…"按钮位置（用于后续对比）
+    const y0 = await btnArea.getByText("获取中…").first().boundingBox();
+
+    // 释放 downloads
     relDl!();
+    await page.waitForTimeout(800);
+
+    // dl>0 阶段：按钮区仍 2 个按钮（下载 + 复制链接），"获取中…"→"下载"未消失
+    count = await btns.count();
+    expect(count).toBe(2);
+    await expect(btnArea.getByText("下载", { exact: true }).first()).toBeVisible();
+
+    // 按钮 Y 位置不变（无跳变）
+    const y1 = await btnArea.getByText("下载", { exact: true }).first().boundingBox();
+    if (y0 && y1) {
+      expect(Math.abs(y0.y - y1.y)).toBeLessThanOrEqual(1);
+    }
   });
 });
