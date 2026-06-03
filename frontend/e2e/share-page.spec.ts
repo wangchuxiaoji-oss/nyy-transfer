@@ -751,33 +751,42 @@ test.describe("单/多文件按钮区布局回归", () => {
     expect(h).toBe(96);
   });
 
-  test("单文件舞台操作栏无'打包'按钮、侧栏无'打包下载'按钮", async ({ page }) => {
+  test("单文件舞台无任何按钮、侧栏有'下载'、无'打包下载'", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
     await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 舞台操作栏不应有"打包"按钮（line 596 级条件 !isSingle）
-    const stagePacks = page.locator("main [class*='stagePlayer'] ~ div button:has-text('打包')");
-    await expect(stagePacks).toHaveCount(0);
+    // 舞台操作栏不应有任何按钮（单文件下载入口在侧栏，舞台已废弃）
+    const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
+    await expect(stageBtns).toHaveCount(0);
 
-    // 侧栏不应有"打包下载"按钮（line 742 级条件 !isSingle）
+    // 侧栏应有"下载"按钮（单文件新下载入口）
+    await expect(page.locator("aside button:has-text('下载')")).toHaveCount(1);
+
+    // 侧栏不应有"打包下载"
     await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(0);
   });
 
-  test("多文件舞台操作栏有'打包'按钮、侧栏有'打包下载'按钮", async ({ page }) => {
+  test("多文件舞台有'下载'+'打包'、列表有下载图标、侧栏有'打包下载'", async ({ page }) => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
     await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 舞台操作栏应有"打包"按钮
+    // 舞台操作栏应有"下载"链接 + "打包"按钮
+    await expect(page.locator("main [class*='stagePlayer'] ~ div a:has-text('下载')")).toHaveCount(1);
     await expect(page.locator("main [class*='stagePlayer'] ~ div button:has-text('打包')")).toHaveCount(1);
 
-    // 侧栏应有"打包下载"按钮
+    // 侧栏应有"打包下载"
     await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(1);
+
+    // 文件列表每项应有下载图标（aria-label 含"下载"）
+    const icons = page.locator("button[aria-label*='下载']");
+    const count = await icons.count();
+    expect(count).toBeGreaterThanOrEqual(3);
   });
 
   test("骨架→ready 侧栏按钮区高度始终 96px", async ({ page }) => {

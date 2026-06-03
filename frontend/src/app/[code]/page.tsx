@@ -611,7 +611,7 @@ export default function SharePage() {
                 </div>
                 {selectedFile ? (
                   <div className="flex gap-3 shrink-0">
-                    {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
+                    {!isSingle && !selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
                       <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
                     )}
                     {!isSingle && (
@@ -625,7 +625,7 @@ export default function SharePage() {
                 ) : (
                   /* downloads 尚未就绪：shimmer 占位，高度与真实按钮（h≈38px）一致 */
                   <div className="flex gap-3 shrink-0" aria-hidden="true">
-                    <div className={`${s.skel} h-[38px] w-24`} />
+                    {!isSingle && <div className={`${s.skel} h-[38px] w-24`} />}
                     {!isSingle && <div className={`${s.skel} h-[38px] w-36`} />}
                   </div>
                 )}
