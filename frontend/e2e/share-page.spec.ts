@@ -340,15 +340,16 @@ test.describe("移动端横向溢出回归", () => {
   // 保持恒定高度，downloads 到达后不得把下方侧栏往下推（移动端单栏最明显）。
   // 用正常长度文件名（避免超长名换行带来的无关高度噪声），精准验证垂直稳定性。
   test("download 慢到时操作栏骨架占位，侧栏不被挤动", async ({ page }) => {
-    const NAME = "演示视频.mp4";
     const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
+    const mkFile = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), file_ext: "mp4", content_type: "video/mp4", index: i, is_chunked: false, chunk_count: 0 });
+    const mkDl = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), content_type: "video/mp4", is_chunked: false, download_url: `https://example.com/v${i}.mp4`, chunks: [] });
     const info = {
       code: MOCK_CODE,
-      files: [{ file_name: NAME, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META }],
-      empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+      files: [mkFile(0), mkFile(1), mkFile(2)],
+      empty_dirs: [], total_bytes: 6000000, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
     };
     const dl = {
-      files: [{ file_name: NAME, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }],
+      files: [mkDl(0), mkDl(1), mkDl(2)],
       empty_dirs: [], expires_in: 3600,
     };
     // share info 立即返回
@@ -686,5 +687,134 @@ test.describe("文件列表折叠/展开", () => {
 
     // 无"展开更多"按钮
     await expect(page.locator("aside button:has-text('展开更多')")).not.toBeVisible();
+  });
+});
+
+// ===== 单/多文件按钮区高度一致 & 打包按钮显隐 =====
+test.describe("单/多文件按钮区布局回归", () => {
+  const C = MOCK_CODE;
+  const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
+
+  async function setup(page: import("@playwright/test").Page, fileCount: number) {
+    const files = Array.from({ length: fileCount }, (_, i) => ({
+      file_name: `文件${i + 1}.mp4`, file_size: 1000000, file_ext: "mp4", content_type: "video/mp4",
+      index: i, is_chunked: false, chunk_count: 0, media_metadata: META,
+    }));
+    const dlFiles = files.map((f) => ({
+      file_name: f.file_name, file_size: f.file_size, content_type: f.content_type,
+      is_chunked: false, download_url: `https://example.com/v${f.index}.mp4`, chunks: [],
+      media_metadata: META,
+    }));
+    await page.route("**/api/v1/shares/" + C, (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        code: C, files, empty_dirs: [], total_bytes: fileCount * 1000000,
+        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+      }) })
+    );
+    await page.route("**/api/v1/shares/" + C + "/download", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dlFiles, empty_dirs: [], expires_in: 3600 }) })
+    );
+    await page.route("https://example.com/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+  }
+
+  // 辅助：定位侧栏按钮容器（flex-col gap-2 且包含 复制链接 按钮）
+  async function sidebarBtnArea(page: import("@playwright/test").Page) {
+    return page.evaluate(() => {
+      const divs = Array.from(document.querySelectorAll("aside .flex.flex-col.gap-2"));
+      const target = divs.find((d) => d.textContent?.includes("复制链接")) as HTMLElement | null;
+      return target ? Math.round(target.getBoundingClientRect().height) : null;
+    });
+  }
+
+  test("单文件侧栏按钮区高度 = 96px（不塌缩为 42px）", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const h = await sidebarBtnArea(page);
+    expect(h).not.toBeNull();
+    expect(h).toBe(96);
+  });
+
+  test("多文件侧栏按钮区高度 = 96px（与单文件一致）", async ({ page }) => {
+    await setup(page, 3);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const h = await sidebarBtnArea(page);
+    expect(h).not.toBeNull();
+    expect(h).toBe(96);
+  });
+
+  test("单文件舞台操作栏无'打包'按钮、侧栏无'打包下载'按钮", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    // 舞台操作栏不应有"打包"按钮（line 596 级条件 !isSingle）
+    const stagePacks = page.locator("main [class*='stagePlayer'] ~ div button:has-text('打包')");
+    await expect(stagePacks).toHaveCount(0);
+
+    // 侧栏不应有"打包下载"按钮（line 742 级条件 !isSingle）
+    await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(0);
+  });
+
+  test("多文件舞台操作栏有'打包'按钮、侧栏有'打包下载'按钮", async ({ page }) => {
+    await setup(page, 3);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    // 舞台操作栏应有"打包"按钮
+    await expect(page.locator("main [class*='stagePlayer'] ~ div button:has-text('打包')")).toHaveCount(1);
+
+    // 侧栏应有"打包下载"按钮
+    await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(1);
+  });
+
+  test("骨架→ready 侧栏按钮区高度始终 96px", async ({ page }) => {
+    // 延迟响应，捕获骨架阶段
+    let relInfo: () => void; const gInfo = new Promise<void>((r) => { relInfo = r; });
+    const gDl = new Promise<void>((r) => { setTimeout(r, 800); });
+    const files = Array.from({ length: 1 }, (_, i) => ({
+      file_name: `单.mp4`, file_size: 1000000, file_ext: "mp4", content_type: "video/mp4",
+      index: i, is_chunked: false, chunk_count: 0, media_metadata: META,
+    }));
+    const dlFiles = files.map((f) => ({
+      file_name: f.file_name, file_size: f.file_size, content_type: f.content_type,
+      is_chunked: false, download_url: `https://example.com/v0.mp4`, chunks: [], media_metadata: META,
+    }));
+    await page.route("**/api/v1/shares/" + C, async (r) => { await gInfo; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: C, files, empty_dirs: [], total_bytes: 1000000, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false }) }); });
+    await page.route("**/api/v1/shares/" + C + "/download", async (r) => { await gDl; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dlFiles, empty_dirs: [], expires_in: 3600 }) }); });
+    await page.route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" }));
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.waitForTimeout(400);
+
+    // 骨架阶段侧栏按钮区高度
+    const skeletonH = await page.evaluate(() => {
+      const divs = Array.from(document.querySelectorAll("aside .flex.flex-col.gap-2"));
+      const target = divs[divs.length - 1] as HTMLElement | null;
+      return target ? Math.round(target.getBoundingClientRect().height) : null;
+    });
+    expect(skeletonH).toBe(96);
+
+    // 释放 share info
+    relInfo!();
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(300);
+
+    const readyH = await sidebarBtnArea(page);
+    expect(readyH).toBe(96);
   });
 });

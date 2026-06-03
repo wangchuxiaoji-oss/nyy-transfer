@@ -369,8 +369,8 @@ export default function SharePage() {
                 </div>
               </div>
 
-              {/* 操作按钮区骨架（主按钮 + 复制链接，与最常见的 ready 状态对齐） */}
-              <div className="flex flex-col gap-2">
+              {/* 操作按钮区骨架（min-h-[96px] 与 real 单/多文件恒定等高） */}
+              <div className="flex flex-col gap-2 min-h-[96px]">
                 <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
                 <div className={`${s.skel} h-[42px] w-full rounded-lg`} />
               </div>
@@ -593,17 +593,19 @@ export default function SharePage() {
                     {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
                       <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
                     )}
-                    <button onClick={handleDownloadAll} disabled={downloading}
-                      className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
-                      <Package className="w-4 h-4" />
-                      {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
-                    </button>
+                    {!isSingle && (
+                      <button onClick={handleDownloadAll} disabled={downloading}
+                        className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+                        <Package className="w-4 h-4" />
+                        {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   /* downloads 尚未就绪：shimmer 占位，高度与真实按钮（h≈38px）一致 */
                   <div className="flex gap-3 shrink-0" aria-hidden="true">
                     <div className={`${s.skel} h-[38px] w-24`} />
-                    <div className={`${s.skel} h-[38px] w-36`} />
+                    {!isSingle && <div className={`${s.skel} h-[38px] w-36`} />}
                   </div>
                 )}
               </div>
@@ -737,7 +739,7 @@ export default function SharePage() {
             </div>
 
             {/* 操作按钮 */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 min-h-[96px]">
               {downloads.length > 0 && !isSingle && (
                 <button onClick={handleDownloadAll} disabled={downloading}
                   className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
