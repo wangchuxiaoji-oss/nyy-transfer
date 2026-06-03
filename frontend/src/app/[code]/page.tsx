@@ -747,7 +747,7 @@ export default function SharePage() {
                   {downloading ? "打包中…" : `打包下载 ${formatSize(share.total_bytes)}`}
                 </button>
               )}
-              {downloads.length === 0 && (
+              {downloads.length === 0 && !isSingle && (
                 <button onClick={handleDownloadSingle} disabled={downloading}
                   className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Download className="w-4 h-4" />

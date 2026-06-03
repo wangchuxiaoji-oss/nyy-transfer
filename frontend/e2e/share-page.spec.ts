@@ -340,7 +340,6 @@ test.describe("移动端横向溢出回归", () => {
   // 保持恒定高度，downloads 到达后不得把下方侧栏往下推（移动端单栏最明显）。
   // 用正常长度文件名（避免超长名换行带来的无关高度噪声），精准验证垂直稳定性。
   test("download 慢到时操作栏骨架占位，侧栏不被挤动", async ({ page }) => {
-    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
     const mkFile = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), file_ext: "mp4", content_type: "video/mp4", index: i, is_chunked: false, chunk_count: 0 });
     const mkDl = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), content_type: "video/mp4", is_chunked: false, download_url: `https://example.com/v${i}.mp4`, chunks: [] });
     const info = {
@@ -816,5 +815,38 @@ test.describe("单/多文件按钮区布局回归", () => {
 
     const readyH = await sidebarBtnArea(page);
     expect(readyH).toBe(96);
+  });
+
+  // 防闪烁回归：单文件 share 已到、downloads 尚未就绪时，侧栏不应出现
+  // 橙色"下载"按钮（因为下一秒就会因 !isSingle 消失）
+  test("单文件 downloads=[] 时侧栏无橙色获取按钮（防闪）", async ({ page }) => {
+    let relDl: () => void; const gDl = new Promise<void>((r) => { relDl = r; });
+    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }] };
+    const f1 = { file_name: "单.mp4", file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META };
+    await page.route("**/api/v1/shares/" + C, (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: C, files: [f1], empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false }) })
+    );
+    // downloads 暂不释放（模拟 share 已到但 downloads 未就绪）
+    await page.route("**/api/v1/shares/" + C + "/download", async (r) => { await gDl; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [{ file_name: "单.mp4", file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }], empty_dirs: [], expires_in: 3600 }) }); });
+    await page.route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" }));
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    // 此时 share 已到，downloads 还是 []，侧栏操作按钮区不应有"下载"/"获取"字样按钮
+    const btnArea = page.locator("aside .flex.flex-col.gap-2.min-h-\\[96px\\]");
+    const btns = btnArea.locator("button, a");
+    const count = await btns.count();
+    const texts: string[] = [];
+    for (let i = 0; i < count; i++) {
+      texts.push((await btns.nth(i).textContent())?.trim() || "");
+    }
+    // 只应有"复制链接"，不应有"下载"或"获取下载链接"或"打包下载"
+    expect(texts.filter((t) => t.includes("复制链接")).length).toBe(1);
+    expect(texts.some((t) => t.includes("下载") || t.includes("获取"))).toBe(false);
+
+    relDl!();
   });
 });
