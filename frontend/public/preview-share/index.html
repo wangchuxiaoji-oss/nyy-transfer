@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>share 页空间利用率 · 5 套 v3 方案对比</title>
+<title>share 页设计对比 · 15 套方案 (v3 + v4 + v5)</title>
 <style>
   :root {
     --bg: #f5f5f7;
@@ -32,7 +32,17 @@
   .header .badges { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; gap: 4px; background: white; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; padding: 5px 10px; border-radius: 14px; font-weight: 500; }
   .badge.primary { background: var(--orange-soft); color: var(--orange-dark); border-color: #ffd9b8; }
+  .badge.accent { background: #1A1815; color: #FF8A3D; border-color: #FF8A3D; }
   .badge .dot { width: 5px; height: 5px; background: var(--orange); border-radius: 50%; }
+
+  .section { margin-top: 48px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid var(--border); }
+  .section-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: baseline; gap: 12px; }
+  .section-title .ver { background: var(--orange); color: white; font-size: 13px; font-weight: 800; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.05em; }
+  .section-title .count { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+  .section-desc { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; line-height: 1.6; }
+  .section-desc b { color: var(--text); font-weight: 600; }
+
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
   .card {
     background: white;
@@ -67,20 +77,23 @@
   .card-meta .item { display: flex; align-items: center; gap: 4px; }
   .card-meta b { color: var(--text); font-weight: 600; }
   .card-meta .dot { width: 4px; height: 4px; background: var(--text-dim); border-radius: 50%; }
-  .card-states { display: flex; gap: 4px; margin-top: 4px; }
+  .card-states { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
   .state-tag { background: var(--bg); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-weight: 600; }
 
-  .footer { margin-top: 36px; padding: 20px 24px; background: white; border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-  .footer .left { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .footer { margin-top: 48px; padding: 24px; background: white; border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .footer .left { font-size: 13px; color: var(--text-muted); line-height: 1.7; }
   .footer .left b { color: var(--text); font-weight: 600; }
-  .footer .right { display: flex; gap: 8px; flex-wrap: wrap; }
-  .footer .btn { background: var(--orange-soft); color: var(--orange-dark); border: 1px solid #ffd9b8; font-size: 12px; font-weight: 600; padding: 8px 16px; border-radius: 8px; text-decoration: none; }
+  .footer .right { display: flex; gap: 8px; flex-wrap: wrap; max-width: 600px; justify-content: flex-end; }
+  .footer .btn { background: var(--orange-soft); color: var(--orange-dark); border: 1px solid #ffd9b8; font-size: 11px; font-weight: 600; padding: 6px 12px; border-radius: 8px; text-decoration: none; }
   .footer .btn:hover { background: var(--orange); color: white; }
+  .footer .btn.fd { background: #1A1815; color: var(--orange); border-color: var(--orange); }
+  .footer .btn.wd { background: var(--orange-soft); color: var(--orange-dark); border-color: #ffd9b8; }
 
-  .info-block { margin-top: 24px; padding: 24px; background: var(--orange-soft); border-radius: 12px; border: 1px solid #ffd9b8; }
+  .info-block { margin-top: 32px; padding: 24px; background: var(--orange-soft); border-radius: 12px; border: 1px solid #ffd9b8; }
   .info-block h2 { font-size: 15px; font-weight: 700; color: var(--orange-dark); margin-bottom: 12px; }
-  .info-block .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .info-block .grid-2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
   .info-block .grid-2 b { color: var(--text); font-weight: 600; }
+  .info-block .grid-2 h3 { color: var(--orange-dark); font-size: 14px; margin-bottom: 8px; }
   .info-block .grid-2 ul { padding-left: 20px; }
   .info-block .grid-2 li { margin-bottom: 4px; }
 </style>
@@ -88,162 +101,261 @@
 <body>
   <div class="page">
     <div class="header">
-      <h1>桌面 share 页空间利用率 · <b>5 套 v3 方案</b></h1>
-      <div class="sub">v3 架构已敲定:Modal 双层模型 + 5 密度档(L0/L1/L2/L3)+ 3 断点响应式 + 双主题(light/dark/auto)+ 跨文件操作(打包/手工下一项)+ 5 种 viewer(视频/图片/PDF/音频/文本)<br>每个 HTML 内置主题切换按钮 + 状态切换 tab,现场对比。</div>
+      <h1>桌面 share 页空间利用率 · <b>15 套方案对比</b></h1>
+      <div class="sub">v3 (5 套) + v4 frontend-design (5 套) + v5 web-design (5 套) = 共 15 套 HTML 预览,每套都内置主题切换 + 状态 tab + Modal 预览,现场对比挑选最合适的最终方案。</div>
       <div class="badges">
         <span class="badge primary"><span class="dot"></span>v3 架构已敲定</span>
+        <span class="badge accent">v4 + v5 新增 10 套</span>
         <span class="badge">Modal 预览,不开新页</span>
-        <span class="badge">支持 5 种文件类型预览</span>
-        <span class="badge">light / dark / auto 三主题</span>
-        <span class="badge">桌面 / 平板 / 手机三断点</span>
+        <span class="badge">5 种文件类型</span>
+        <span class="badge">3 主题 + 3 断点</span>
         <span class="badge">打包下载 + 手工下一项</span>
       </div>
     </div>
 
-    <div class="grid">
-      <a class="card" href="plan-3a-minimal.html" target="_blank">
-        <div class="thumb"><iframe src="plan-3a-minimal.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
-        <div class="card-body">
-          <div class="card-num">PLAN 3A</div>
-          <div class="card-title">极简白</div>
-          <div class="card-desc">白底 + 橙点缀 · 大留白 · 精准对齐。light 下"克制感"突出,dark 下"朴素"。最贴近 nyy 现有品牌调性。</div>
-          <div class="card-states">
-            <span class="state-tag">A 单桌面</span>
-            <span class="state-tag">B 多桌面</span>
-            <span class="state-tag">D 单手机</span>
+    <!-- v3 套 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="ver">v3</span><span>基线 5 套</span><span class="count">· 渐进式改 · 5 套备选</span></div>
+      </div>
+      <div class="section-desc">5 套 v3 方案:贴近 nyy 现有品牌调性的<b>极简白</b>、<b>温暖米</b>、<b>深色 HUD</b>、<b>冷白现代</b>、<b>杂志感</b>。</div>
+      <div class="grid">
+        <a class="card" href="plan-3a-minimal.html" target="_blank">
+          <div class="thumb"><iframe src="plan-3a-minimal.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 3A</div>
+            <div class="card-title">极简白</div>
+            <div class="card-desc">白底 + 橙点缀 · 大留白 · 精准对齐。light 下"克制感"突出,dark 下"朴素"。最贴近 nyy 现有品牌调性。</div>
+            <div class="card-states"><span class="state-tag">A</span><span class="state-tag">B</span><span class="state-tag">D</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>极简白</b></span><span class="dot"></span><span class="item">🌗 双主题</span></div>
           </div>
-          <div class="card-meta">
-            <span class="item">🎨 风格: <b>极简白</b></span>
-            <span class="dot"></span>
-            <span class="item">🌗 双主题</span>
-          </div>
-        </div>
-      </a>
+        </a>
 
-      <a class="card recommended" href="plan-3b-warm.html" target="_blank">
-        <div class="thumb"><iframe src="plan-3b-warm.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
-        <div class="card-body">
-          <div class="card-num">PLAN 3B</div>
-          <div class="card-title">温暖米</div>
-          <div class="card-desc">米白 / 深棕 + 暖橙 · 衬线字体 · 大圆角 · 像"白天书桌 / 夜晚壁炉"。双主题都温暖。</div>
-          <div class="card-states">
-            <span class="state-tag">A 单桌面</span>
-            <span class="state-tag">B 多桌面</span>
-            <span class="state-tag">D 单手机</span>
+        <a class="card recommended" href="plan-3b-warm.html" target="_blank">
+          <div class="thumb"><iframe src="plan-3b-warm.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 3B</div>
+            <div class="card-title">温暖米</div>
+            <div class="card-desc">米白 / 深棕 + 暖橙 · 衬线字体 · 大圆角 · 像"白天书桌 / 夜晚壁炉"。双主题都温暖。</div>
+            <div class="card-states"><span class="state-tag">A</span><span class="state-tag">B</span><span class="state-tag">D</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>温暖米</b></span><span class="dot"></span><span class="item">🌗 双主题都好看</span></div>
           </div>
-          <div class="card-meta">
-            <span class="item">🎨 风格: <b>温暖米</b></span>
-            <span class="dot"></span>
-            <span class="item">🌗 双主题都好看</span>
-          </div>
-        </div>
-      </a>
+        </a>
 
-      <a class="card" href="plan-3c-dark-hud.html" target="_blank">
-        <div class="thumb"><iframe src="plan-3c-dark-hud.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
-        <div class="card-body">
-          <div class="card-num">PLAN 3C</div>
-          <div class="card-title">深色 HUD</div>
-          <div class="card-desc">深色画布 + 橙色 HUD · dark 主题下影院感最强 · 重点展示 L3 多文件 16+ 网格管理能力。</div>
-          <div class="card-states">
-            <span class="state-tag">A 单桌面</span>
-            <span class="state-tag">C 多 16+ 桌面</span>
-            <span class="state-tag">F 多手机</span>
+        <a class="card" href="plan-3c-dark-hud.html" target="_blank">
+          <div class="thumb"><iframe src="plan-3c-dark-hud.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 3C</div>
+            <div class="card-title">深色 HUD</div>
+            <div class="card-desc">深色画布 + 橙色 HUD · dark 主题下影院感最强 · 重点展示 L3 多文件 16+ 网格管理能力。</div>
+            <div class="card-states"><span class="state-tag">A</span><span class="state-tag">C</span><span class="state-tag">F</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>深色 HUD</b></span><span class="dot"></span><span class="item">🌗 dark 优先</span></div>
           </div>
-          <div class="card-meta">
-            <span class="item">🎨 风格: <b>深色 HUD</b></span>
-            <span class="dot"></span>
-            <span class="item">🌗 dark 优先</span>
-          </div>
-        </div>
-      </a>
+        </a>
 
-      <a class="card" href="plan-3d-cool.html" target="_blank">
-        <div class="thumb"><iframe src="plan-3d-cool.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
-        <div class="card-body">
-          <div class="card-num">PLAN 3D</div>
-          <div class="card-title">冷白现代</div>
-          <div class="card-desc">冷白 / 深蓝灰 + 锐利橙 · 数据感 · 表格化文件列表 · 精确对齐 · 适合多文件批量管理(信息密度高)。</div>
-          <div class="card-states">
-            <span class="state-tag">B 多 5 桌面</span>
-            <span class="state-tag">C 多 16+ 桌面</span>
-            <span class="state-tag">E 多手机</span>
+        <a class="card" href="plan-3d-cool.html" target="_blank">
+          <div class="thumb"><iframe src="plan-3d-cool.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 3D</div>
+            <div class="card-title">冷白现代</div>
+            <div class="card-desc">冷白 / 深蓝灰 + 锐利橙 · 数据感 · 表格化文件列表 · 精确对齐 · 适合多文件批量管理(信息密度高)。</div>
+            <div class="card-states"><span class="state-tag">B</span><span class="state-tag">C</span><span class="state-tag">E</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>冷白现代</b></span><span class="dot"></span><span class="item">🌗 锐利双主题</span></div>
           </div>
-          <div class="card-meta">
-            <span class="item">🎨 风格: <b>冷白现代</b></span>
-            <span class="dot"></span>
-            <span class="item">🌗 锐利双主题</span>
-          </div>
-        </div>
-      </a>
+        </a>
 
-      <a class="card" href="plan-3e-magazine.html" target="_blank">
-        <div class="thumb"><iframe src="plan-3e-magazine.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
-        <div class="card-body">
-          <div class="card-num">PLAN 3E</div>
-          <div class="card-title">杂志感</div>
-          <div class="card-desc">米色 / 深棕 + 粗衬线 · 立体卡片(4px 硬阴影)· 印刷质感 · 强排版 · 双主题都"杂志封面"。</div>
-          <div class="card-states">
-            <span class="state-tag">A 单桌面</span>
-            <span class="state-tag">B 多 5 桌面</span>
-            <span class="state-tag">C 多 16+ 桌面</span>
+        <a class="card" href="plan-3e-magazine.html" target="_blank">
+          <div class="thumb"><iframe src="plan-3e-magazine.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 3E</div>
+            <div class="card-title">杂志感</div>
+            <div class="card-desc">米色 / 深棕 + 粗衬线 · 立体卡片(4px 硬阴影)· 印刷质感 · 强排版 · 双主题都"杂志封面"。</div>
+            <div class="card-states"><span class="state-tag">A</span><span class="state-tag">B</span><span class="state-tag">C</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>杂志感</b></span><span class="dot"></span><span class="item">🌗 双主题都好看</span></div>
           </div>
-          <div class="card-meta">
-            <span class="item">🎨 风格: <b>杂志感</b></span>
-            <span class="dot"></span>
-            <span class="item">🌗 双主题都好看</span>
-          </div>
-        </div>
-      </a>
+        </a>
+      </div>
+    </div>
 
-      <div class="card" style="background: linear-gradient(135deg, #fff7f0, #ffe5cc); border-color: #ffd9b8; cursor: default;">
-        <div style="padding: 36px 24px; flex: 1; display: flex; flex-direction: column; gap: 14px; justify-content: center;">
-          <div style="font-size: 11px; color: var(--orange-dark); font-weight: 700; letter-spacing: 0.15em;">SUMMARY</div>
-          <div style="font-size: 20px; font-weight: 600; color: var(--text); letter-spacing: -0.01em;">v3 架构推荐</div>
-          <div style="font-size: 14px; color: var(--text-muted); line-height: 1.6;">
-            <b style="color: var(--text);">3A</b> 最贴 nyy 现有品牌(渐进式改)<br>
-            <b style="color: var(--text);">3B / 3E</b> 双主题都好看,气质稳定<br>
-            <b style="color: var(--text);">3C</b> 适合夜间用户,大文件管理<br>
-            <b style="color: var(--text);">3D</b> 适合效率型用户,信息密度高
+    <!-- v4 套 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="ver" style="background:#1A1815;color:#FF8A3D;">v4</span><span>frontend-design 5 套</span><span class="count">· BOLD 极端风格 · 5 套备选</span></div>
+      </div>
+      <div class="section-desc">anthropics/skills 仓库的 frontend-design skill 产出的 5 套:每个都走极端方向,看 nyy 是否要更"敢一点"的风格。<b>5 套都严格 nyy 品牌色 #FF8A3D</b>。</div>
+      <div class="grid">
+        <a class="card" href="plan-4a-brutalist.html" target="_blank">
+          <div class="thumb"><iframe src="plan-4a-brutalist.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num" style="color:#FF8A3D;">PLAN 4A</div>
+            <div class="card-title">Brutalist Industrial</div>
+            <div class="card-desc">黑硬边 + 4-6px 硬阴影 + JetBrains Mono · 工业感 · 高对比 · 0 圆角。技术宅的"硬核取件单"。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Brutalist</b></span><span class="dot"></span><span class="item">⚡ 极端</span></div>
           </div>
-          <div style="font-size: 12px; color: var(--orange-dark); padding-top: 12px; border-top: 1px solid #ffd9b8;">
-            点卡片看具体设计。每个 HTML 内置主题切换 + 状态 tab,现场对比。
+        </a>
+
+        <a class="card" href="plan-4b-luxury.html" target="_blank">
+          <div class="thumb"><iframe src="plan-4b-luxury.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num" style="color:#FF8A3D;">PLAN 4B</div>
+            <div class="card-title">Luxury Refined</div>
+            <div class="card-desc">Cormorant Garamond 斜体 + 0 阴影 + 1px hairline + 0.4s 慢动效 · 高级感 · 爱马仕橙盒气质。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Luxury</b></span><span class="dot"></span><span class="item">⚡ 极端精致</span></div>
           </div>
-        </div>
+        </a>
+
+        <a class="card" href="plan-4c-retro-futuristic.html" target="_blank">
+          <div class="thumb"><iframe src="plan-4c-retro-futuristic.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num" style="color:#FF8A3D;">PLAN 4C</div>
+            <div class="card-title">Retro-Futuristic Y2K</div>
+            <div class="card-desc">Orbitron + 镭射橙 + 玻璃 + 立体按钮 + 紫黑星云 · 1999 穿越来的取件单 · 霓虹感。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Y2K Chrome</b></span><span class="dot"></span><span class="item">⚡ 极端未来</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-4d-playful.html" target="_blank">
+          <div class="thumb"><iframe src="plan-4d-playful.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num" style="color:#FF8A3D;">PLAN 4D</div>
+            <div class="card-title">Playful Toy</div>
+            <div class="card-desc">Sora + 100px 药丸按钮 + 弹性曲线 + 糖果色朋友 · 软糖阴影 · 谁看了都想按一下。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Playful</b></span><span class="dot"></span><span class="item">⚡ 极端可爱</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-4e-editorial.html" target="_blank">
+          <div class="thumb"><iframe src="plan-4e-editorial.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num" style="color:#FF8A3D;">PLAN 4E</div>
+            <div class="card-title">Editorial Magazine</div>
+            <div class="card-desc">Fraunces italic 700 + 米色纸 + 0 圆角 + 橙色高亮笔 · 纽约客跨页 · 排版至上。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Editorial</b></span><span class="dot"></span><span class="item">⚡ 极端排版</span></div>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <!-- v5 套 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="ver">v5</span><span>web-design 5 套</span><span class="count">· spec-first 理性派 · 5 套备选</span></div>
+      </div>
+      <div class="section-desc">KAOPU-XiaoPu/web-design skill 产出的 5 套:spec-first 工作流 + 58 个 design-systems 参考 + 10 个 style-seeds。每个都基于一个 style-seed 衍生。<b>5 套都严格 nyy 品牌色 #FF8A3D</b>。</div>
+      <div class="grid">
+        <a class="card" href="plan-5a-cream-editorial.html" target="_blank">
+          <div class="thumb"><iframe src="plan-5a-cream-editorial.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 5A</div>
+            <div class="card-title">Cream Editorial</div>
+            <div class="card-desc">奶油米 + Playfair Display 900 + 橙色高亮笔 + 1px 黑实线 · 像翻 200 页纸质杂志。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Style-seed #1</b></span><span class="dot"></span><span class="item">📐 Spec-first</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-5b-dark-tech.html" target="_blank">
+          <div class="thumb"><iframe src="plan-5b-dark-tech.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 5B</div>
+            <div class="card-title">Dark Tech Console</div>
+            <div class="card-desc">深空 #0B0B0F + Space Grotesk + 玻璃 + 橙色 glow · 像深空站控制台 · 信息在黑暗中发光。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Style-seed #2</b></span><span class="dot"></span><span class="item">📐 Spec-first</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-5c-swiss-grid.html" target="_blank">
+          <div class="thumb"><iframe src="plan-5c-swiss-grid.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 5C</div>
+            <div class="card-title">Swiss Grid</div>
+            <div class="card-desc">Inter 全家族 + 12 列严格 grid + 99% 黑/白 + 1% 橙 · 包豪斯走廊海报 · 理性至上。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Style-seed #9</b></span><span class="dot"></span><span class="item">📐 Spec-first</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-5d-glassmorphism.html" target="_blank">
+          <div class="thumb"><iframe src="plan-5d-glassmorphism.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 5D</div>
+            <div class="card-title">Glassmorphism</div>
+            <div class="card-desc">Outfit + 渐变橙底 + backdrop-filter 玻璃 + 橙色光斑 · 阳光穿过磨砂玻璃。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Style-seed #10</b></span><span class="dot"></span><span class="item">📐 Spec-first</span></div>
+          </div>
+        </a>
+
+        <a class="card" href="plan-5e-organic.html" target="_blank">
+          <div class="thumb"><iframe src="plan-5e-organic.html" scrolling="no"></iframe><div class="thumb-overlay"></div></div>
+          <div class="card-body">
+            <div class="card-num">PLAN 5E</div>
+            <div class="card-title">Organic Natural</div>
+            <div class="card-desc">Fraunces italic + 暖米 + 陶土 + 噪点纹理 + 苔绿 · 乡间市集手工皂包装 · 呼吸感。</div>
+            <div class="card-states"><span class="state-tag">A L0</span><span class="state-tag">B L1</span><span class="state-tag">D L2</span></div>
+            <div class="card-meta"><span class="item">🎨 <b>Style-seed #8</b></span><span class="dot"></span><span class="item">📐 Spec-first</span></div>
+          </div>
+        </a>
       </div>
     </div>
 
     <div class="info-block">
-      <h2>v3 架构 vs v1 架构(5 个关键改进)</h2>
+      <h2>v3 + v4 + v5 关键对比(15 套设计哲学)</h2>
       <div class="grid-2">
-        <ul>
-          <li><b>Modal 双层</b>:预览不离开 share 页,点 ▶ 弹全屏 Modal(视频/图片/PDF/音频/文本),不新建路由</li>
-          <li><b>5 密度档</b>:L0(1) / L1(2-5) / L2(6-15) / L3(16+) 自动适配,不"1 个嫌空 200 个嫌挤"</li>
-          <li><b>双主题</b>:light / dark / auto 三态,Modal 也适配(原有 share 页未支持)</li>
-          <li><b>跨文件操作</b>:L1+ 出现"打包下载"主 CTA + 列表项"▶ 下一项"手工切换</li>
-          <li><b>5 种 viewer</b>:SDP 视频 / Image / PDF.js / 音频 / 文本,不只视频</li>
-        </ul>
-        <ul>
-          <li><b>3 断点响应式</b>:≥1024 桌面 / 640-1023 平板 / &lt;640 手机,同套代码</li>
-          <li><b>ThemeToggle</b>:右上角 Sun/Moon/Monitor 循环切换(原本漏的,已加)</li>
-          <li><b>16+ 网格</b>:L3 状态显示缩略图墙 + 左侧筛选侧栏 + 批量选择</li>
-          <li><b>免费预览</b>:无付费墙(预留之后补),Modal 入口直接进入</li>
-          <li><b>共享 Modal</b>:多文件共享同一 Modal,"X / N"指示 + 上一项/下一项</li>
-        </ul>
+        <div>
+          <h3>📐 v3 基线(5 套)</h3>
+          <ul>
+            <li>渐进式改,贴近 nyy 现有</li>
+            <li>2-3 套作为最终候选</li>
+            <li><b>3B 温暖米</b>作为 v3 主力</li>
+          </ul>
+        </div>
+        <div>
+          <h3>⚡ v4 frontend-design(5 套)</h3>
+          <ul>
+            <li>BOLD 极端方向(Brutalist / Luxury / Y2K / Playful / Editorial)</li>
+            <li>anthropics/skills 仓库</li>
+            <li><b>看 nyy 是否要更"敢一点"</b></li>
+          </ul>
+        </div>
+        <div>
+          <h3>📐 v5 web-design(5 套)</h3>
+          <ul>
+            <li>spec-first 理性派(9 章节 DESIGN.md)</li>
+            <li>10 个 style-seeds 衍生</li>
+            <li>58 个 design-systems 参考</li>
+          </ul>
+        </div>
       </div>
     </div>
 
     <div class="footer">
       <div class="left">
         统一数据:<b>碟中谍8-最后的清算.mkv</b> · 5.28 GB · 提取码 <b>Ab3F7K</b> · 分享者 小爱同学 · 多文件场景叠加 JPG / PDF / MP3 / TXT<br>
-        v1 旧预览保留在: <code>plan-1-narrow-card.html</code> · <code>plan-2-three-columns.html</code> · <code>plan-3-topbar-split.html</code> · <code>plan-4-immersive.html</code> · <code>plan-5-split-routes.html</code>
+        15 套 HTML 全部部署在 dev.nyy.app/preview-share/ · 每个内置主题切换 + 状态 tab + Modal 预览
       </div>
       <div class="right">
-        <a class="btn" href="plan-3a-minimal.html" target="_blank">▶ 3A 极简白</a>
-        <a class="btn" href="plan-3b-warm.html" target="_blank">▶ 3B 温暖米</a>
-        <a class="btn" href="plan-3c-dark-hud.html" target="_blank">▶ 3C 深色 HUD</a>
-        <a class="btn" href="plan-3d-cool.html" target="_blank">▶ 3D 冷白现代</a>
-        <a class="btn" href="plan-3e-magazine.html" target="_blank">▶ 3E 杂志感</a>
+        <a class="btn" href="plan-3a-minimal.html" target="_blank">3A 极简白</a>
+        <a class="btn" href="plan-3b-warm.html" target="_blank">3B 温暖米</a>
+        <a class="btn" href="plan-3c-dark-hud.html" target="_blank">3C 深色 HUD</a>
+        <a class="btn" href="plan-3d-cool.html" target="_blank">3D 冷白现代</a>
+        <a class="btn" href="plan-3e-magazine.html" target="_blank">3E 杂志感</a>
+        <a class="btn fd" href="plan-4a-brutalist.html" target="_blank">4A Brutalist</a>
+        <a class="btn fd" href="plan-4b-luxury.html" target="_blank">4B Luxury</a>
+        <a class="btn fd" href="plan-4c-retro-futuristic.html" target="_blank">4C Y2K</a>
+        <a class="btn fd" href="plan-4d-playful.html" target="_blank">4D Playful</a>
+        <a class="btn fd" href="plan-4e-editorial.html" target="_blank">4E Editorial</a>
+        <a class="btn wd" href="plan-5a-cream-editorial.html" target="_blank">5A Cream</a>
+        <a class="btn wd" href="plan-5b-dark-tech.html" target="_blank">5B Dark</a>
+        <a class="btn wd" href="plan-5c-swiss-grid.html" target="_blank">5C Swiss</a>
+        <a class="btn wd" href="plan-5d-glassmorphism.html" target="_blank">5D Glass</a>
+        <a class="btn wd" href="plan-5e-organic.html" target="_blank">5E Organic</a>
       </div>
     </div>
   </div>
@@ -261,7 +373,7 @@
     }
     let loaded = 0;
     document.querySelectorAll('.thumb iframe').forEach(ifr => {
-      ifr.addEventListener('load', () => { loaded++; if (loaded >= 5) setTimeout(resizeThumbs, 100); });
+      ifr.addEventListener('load', () => { loaded++; if (loaded >= 15) setTimeout(resizeThumbs, 100); });
     });
     window.addEventListener('load', resizeThumbs);
     window.addEventListener('resize', resizeThumbs);
