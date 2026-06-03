@@ -144,6 +144,8 @@
 /* 舞台播放器 */
 .stagePlayer {
   position: relative;
+  width: 100%;
+  max-width: 100%;
   background: #000;
   border-radius: 16px;
   overflow: hidden;

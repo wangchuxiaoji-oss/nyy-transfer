@@ -225,11 +225,14 @@ test.describe("4C CSS 模块", () => {
 // 用于复现并防止「视频播放器及其下方元素撑破手机屏幕宽度」的回归。
 const MOCK_CODE = "overflow-mock";
 const LONG_NAME = "超长文件名".repeat(8); // 制造一个会撑破布局的长名字
+// 关键：带 media_metadata（含音频轨）的 mp4 才会真正渲染 SDP 的 <canvas>，
+// 否则 SelfDevelopPlayer 不渲染 canvas，溢出回归就测不到真实场景。
+const VIDEO_META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
 
 const MOCK_SHARE_INFO = {
   code: MOCK_CODE,
   files: [
-    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0 },
+    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
     { file_name: `${LONG_NAME}.png`, file_size: 234567, file_ext: "png", content_type: "image/png", index: 1, is_chunked: false, chunk_count: 0 },
     { file_name: `${LONG_NAME}.pdf`, file_size: 345678, file_ext: "pdf", content_type: "application/pdf", index: 2, is_chunked: false, chunk_count: 0 },
   ],
@@ -244,7 +247,7 @@ const MOCK_SHARE_INFO = {
 
 const MOCK_DOWNLOAD = {
   files: [
-    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [] },
+    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: VIDEO_META },
     { file_name: `${LONG_NAME}.png`, file_size: 234567, content_type: "image/png", is_chunked: false, download_url: "https://example.com/i.png", chunks: [] },
     { file_name: `${LONG_NAME}.pdf`, file_size: 345678, content_type: "application/pdf", is_chunked: false, download_url: "https://example.com/d.pdf", chunks: [] },
   ],
@@ -311,6 +314,40 @@ test.describe("移动端横向溢出回归", () => {
     for (const mw of minWidths!) {
       expect(mw).toBe("0px");
     }
+  });
+
+  // 真正复现「播放器超宽」：先确保 canvas 已渲染，再强制其固有宽度为大尺寸视频像素，
+  // 然后断言没有任何元素的可视宽度超过视口。
+  // 注意：不能只看 documentElement.scrollWidth —— main 上的 overflow-x-hidden 会把溢出裁掉、
+  // 掩盖真实的“子元素比父级宽”问题，所以这里逐元素比对 boundingRect 宽度。
+  test("SDP canvas 固有宽度变大时播放器不超宽", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+
+    // 等待 SDP canvas 真正渲染出来
+    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
+
+    // 模拟 video-renderer 把 canvas 固有像素设为真实视频尺寸（1920x1080）
+    await page.evaluate(() => {
+      document.querySelectorAll("canvas").forEach((c) => { c.width = 1920; c.height = 1080; });
+    });
+    await page.waitForTimeout(300);
+
+    // 收集所有可视宽度超过视口的元素（允许 1px 误差）
+    const offenders = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const out: Array<{ tag: string; cls: string; rectW: number }> = [];
+      document.querySelectorAll("body *").forEach((el) => {
+        const rectW = (el as HTMLElement).getBoundingClientRect().width;
+        if (rectW > vw + 1) {
+          out.push({ tag: el.tagName, cls: (el.className || "").toString().slice(0, 80), rectW: Math.round(rectW) });
+        }
+      });
+      return out;
+    });
+    expect(offenders, `溢出元素: ${JSON.stringify(offenders)}`).toEqual([]);
   });
 });
 
