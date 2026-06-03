@@ -388,7 +388,7 @@ export default function SharePage() {
           <div>
             {downloads.length > 0 ? (
               <div className="animate-fade-in">
-                <div className={`${s.stagePlayer} min-h-[320px]`}>
+                <div className={s.stagePlayer}>
                   {/* 视频:SDP 播放器 */}
                   {selectedType === "video" && selectedFile && (
                     <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />

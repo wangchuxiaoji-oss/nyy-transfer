@@ -316,6 +316,26 @@ test.describe("移动端横向溢出回归", () => {
     }
   });
 
+  // 播放器舞台必须恒为 16:9（修复“接近正方形”：之前 min-h-[320px] 在窄屏
+  // 会盖过 aspect-ratio:16/9 算出的高度，把容器顶成近正方形）。
+  test("播放器舞台宽高比恒为 16:9", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
+
+    const ratio = await page.evaluate(() => {
+      const stage = document.querySelector('main [class*="stagePlayer"]') as HTMLElement | null;
+      if (!stage) return null;
+      const r = stage.getBoundingClientRect();
+      return r.width / r.height;
+    });
+    expect(ratio).not.toBeNull();
+    // 16/9 ≈ 1.778，允许 ±0.02 误差
+    expect(Math.abs(ratio! - 16 / 9)).toBeLessThan(0.02);
+  });
+
   // 真正复现「播放器超宽」：先确保 canvas 已渲染，再强制其固有宽度为大尺寸视频像素，
   // 然后断言没有任何元素的可视宽度超过视口。
   // 注意：不能只看 documentElement.scrollWidth —— main 上的 overflow-x-hidden 会把溢出裁掉、
