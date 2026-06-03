@@ -85,7 +85,7 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
   };
 
   return (
-    <div className={`relative overflow-hidden bg-black text-white ${className}`}>
+    <div className={`relative w-full min-w-0 overflow-hidden bg-black text-white ${className}`}>
       <div className="relative bg-black">
         {children}
         {view.state !== "playing" && view.state !== "error" && (

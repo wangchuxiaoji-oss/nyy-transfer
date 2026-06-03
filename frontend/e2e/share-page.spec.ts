@@ -6,9 +6,9 @@ test.describe("分享页 4C 渲染", () => {
   test("不存在的分享码显示 NOT FOUND", async ({ page }) => {
     await page.goto("/definitely-not-exist-xyz");
     // 等待客户端渲染完成
-    await expect(page.locator("text=SHARE NOT FOUND")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("text=分享不存在或已被删除")).toBeVisible({ timeout: 10000 });
     // 返回首页链接
-    await expect(page.locator("text=RETURN HOME")).toBeVisible();
+    await expect(page.locator("text=返回首页")).toBeVisible();
   });
 
   test("页面包含 4C 关键元素:mesh 背景、glass 卡片、Orbitron 字体", async ({ page }) => {
@@ -87,8 +87,8 @@ test.describe("Vault Unlock", () => {
     await page.waitForTimeout(3000);
 
     // 检查是否在 locked 状态或 not_found 状态
-    const vaultTitle = page.locator("text=Secure Vault");
-    const notFound = page.locator("text=SHARE NOT FOUND");
+    const vaultTitle = page.locator("text=安全保险库");
+    const notFound = page.locator("text=分享不存在或已被删除");
     const isVault = await vaultTitle.isVisible().catch(() => false);
     const isNotFound = await notFound.isVisible().catch(() => false);
 
@@ -97,8 +97,8 @@ test.describe("Vault Unlock", () => {
 
     if (isVault) {
       // 验证 Vault 元素
-      await expect(page.locator("text=4-Digit Access Code Required")).toBeVisible();
-      await expect(page.locator("text=AUTHORIZE")).toBeVisible();
+      await expect(page.locator("text=请输入 4 位提取码解锁")).toBeVisible();
+      await expect(page.locator("text=解锁")).toBeVisible();
 
       // 验证数字方块存在
       const digits = page.locator("text=·");
@@ -126,13 +126,12 @@ test.describe("响应式布局", () => {
     expect(true).toBe(true);
   });
 
-  test("移动端（<640px）显示底栏", async ({ page }) => {
+  test("移动端（<640px）不崩溃", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    // 移动端底栏应该可见（在 ready 或 locked 状态）
-    // 由于不确定状态，只验证页面不崩溃
+    // 移动端只验证页面不崩溃（固定底栏已移除，相关回归见“反馈修复回归”）
     const body = page.locator("main");
     await expect(body).toBeVisible();
   });
@@ -311,6 +310,65 @@ test.describe("移动端横向溢出回归", () => {
     expect(minWidths!.length).toBeGreaterThan(0);
     for (const mw of minWidths!) {
       expect(mw).toBe("0px");
+    }
+  });
+});
+
+// ===== 反馈修复回归：浅色文字 / 移动端底栏 / QR =====
+
+test.describe("反馈修复回归", () => {
+  test("浅色模式下正文文字为深色（非白色）", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+
+    // 切到浅色主题
+    await page.locator("button:has-text('☀')").first().click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.waitForTimeout(300);
+
+    // 取顶部文件名（应用了主题文字类）的计算颜色，应为深色而非接近白色
+    const rgb = await page.evaluate(() => {
+      const el = document.querySelector('main [class*="tPrimary"]');
+      if (!el) return null;
+      return getComputedStyle(el as Element).color;
+    });
+    expect(rgb).not.toBeNull();
+    const m = rgb!.match(/\d+/g)!.map(Number);
+    // 深色文字：RGB 三通道都应较低（远离 255 白色）
+    expect(Math.max(m[0], m[1], m[2])).toBeLessThan(120);
+  });
+
+  test("移动端不再有固定底栏（fixed bottom bar）", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+
+    // 查找 position:fixed 且贴底（bottom:0）的元素，应不存在
+    const hasFixedBottomBar = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll("body *")).some((el) => {
+        const cs = getComputedStyle(el);
+        return cs.position === "fixed" && cs.bottom === "0px" && el.clientHeight > 0 && el.clientWidth > 200;
+      });
+    });
+    expect(hasFixedBottomBar).toBe(false);
+  });
+
+  test("移动端隐藏二维码卡片", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+
+    // 二维码 img 在移动端应不可见（lg:block + hidden）
+    const qr = page.locator('img[alt="二维码"]');
+    if (await qr.count() > 0) {
+      await expect(qr.first()).not.toBeVisible();
     }
   });
 });

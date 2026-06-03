@@ -125,7 +125,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <PlayerChrome
         view={viewState}
         actions={{
@@ -151,7 +151,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       >
         <canvas
           ref={canvasRef}
-          className="block w-full bg-black"
+          className="block w-full min-w-0 max-w-full bg-black object-contain"
           style={{ aspectRatio: "16/9" }}
         />
       </PlayerChrome>

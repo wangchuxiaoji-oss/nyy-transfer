@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
-import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder } from "lucide-react";
+import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder, Play } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { SelfDevelopPlayer } from "@/components/self-develop-player";
 import { PdfPreview } from "@/components/pdf-preview";
@@ -243,13 +243,25 @@ export default function SharePage() {
   const selectedFile = downloads.length > 0 ? downloads[Math.min(selectedIdx, downloads.length - 1)] : null;
   const selectedType = selectedFile ? classifyFile(selectedFile.file_name) : "other";
 
+  // 主题切换按钮（三处状态页/主页面共用，统一主题感知配色）
+  const ThemeToggle = () => (
+    <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
+      {(["light", "auto", "dark"] as const).map((t) => (
+        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
+          className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
+          {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
+        </button>
+      ))}
+    </div>
+  );
+
   // ===== 状态页渲染 =====
   if (pageState === "loading") {
     return (
       <main className={`min-h-dvh flex items-center justify-center ${s.meshBg}`}>
-        <div className="text-center animate-glow-pulse">
-          <BrandLogo className="w-32 h-auto mx-auto mb-4" />
-          <p className="font-tech text-sm tracking-[0.2em] text-white/60">ACCESSING VAULT…</p>
+        <div className="text-center">
+          <BrandLogo className={`w-32 h-auto mx-auto mb-4 ${s.logoBreath}`} />
+          <p className={`font-tech text-sm tracking-[0.2em] ${s.tSecondary}`}>正在打开保险库…</p>
         </div>
       </main>
     );
@@ -258,14 +270,7 @@ export default function SharePage() {
   // 状态页共用的 logo + 主题切换
   const StatusPage = ({ children }: { children: React.ReactNode }) => (
     <main className={`min-h-dvh flex flex-col items-center justify-center gap-4 ${s.meshBg}`}>
-      <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
-        {(["light", "auto", "dark"] as const).map((t) => (
-          <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
-            className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : "text-white/50 hover:text-white"}`}>
-            {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
-          </button>
-        ))}
-      </div>
+      <ThemeToggle />
       <BrandLogo className="w-24 h-auto mx-auto mb-2 opacity-60" />
       {children}
     </main>
@@ -274,9 +279,9 @@ export default function SharePage() {
   if (pageState === "not_found") {
     return (
       <StatusPage>
-        <AlertCircle className="w-12 h-12 text-white/30" />
-        <p className="font-tech text-sm tracking-widest text-white/60">SHARE NOT FOUND</p>
-        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">RETURN HOME</a>
+        <AlertCircle className={`w-12 h-12 ${s.tMuted}`} />
+        <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>分享不存在或已被删除</p>
+        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">返回首页</a>
       </StatusPage>
     );
   }
@@ -284,9 +289,9 @@ export default function SharePage() {
   if (pageState === "expired") {
     return (
       <StatusPage>
-        <Clock className="w-12 h-12 text-white/30" />
-        <p className="font-tech text-sm tracking-widest text-white/60">SHARE EXPIRED</p>
-        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">RETURN HOME</a>
+        <Clock className={`w-12 h-12 ${s.tMuted}`} />
+        <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>分享已过期</p>
+        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">返回首页</a>
       </StatusPage>
     );
   }
@@ -295,7 +300,7 @@ export default function SharePage() {
     return (
       <StatusPage>
         <AlertCircle className="w-12 h-12 text-red-400" />
-        <p className="font-tech text-sm tracking-widest text-white/60">LOAD FAILED</p>
+        <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>加载失败，请稍后重试</p>
       </StatusPage>
     );
   }
@@ -304,20 +309,12 @@ export default function SharePage() {
   if (pageState === "locked") {
     return (
       <main className={`min-h-dvh flex flex-col items-center justify-center px-4 ${s.meshBg}`}>
-        {/* 主题切换 */}
-        <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
-          {(["light", "auto", "dark"] as const).map((t) => (
-            <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
-              className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : "text-white/50 hover:text-white"}`}>
-              {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
-            </button>
-          ))}
-        </div>
+        <ThemeToggle />
 
         <div className={`${s.glass} p-10 max-w-sm w-full text-center animate-vault-open`}>
           <BrandLogo className="w-28 h-auto mx-auto mb-6" />
-          <h1 className="font-tech text-lg font-bold tracking-[0.15em] text-white mb-2 uppercase">Secure Vault</h1>
-          <p className="font-tech text-[10px] tracking-[0.2em] text-white/40 mb-8 uppercase">4-Digit Access Code Required</p>
+          <h1 className={`font-tech text-lg font-bold tracking-[0.15em] ${s.tPrimary} mb-2`}>安全保险库</h1>
+          <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-8`}>请输入 4 位提取码解锁</p>
 
           {/* 4 位数字方块 */}
           <div className="flex justify-center gap-3 mb-6">
@@ -339,25 +336,25 @@ export default function SharePage() {
             id="pwInput"
           />
           <label htmlFor="pwInput" className="block mb-6 cursor-pointer">
-            <span className="font-tech text-[10px] tracking-widest text-white/40">TAP TO ENTER CODE</span>
+            <span className={`font-tech text-[11px] tracking-widest ${s.tMuted}`}>点击输入提取码</span>
           </label>
 
           {pwError && <p role="alert" className="font-tech text-xs tracking-widest text-red-400 mb-4">{pwError}</p>}
 
           <button onClick={handleVerify} disabled={pwInput.length !== 4 || pwVerifying}
-            className={`${s.glowBtn} w-full py-4 font-tech text-sm font-bold tracking-[0.12em] uppercase`}>
-            {pwVerifying ? "VERIFYING…" : "▶ AUTHORIZE"}
+            className={`${s.glowBtn} w-full py-4 font-tech text-sm font-bold tracking-[0.12em] flex items-center justify-center gap-2`}>
+            {pwVerifying ? "验证中…" : <><Play className="w-4 h-4 fill-current" /> 解锁</>}
           </button>
 
           {/* 分享元信息（不泄露文件名） */}
           <div className="mt-8 grid grid-cols-2 gap-4 text-center">
-            <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Files</span><span className="font-tech text-base font-bold text-white">{share.files.length}</span></div>
-            <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Size</span><span className="font-tech text-base font-bold text-white">{formatSize(share.total_bytes)}</span></div>
+            <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>文件数</span><span className={`font-tech text-base font-bold ${s.tPrimary}`}>{share.files.length}</span></div>
+            <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>总大小</span><span className={`font-tech text-base font-bold ${s.tPrimary}`}>{formatSize(share.total_bytes)}</span></div>
           </div>
         </div>
 
         {/* 底部品牌 */}
-        <p className="mt-8 font-tech text-[10px] tracking-[0.15em] text-white/20 uppercase">DRIVEN BY SDP ENGINE · NYAAYA</p>
+        <p className={`mt-8 font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
       </main>
     );
   }
@@ -367,16 +364,8 @@ export default function SharePage() {
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
 
   return (
-    <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} text-white`}>
-      {/* 主题切换 */}
-      <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
-        {(["light", "auto", "dark"] as const).map((t) => (
-          <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
-            className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : "text-white/50 hover:text-white"}`}>
-            {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
-          </button>
-        ))}
-      </div>
+    <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
+      <ThemeToggle />
 
       <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
         {/* Topbar */}
@@ -385,11 +374,11 @@ export default function SharePage() {
             <BrandLogo className="w-28 h-auto" />
             <span className="font-tech text-sm font-bold tracking-[0.12em] text-yc-accent px-3 py-1.5 bg-white/6 border border-white/10 rounded-md">{code}</span>
           </div>
-          <div className="hidden md:flex items-center gap-6 text-xs text-white/50">
-            <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Files</span><b className="font-tech text-white">{share.files.length}</b></div>
-            <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Size</span><b className="font-tech text-white">{formatSize(share.total_bytes)}</b></div>
-            {share.expires_at && <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Expires</span><b className="font-tech text-white">{new Date(share.expires_at).toLocaleDateString("zh-CN")}</b></div>}
-            {share.max_downloads > 0 && <div><span className="block font-tech text-[9px] tracking-[0.2em] text-white/30 uppercase">Downloads</span><b className="font-tech text-white">{share.download_count} / {share.max_downloads}</b></div>}
+          <div className={`hidden md:flex items-center gap-6 text-xs ${s.tSecondary}`}>
+            <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>文件数</span><b className={`font-tech ${s.tPrimary}`}>{share.files.length}</b></div>
+            <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>总大小</span><b className={`font-tech ${s.tPrimary}`}>{formatSize(share.total_bytes)}</b></div>
+            {share.expires_at && <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>到期</span><b className={`font-tech ${s.tPrimary}`}>{new Date(share.expires_at).toLocaleDateString("zh-CN")}</b></div>}
+            {share.max_downloads > 0 && <div><span className={`block font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>下载次数</span><b className={`font-tech ${s.tPrimary}`}>{share.download_count} / {share.max_downloads}</b></div>}
           </div>
         </div>
 
@@ -402,7 +391,7 @@ export default function SharePage() {
                 <div className={`${s.stagePlayer} min-h-[320px]`}>
                   {/* 视频:SDP 播放器 */}
                   {selectedType === "video" && selectedFile && (
-                    <SelfDevelopPlayer file={selectedFile} className="w-full h-full" debugLog={appendDebugLog} />
+                    <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
                   )}
                   {/* 图片 */}
                   {selectedType === "image" && selectedFile && isSafeUrl(selectedFile.download_url) && (
@@ -419,8 +408,8 @@ export default function SharePage() {
                   {selectedType === "audio" && selectedFile && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-yc-bg via-yc-mesh-1 to-yc-mesh-2">
                       <div className="w-44 h-44 rounded-2xl bg-gradient-to-br from-yc-accent to-yc-accent-3 flex items-center justify-center text-6xl text-white shadow-[0_0_48px_rgba(255,138,61,0.5)]">♪</div>
-                      <p className="font-tech font-bold tracking-widest">{selectedFile.file_name}</p>
-                      <p className="text-xs text-white/40">{formatSize(selectedFile.file_size)}</p>
+                      <p className={`font-tech font-bold tracking-widest ${s.tPrimary}`}>{selectedFile.file_name}</p>
+                      <p className={`text-xs ${s.tMuted}`}>{formatSize(selectedFile.file_size)}</p>
                       <div className={s.audioWave}>
                         {Array.from({ length: 24 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 0.06}s` }} />)}
                       </div>
@@ -430,9 +419,9 @@ export default function SharePage() {
                   {selectedType === "text" && selectedFile && (
                     <div className={s.textScroll}>
                       <div className={s.textContent}>
-                        <p className="text-white/40 mb-2"># {selectedFile.file_name}</p>
-                        <p className="text-white/60">文本预览需要下载后查看。</p>
-                        <p className="text-white/30 mt-4 text-xs">文件大小: {formatSize(selectedFile.file_size)}</p>
+                        <p className={`${s.tMuted} mb-2`}># {selectedFile.file_name}</p>
+                        <p className={s.tSecondary}>文本预览需要下载后查看。</p>
+                        <p className={`${s.tMuted} mt-4 text-xs`}>文件大小: {formatSize(selectedFile.file_size)}</p>
                       </div>
                     </div>
                   )}
@@ -440,28 +429,29 @@ export default function SharePage() {
                   {selectedType === "other" && selectedFile && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                       <div className="w-20 h-20 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-3xl">⋯</div>
-                      <p className="font-tech text-sm tracking-widest text-white/60">{selectedFile.file_name}</p>
-                      <p className="text-xs text-white/40">{formatSize(selectedFile.file_size)}</p>
+                      <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>{selectedFile.file_name}</p>
+                      <p className={`text-xs ${s.tMuted}`}>{formatSize(selectedFile.file_size)}</p>
                     </div>
                   )}
                 </div>
                 {/* 文件名 + 操作栏 */}
                 {selectedFile && (
                 <div className="flex items-center justify-between gap-4 mt-4 flex-wrap">
-                  <div>
-                    <p className="font-tech text-lg font-bold tracking-wide">{selectedFile.file_name}</p>
-                    <p className="font-tech text-xs text-white/40 mt-1">
+                  <div className="min-w-0">
+                    <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedFile.file_name}</p>
+                    <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
                       {formatSize(selectedFile.file_size)}
                       {selectedFile.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
                     </p>
                   </div>
                   <div className="flex gap-3">
                     {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
-                      <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest uppercase`}>⬇ 下载</a>
+                      <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
                     )}
                     <button onClick={handleDownloadAll} disabled={downloading}
-                      className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest uppercase`}>
-                      {downloading ? "PACKING…" : `⬇ ZIP ${formatSize(share.total_bytes)}`}
+                      className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+                      <Package className="w-4 h-4" />
+                      {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
                     </button>
                   </div>
                 </div>
@@ -472,8 +462,8 @@ export default function SharePage() {
               <div className={`${s.stagePlayer} min-h-[320px] flex items-center justify-center`}>
                 <div className="text-center">
                   <BrandLogo className="w-20 h-auto mx-auto mb-4 opacity-30" />
-                  <p className="font-tech text-xs tracking-widest text-white/30">
-                    {hasOnlyEmptyDirs ? "NO FILES — FOLDERS ONLY" : "SELECT A FILE TO PREVIEW"}
+                  <p className={`font-tech text-xs tracking-widest ${s.tMuted}`}>
+                    {hasOnlyEmptyDirs ? "该分享仅包含空文件夹" : "选择一个文件开始预览"}
                   </p>
                 </div>
               </div>
@@ -485,10 +475,10 @@ export default function SharePage() {
             {/* 文件列表 */}
             <div className={`${s.glass} p-4`}>
               <div className="flex items-center justify-between mb-3">
-                <span className="font-tech text-[10px] tracking-[0.15em] text-white/40 uppercase">{share.files.length + share.empty_dirs.length} ITEMS · {formatSize(share.total_bytes)}</span>
+                <span className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted}`}>{share.files.length + share.empty_dirs.length} 项 · {formatSize(share.total_bytes)}</span>
                 <div className="flex gap-1 bg-white/6 border border-white/10 rounded-md p-0.5">
-                  <button onClick={() => setViewMode("list")} className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "list" ? "bg-yc-accent text-white" : "text-white/30"}`}>≡</button>
-                  <button onClick={() => setViewMode("grid")} className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "grid" ? "bg-yc-accent text-white" : "text-white/30"}`}>▦</button>
+                  <button onClick={() => setViewMode("list")} title="列表视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "list" ? "bg-yc-accent text-white" : s.tMuted}`}>≡</button>
+                  <button onClick={() => setViewMode("grid")} title="网格视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "grid" ? "bg-yc-accent text-white" : s.tMuted}`}>▦</button>
                 </div>
               </div>
 
@@ -497,7 +487,7 @@ export default function SharePage() {
                 <div key={dir} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
                   <Folder className="w-5 h-5 text-yc-accent flex-shrink-0" />
                   <span className="text-sm truncate flex-1">{dir}</span>
-                  <span className="font-tech text-[10px] text-white/30">空</span>
+                  <span className={`font-tech text-[10px] ${s.tMuted}`}>空</span>
                 </div>
               ))}
 
@@ -511,11 +501,11 @@ export default function SharePage() {
                     <div key={i} onClick={() => setSelectedIdx(i)} role="button" tabIndex={0}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedIdx(i); } }}
                       className={`${s.fileRow} flex items-center gap-3 px-3 py-2.5 rounded-lg border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"}`}>
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${getFileExtClass(ft)}`}>
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
                           {getFileIcon(ft)}
                         </div>
                         <span className="text-sm truncate flex-1 font-medium">{dl.file_name}</span>
-                        <span className="font-tech text-[10px] text-white/30">{formatSize(dl.file_size)}</span>
+                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
                       </div>
                     );
                   })}
@@ -532,11 +522,11 @@ export default function SharePage() {
                     <div key={i} onClick={() => setSelectedIdx(i)} role="button" tabIndex={0}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedIdx(i); } }}
                       className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
-                        <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl ${getFileExtClass(ft)}`}>
+                        <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
                           {getFileIcon(ft)}
                         </div>
                         <span className="text-xs truncate font-medium">{dl.file_name}</span>
-                        <span className="font-tech text-[10px] text-white/30">{formatSize(dl.file_size)}</span>
+                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
                       </div>
                     );
                   })}
@@ -548,12 +538,12 @@ export default function SharePage() {
                 const ft = classifyFile(f.file_name);
                 return (
                   <div key={i} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${getFileExtClass(ft)}`}>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
                       {getFileIcon(ft)}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm truncate font-medium">{f.file_name}</p>
-                      <p className="font-tech text-[10px] text-white/30">{formatSize(f.file_size)}</p>
+                      <p className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</p>
                     </div>
                   </div>
                 );
@@ -562,20 +552,20 @@ export default function SharePage() {
 
             {/* 分享信息 */}
             <div className={`${s.glass} p-4`}>
-              <p className="font-tech text-[10px] tracking-[0.2em] text-white/30 uppercase mb-3">Share Info</p>
+              <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>分享信息</p>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><span className="block font-tech text-[9px] text-white/30 uppercase">Downloads</span><span className="font-tech font-bold">{share.download_count}</span></div>
-                {share.expires_at && <div><span className="block font-tech text-[9px] text-white/30 uppercase">Expires</span><span className="font-tech font-bold">{new Date(share.expires_at).toLocaleDateString("zh-CN")}</span></div>}
+                <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>下载次数</span><span className="font-tech font-bold">{share.download_count}</span></div>
+                {share.expires_at && <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>到期</span><span className="font-tech font-bold">{new Date(share.expires_at).toLocaleDateString("zh-CN")}</span></div>}
               </div>
             </div>
 
-            {/* 二维码 */}
+            {/* 二维码（移动端隐藏，仅复制链接即可） */}
             {qr && (
-              <div className={`${s.glass} p-4`}>
-                <p className="font-tech text-[10px] tracking-[0.2em] text-white/30 uppercase mb-3">QR Code</p>
+              <div className={`${s.glass} p-4 hidden lg:block`}>
+                <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>扫码取件</p>
                 <div className="flex items-center gap-3">
-                  <Image src={qr} alt="QR" width={92} height={92} unoptimized className="rounded-lg" />
-                  <div className="text-xs text-white/40">
+                  <Image src={qr} alt="二维码" width={92} height={92} unoptimized className="rounded-lg" />
+                  <div className={`text-xs ${s.tMuted}`}>
                     <p>手机扫码</p><p>随时随地取件</p>
                   </div>
                 </div>
@@ -586,25 +576,29 @@ export default function SharePage() {
             <div className="flex flex-col gap-2">
               {downloads.length > 0 && !isSingle && (
                 <button onClick={handleDownloadAll} disabled={downloading}
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest uppercase flex items-center justify-center gap-2`}>
+                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Package className="w-4 h-4" />
-                  {downloading ? "PACKING…" : `PACK ZIP ${formatSize(share.total_bytes)}`}
+                  {downloading ? "打包中…" : `打包下载 ${formatSize(share.total_bytes)}`}
                 </button>
               )}
               {downloads.length === 0 && (
                 <button onClick={handleDownloadSingle} disabled={downloading}
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest uppercase flex items-center justify-center gap-2`}>
+                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Download className="w-4 h-4" />
-                  {downloading ? "FETCHING…" : hasOnlyEmptyDirs ? "DOWNLOAD FOLDERS" : isSingle ? "DOWNLOAD" : "GET DOWNLOAD LINKS"}
+                  {downloading ? "获取中…" : hasOnlyEmptyDirs ? "下载文件夹" : isSingle ? "下载" : "获取下载链接"}
                 </button>
               )}
+              {/* 复制链接（提权为主按钮，方便取件） */}
+              <button onClick={handleCopyLink}
+                className={`${s.ghostBtn} w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                <Copy className="w-4 h-4" /> 复制链接
+              </button>
             </div>
 
-            {/* 底部操作 */}
-            <div className="flex items-center justify-center gap-4 text-xs text-white/30">
-              <button onClick={handleCopyLink} className="flex items-center gap-1 hover:text-yc-accent transition-colors"><Copy className="w-3 h-3" /> 复制</button>
+            {/* 底部操作（举报 / 首页保持低调） */}
+            <div className={`flex items-center justify-center gap-5 text-xs ${s.tMuted}`}>
               <button onClick={() => setReportOpen(true)} disabled={reported} className="flex items-center gap-1 hover:text-red-400 transition-colors disabled:opacity-40"><Flag className="w-3 h-3" /> {reported ? "已举报" : "举报"}</button>
-              <a href="/" className="hover:text-yc-accent transition-colors">首页</a>
+              <a href="/" className="hover:text-yc-accent transition-colors">返回首页</a>
             </div>
           </aside>
         </div>
@@ -612,7 +606,7 @@ export default function SharePage() {
         {/* 分片下载进度 */}
         {chunkProgress && (
           <div className={`${s.glass} mt-4 p-4`}>
-            <div className="flex justify-between text-xs text-white/50 mb-2">
+            <div className={`flex justify-between text-xs ${s.tSecondary} mb-2`}>
               <span className="font-tech">下载中 · 分片 {chunkProgress.currentChunk + 1}/{chunkProgress.totalChunks}</span>
               <span className="font-tech">{Math.round((chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100)}%</span>
             </div>
@@ -620,31 +614,12 @@ export default function SharePage() {
               <div className="h-full bg-gradient-to-r from-yc-accent to-yc-accent-3 rounded-full transition-all duration-300"
                 style={{ width: `${(chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100}%` }} />
             </div>
-            <p className="font-tech text-[10px] text-white/30 mt-1">{formatSize(chunkProgress.downloadedBytes)} / {formatSize(chunkProgress.totalBytes)}</p>
+            <p className={`font-tech text-[10px] ${s.tMuted} mt-1`}>{formatSize(chunkProgress.downloadedBytes)} / {formatSize(chunkProgress.totalBytes)}</p>
           </div>
         )}
 
-        {/* 移动端底栏 */}
-        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-white/10 bg-yc-bg/95 backdrop-blur-xl px-4 py-2.5 lg:hidden" style={{ background: "rgba(10,4,24,0.95)" }}>
-          {downloads.length > 0 ? (
-            <button onClick={handleDownloadAll} disabled={downloading} className="flex flex-col items-center gap-0.5 text-xs text-white/60">
-              <Download className="h-5 w-5 text-yc-accent" /><span className="font-tech">下载</span>
-            </button>
-          ) : (
-            <button onClick={handleDownloadSingle} disabled={downloading} className="flex flex-col items-center gap-0.5 text-xs text-white/60">
-              <Download className="h-5 w-5 text-yc-accent" /><span className="font-tech">{downloading ? "…" : "下载"}</span>
-            </button>
-          )}
-          <button onClick={handleCopyLink} className="flex flex-col items-center gap-0.5 text-xs text-white/60">
-            <Copy className="h-5 w-5" /><span className="font-tech">复制</span>
-          </button>
-          <button onClick={() => setReportOpen(true)} disabled={reported} className="flex flex-col items-center gap-0.5 text-xs text-white/60 disabled:opacity-40">
-            <Flag className="h-5 w-5" /><span className="font-tech">{reported ? "已举报" : "举报"}</span>
-          </button>
-        </div>
-
         {/* 底部品牌 */}
-        <p className="mt-16 mb-20 lg:mb-8 text-center font-tech text-[10px] tracking-[0.15em] text-white/15 uppercase">DRIVEN BY SDP ENGINE · NYAAYA</p>
+        <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
       </div>
 
       {/* 举报 Modal */}
@@ -652,11 +627,11 @@ export default function SharePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
           <div className={`${s.glass} relative w-full max-w-sm p-6`}>
-            <button onClick={() => setReportOpen(false)} className="absolute right-4 top-4 text-white/40 hover:text-white"><X className="h-5 w-5" /></button>
-            <h3 className="font-tech text-sm tracking-widest font-bold mb-2 uppercase">Report Share</h3>
-            <p className="text-xs text-white/40 mb-4">请选择举报原因。</p>
+            <button onClick={() => setReportOpen(false)} className={`absolute right-4 top-4 ${s.tMuted} hover:opacity-80`}><X className="h-5 w-5" /></button>
+            <h3 className={`font-tech text-sm tracking-widest font-bold mb-2 ${s.tPrimary}`}>举报分享</h3>
+            <p className={`text-xs ${s.tMuted} mb-4`}>请选择举报原因。</p>
             <select value={reportReason} onChange={(e) => setReportReason(e.target.value)}
-              className="w-full bg-white/6 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-yc-accent mb-4">
+              className={`w-full bg-white/6 border border-white/10 rounded-lg px-3 py-2.5 text-sm ${s.tPrimary} focus:outline-none focus:border-yc-accent mb-4`}>
               <option value="" className="text-black">选择原因…</option>
               <option value="侵权内容" className="text-black">侵权内容</option>
               <option value="恶意软件" className="text-black">恶意软件</option>
@@ -664,8 +639,8 @@ export default function SharePage() {
               <option value="其他" className="text-black">其他</option>
             </select>
             <button onClick={handleReport} disabled={!reportReason}
-              className={`${s.glowBtn} w-full py-3 font-tech text-xs tracking-widest uppercase`}>
-              SUBMIT
+              className={`${s.glowBtn} w-full py-3 font-tech text-xs tracking-widest`}>
+              提交举报
             </button>
           </div>
         </div>

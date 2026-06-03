@@ -299,3 +299,33 @@
     font-size: 24px;
   }
 }
+
+/* ===== 主题感知文字色（浅色自动变深，解决白底白字） ===== */
+.tPrimary { color: var(--yc-text, #fff); }
+.tSecondary { color: var(--yc-text-s, rgba(255,255,255,0.7)); }
+.tMuted { color: var(--yc-text-t, rgba(255,255,255,0.45)); }
+.tFaint { color: rgba(255,255,255,0.22); }
+:global([data-theme="light"]) .tFaint { color: rgba(10,4,24,0.32); }
+
+/* ===== loading：logo 柔和呼吸（替代会画出矩形光晕的 glow-pulse） ===== */
+.logoBreath {
+  animation: logo-breath 2.2s ease-in-out infinite;
+}
+@keyframes logo-breath {
+  0%, 100% { opacity: 0.55; transform: scale(0.98); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+
+/* ===== SDP 播放器填满舞台，杜绝 canvas 固有宽度撑破移动端 ===== */
+.sdpFill {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sdpFill > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
