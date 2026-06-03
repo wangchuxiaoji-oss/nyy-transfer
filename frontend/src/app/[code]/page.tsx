@@ -242,6 +242,9 @@ export default function SharePage() {
   // ===== 选中文件预览 =====
   const selectedFile = downloads.length > 0 ? downloads[Math.min(selectedIdx, downloads.length - 1)] : null;
   const selectedType = selectedFile ? classifyFile(selectedFile.file_name) : "other";
+  // 选中文件的“元信息”：share.files 在第一阶段（getShareInfo）就有 file_name/file_size，
+  // 据此让文件名+操作栏区域提前以恒定高度渲染，避免 downloads 后到时把布局挤开。
+  const selectedMeta = share && share.files.length > 0 ? share.files[Math.min(selectedIdx, share.files.length - 1)] : null;
 
   // 主题切换按钮（三处状态页/主页面共用，统一主题感知配色）
   const ThemeToggle = () => (
@@ -447,26 +450,35 @@ export default function SharePage() {
                 </div>
               )}
             </div>
-            {/* 文件名 + 操作栏 */}
-            {downloads.length > 0 && selectedFile && (
-              <div className="flex items-center justify-between gap-4 mt-4 flex-wrap">
-                <div className="min-w-0">
-                  <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedFile.file_name}</p>
+            {/* 文件名 + 操作栏：以 share.files 的元信息提前渲染并占位，
+                按钮在 downloads 就绪前用 shimmer 占位，避免布局跳动 */}
+            {selectedMeta && (
+              <div className="flex items-center justify-between gap-4 mt-4 min-h-[38px]">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedMeta.file_name}</p>
                   <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
-                    {formatSize(selectedFile.file_size)}
-                    {selectedFile.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
+                    {formatSize(selectedMeta.file_size)}
+                    {selectedFile?.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
                   </p>
                 </div>
-                <div className="flex gap-3">
-                  {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
-                    <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
-                  )}
-                  <button onClick={handleDownloadAll} disabled={downloading}
-                    className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
-                    <Package className="w-4 h-4" />
-                    {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
-                  </button>
-                </div>
+                {selectedFile ? (
+                  <div className="flex gap-3 shrink-0">
+                    {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
+                      <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
+                    )}
+                    <button onClick={handleDownloadAll} disabled={downloading}
+                      className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+                      <Package className="w-4 h-4" />
+                      {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
+                    </button>
+                  </div>
+                ) : (
+                  /* downloads 尚未就绪：shimmer 占位，高度与真实按钮（h≈38px）一致 */
+                  <div className="flex gap-3 shrink-0" aria-hidden="true">
+                    <div className={`${s.skel} h-[38px] w-24`} />
+                    <div className={`${s.skel} h-[38px] w-36`} />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -534,21 +546,23 @@ export default function SharePage() {
                 </div>
               )}
 
-              {/* 没有 downloads 时显示文件名列表 */}
-              {downloads.length === 0 && share.files.map((f, i) => {
-                const ft = classifyFile(f.file_name);
-                return (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
-                      {getFileIcon(ft)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm truncate font-medium">{f.file_name}</p>
-                      <p className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</p>
-                    </div>
-                  </div>
-                );
-              })}
+              {/* 没有 downloads 时显示文件名列表（结构与 list 视图项一致，避免就绪后跳动） */}
+              {downloads.length === 0 && (
+                <div className="flex flex-col gap-1.5">
+                  {share.files.map((f, i) => {
+                    const ft = classifyFile(f.file_name);
+                    return (
+                      <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
+                          {getFileIcon(ft)}
+                        </div>
+                        <span className="text-sm truncate flex-1 font-medium">{f.file_name}</span>
+                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 分享信息 */}

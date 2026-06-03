@@ -336,6 +336,59 @@ test.describe("移动端横向溢出回归", () => {
     expect(Math.abs(ratio! - 16 / 9)).toBeLessThan(0.02);
   });
 
+  // 两段式加载（getShareInfo 先到、download 慢）时，文件名+操作栏区域应以骨架占位
+  // 保持恒定高度，downloads 到达后不得把下方侧栏往下推（移动端单栏最明显）。
+  // 用正常长度文件名（避免超长名换行带来的无关高度噪声），精准验证垂直稳定性。
+  test("download 慢到时操作栏骨架占位，侧栏不被挤动", async ({ page }) => {
+    const NAME = "演示视频.mp4";
+    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
+    const info = {
+      code: MOCK_CODE,
+      files: [{ file_name: NAME, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META }],
+      empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+    };
+    const dl = {
+      files: [{ file_name: NAME, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }],
+      empty_dirs: [], expires_in: 3600,
+    };
+    // share info 立即返回
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    // download 延迟 1.2s 返回，模拟慢网络
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
+      await new Promise((r) => setTimeout(r, 1200));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(dl) });
+    });
+    await page.route("https://example.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    // 等 share info 渲染出侧栏（“分享信息”出现），此时 download 仍在延迟中
+    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+
+    // download 到达前：右侧栏整体的 Y 坐标（移动端单栏时它紧跟在播放器列之后，
+    // 若操作栏从无到有撑开，aside 会被整体下推）
+    const asideTop = () => page.evaluate(() => {
+      const aside = document.querySelector("aside");
+      return aside ? Math.round(aside.getBoundingClientRect().top) : null;
+    });
+    const before = await asideTop();
+    expect(before).not.toBeNull();
+
+    // 等 download 返回、真实按钮渲染（“打包”出现）
+    await expect(page.locator("text=打包").first()).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(300);
+
+    const after = await asideTop();
+    expect(after).not.toBeNull();
+    // 骨架与真实按钮高度一致，侧栏整体 Y 不应发生明显位移（允许 2px 误差）
+    expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
+  });
+
   // 真正复现「播放器超宽」：先确保 canvas 已渲染，再强制其固有宽度为大尺寸视频像素，
   // 然后断言没有任何元素的可视宽度超过视口。
   // 注意：不能只看 documentElement.scrollWidth —— main 上的 overflow-x-hidden 会把溢出裁掉、
