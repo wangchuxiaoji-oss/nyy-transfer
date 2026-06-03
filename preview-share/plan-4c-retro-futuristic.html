@@ -281,22 +281,34 @@ body {
 .phone-cta { padding: 12px; }
 .phone-cta .btn { width: 100%; justify-content: center; }
 
-/* ===== Modal 预览 ===== */
-.modal-overlay { position: fixed; inset: 0; background: rgba(10,4,24,0.92); backdrop-filter: blur(10px); display: none; align-items: center; justify-content: center; z-index: 200; padding: 24px; }
-.modal-overlay.show { display: flex; }
-.modal { width: 100%; max-width: 1200px; max-height: 86vh; height: 100%; background: #000; border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; position: relative; border: 1px solid var(--border); box-shadow: 0 0 60px rgba(255,138,61,0.3); }
-.modal-close { position: absolute; top: 12px; right: 12px; z-index: 10; width: 34px; height: 34px; border-radius: 6px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid var(--border); cursor: pointer; font-size: 14px; }
-.modal-header { position: absolute; top: 0; inset-inline: 0; height: 48px; z-index: 5; display: flex; align-items: center; padding: 0 60px 0 18px; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); color: #fff; }
-.modal-header .name { font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 0.04em; }
-.modal-header .counter { font-size: 10px; color: rgba(255,255,255,0.6); margin-left: 10px; }
-.modal-body { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; background: #000; }
-.modal-body .image-mock { width: 78%; max-width: 760px; aspect-ratio: 16/10; border-radius: 8px; background: linear-gradient(135deg,#00D4FF,#6441A5); box-shadow: 0 0 40px rgba(0,212,255,0.3); }
-.modal-body canvas { max-width: 100%; max-height: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
-.modal-body .pdf-scroll { width: 100%; height: 100%; overflow: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.modal-body .text-scroll { width: 100%; height: 100%; overflow: auto; padding: 28px; }
-.modal-body .text-content { max-width: 720px; margin: 0 auto; background: #0f0a1e; border: 1px solid var(--border); border-radius: 8px; padding: 22px; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.7; color: #e2e8f0; }
+/* ===== 内联预览舞台(唯一预览区) ===== */
+.inline-stage {
+  position: relative; background: #000; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--border); box-shadow: 0 0 40px rgba(255,138,61,0.18), 0 20px 60px rgba(0,0,0,0.5);
+  aspect-ratio: 16/9; min-height: 320px; display: flex; align-items: center; justify-content: center;
+}
+.inline-stage:fullscreen { aspect-ratio: auto; width: 100vw; height: 100vh; border-radius: 0; }
+/* 视频/音频:HUD 默认可见,播放后淡出 */
+.inline-stage .player-hud, #singlePlayer .player-hud { transition: opacity 0.3s; }
+.inline-stage.playing .player-stage .play-big, #singlePlayer.playing .player-stage .play-big { opacity: 0; pointer-events: none; }
+/* 图片预览 */
+.image-stage { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.image-stage .image-mock { width: 86%; max-width: 760px; aspect-ratio: 16/10; border-radius: 8px; background: linear-gradient(135deg,#00D4FF,#6441A5); box-shadow: 0 0 40px rgba(0,212,255,0.3); }
+/* PDF / 文本滚动区 */
+.pdf-scroll { width: 100%; height: 100%; overflow: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; background: #0f0a1e; }
+.pdf-scroll canvas { max-width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.6); border-radius: 4px; }
+.text-scroll { width: 100%; height: 100%; overflow: auto; padding: 24px; background: #0f0a1e; }
+.text-content { max-width: 720px; margin: 0 auto; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 22px; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.7; color: #e2e8f0; }
 .text-content .kw { color: var(--accent); } .text-content .str { color: var(--accent-2); } .text-content .com { color: var(--text-tertiary); }
-.modal-pdf-loading { color: var(--text-secondary); font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 0.1em; }
+.modal-pdf-loading { color: rgba(255,255,255,0.7); font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 0.1em; margin: auto; }
+/* 舞台右上角全屏按钮(图片/PDF 用) */
+.stage-fs { position: absolute; top: 12px; right: 12px; z-index: 4; width: 34px; height: 34px; border-radius: 6px; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.stage-fs:hover { background: var(--accent); }
+/* 舞台下方信息栏 */
+.inline-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.inline-info .iname { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
+.inline-info .imeta { font-size: 12px; color: var(--text-tertiary); margin-top: 5px; }
+.inline-acts { display: flex; gap: 10px; }
 
 /* ===== 动效 ===== */
 @keyframes glow-in { from { opacity: 0; transform: scale(0.97); filter: blur(6px); } to { opacity: 1; transform: scale(1); filter: blur(0); } }
@@ -378,22 +390,10 @@ body {
           </div>
         </div>
         <div class="app-body">
-          <!-- 左:自定义播放器(当前选中视频) -->
+          <!-- 左:内联预览舞台(唯一预览区,点右侧文件即时切换) -->
           <div class="player-zone">
-            <div class="player reveal" id="mainPlayer">
-              <div class="player-stage">
-                <div class="player-video-mock"><div class="vtitle">碟中谍 8</div></div>
-                <button class="play-big" onclick="openModal('video')" aria-label="播放"></button>
-              </div>
-              <div class="player-hud">
-                <button class="hud-btn"><svg><use href="#ic-play"/></svg></button>
-                <div class="hud-progress"><div class="hud-progress-fill"></div></div>
-                <span class="hud-time">00:32:14 / 02:49:36</span>
-                <button class="hud-btn"><svg><use href="#ic-volume"/></svg></button>
-                <button class="hud-btn"><svg><use href="#ic-settings"/></svg></button>
-                <button class="hud-btn"><svg><use href="#ic-fullscreen"/></svg></button>
-              </div>
-            </div>
+            <div class="inline-stage reveal" id="inlineStage"><!-- 由 JS 动态渲染当前选中文件 --></div>
+            <div class="inline-bar" id="inlineBar"><!-- 由 JS 渲染当前文件名 + 元信息 + 全屏 --></div>
           </div>
           <!-- 右:侧栏(文件列表 + 信息 + 二维码) -->
           <aside class="sidebar">
@@ -407,28 +407,28 @@ body {
               </div>
               <!-- 列表视图 -->
               <div class="file-list">
-                <div class="file-row active" onclick="openModal('video')">
+                <div class="file-row active" data-file="video" onclick="selectFile('video')">
                   <div class="file-icon type-video"><svg><use href="#ic-video"/></svg></div>
                   <span class="name">碟中谍8-最后的清算.mkv</span>
                   <span class="size">5.28G</span>
                   <span class="play-mini"><svg width="11" height="11"><use href="#ic-play"/></svg></span>
                 </div>
-                <div class="file-row" onclick="openModal('image')">
+                <div class="file-row" data-file="image" onclick="selectFile('image')">
                   <div class="file-icon type-image"><svg><use href="#ic-image"/></svg></div>
                   <span class="name">cover-01.jpg</span><span class="size">2.1M</span>
                   <span class="play-mini"><svg width="11" height="11"><use href="#ic-play"/></svg></span>
                 </div>
-                <div class="file-row" onclick="openModal('pdf')">
+                <div class="file-row" data-file="pdf" onclick="selectFile('pdf')">
                   <div class="file-icon type-pdf"><svg><use href="#ic-pdf"/></svg></div>
                   <span class="name">说明文档.pdf</span><span class="size">3.4M</span>
                   <span class="play-mini"><svg width="11" height="11"><use href="#ic-play"/></svg></span>
                 </div>
-                <div class="file-row" onclick="openModal('audio')">
+                <div class="file-row" data-file="audio" onclick="selectFile('audio')">
                   <div class="file-icon type-audio"><svg><use href="#ic-audio"/></svg></div>
                   <span class="name">theme.mp3</span><span class="size">4.8M</span>
                   <span class="play-mini"><svg width="11" height="11"><use href="#ic-play"/></svg></span>
                 </div>
-                <div class="file-row" onclick="openModal('text')">
+                <div class="file-row" data-file="text" onclick="selectFile('text')">
                   <div class="file-icon type-text"><svg><use href="#ic-text"/></svg></div>
                   <span class="name">readme.txt</span><span class="size">1K</span>
                   <span class="play-mini"><svg width="11" height="11"><use href="#ic-play"/></svg></span>
@@ -436,11 +436,11 @@ body {
               </div>
               <!-- 网格视图 -->
               <div class="file-grid">
-                <div class="grid-item active" onclick="openModal('video')"><div class="grid-thumb type-video"><svg><use href="#ic-video"/></svg></div><span class="name">碟中谍8.mkv</span><span class="size">5.28G</span></div>
-                <div class="grid-item" onclick="openModal('image')"><div class="grid-thumb type-image"><svg><use href="#ic-image"/></svg></div><span class="name">cover-01.jpg</span><span class="size">2.1M</span></div>
-                <div class="grid-item" onclick="openModal('pdf')"><div class="grid-thumb type-pdf"><svg><use href="#ic-pdf"/></svg></div><span class="name">说明文档.pdf</span><span class="size">3.4M</span></div>
-                <div class="grid-item" onclick="openModal('audio')"><div class="grid-thumb type-audio"><svg><use href="#ic-audio"/></svg></div><span class="name">theme.mp3</span><span class="size">4.8M</span></div>
-                <div class="grid-item" onclick="openModal('text')"><div class="grid-thumb type-text"><svg><use href="#ic-text"/></svg></div><span class="name">readme.txt</span><span class="size">1K</span></div>
+                <div class="grid-item active" data-file="video" onclick="selectFile('video')"><div class="grid-thumb type-video"><svg><use href="#ic-video"/></svg></div><span class="name">碟中谍8.mkv</span><span class="size">5.28G</span></div>
+                <div class="grid-item" data-file="image" onclick="selectFile('image')"><div class="grid-thumb type-image"><svg><use href="#ic-image"/></svg></div><span class="name">cover-01.jpg</span><span class="size">2.1M</span></div>
+                <div class="grid-item" data-file="pdf" onclick="selectFile('pdf')"><div class="grid-thumb type-pdf"><svg><use href="#ic-pdf"/></svg></div><span class="name">说明文档.pdf</span><span class="size">3.4M</span></div>
+                <div class="grid-item" data-file="audio" onclick="selectFile('audio')"><div class="grid-thumb type-audio"><svg><use href="#ic-audio"/></svg></div><span class="name">theme.mp3</span><span class="size">4.8M</span></div>
+                <div class="grid-item" data-file="text" onclick="selectFile('text')"><div class="grid-thumb type-text"><svg><use href="#ic-text"/></svg></div><span class="name">readme.txt</span><span class="size">1K</span></div>
               </div>
             </div>
             <div class="card reveal">
@@ -479,10 +479,10 @@ body {
         </div>
         <div class="app-body">
           <div class="player-zone">
-            <div class="player reveal" style="aspect-ratio:16/9">
+            <div class="player reveal" id="singlePlayer" style="aspect-ratio:16/9">
               <div class="player-stage">
                 <div class="player-video-mock"><div class="vtitle">碟中谍 8</div></div>
-                <button class="play-big" onclick="openModal('video')" aria-label="播放"></button>
+                <button class="play-big" onclick="this.closest('.player').classList.add('playing')" aria-label="播放"></button>
               </div>
               <div class="player-hud">
                 <button class="hud-btn"><svg><use href="#ic-play"/></svg></button>
@@ -490,7 +490,7 @@ body {
                 <span class="hud-time">00:32:14 / 02:49:36</span>
                 <button class="hud-btn"><svg><use href="#ic-volume"/></svg></button>
                 <button class="hud-btn"><svg><use href="#ic-settings"/></svg></button>
-                <button class="hud-btn"><svg><use href="#ic-fullscreen"/></svg></button>
+                <button class="hud-btn" onclick="goFullscreen('singlePlayer')" title="全屏"><svg><use href="#ic-fullscreen"/></svg></button>
               </div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;flex-wrap:wrap">
@@ -516,19 +516,12 @@ body {
                 <img class="logo-svg" style="height:26px" src="logo.svg" alt="拿呀呀">
                 <span class="code-pill" style="font-size:11px;padding:4px 10px">Ab3F7K</span>
               </div>
-              <div class="phone-player">
-                <button class="play-big" style="width:56px;height:56px" onclick="openModal('video')" aria-label="播放"></button>
-                <div class="player-hud" style="padding:24px 10px 10px">
-                  <button class="hud-btn" style="width:26px;height:26px"><svg><use href="#ic-play"/></svg></button>
-                  <div class="hud-progress"><div class="hud-progress-fill"></div></div>
-                  <span class="hud-time" style="font-size:9px">32:14</span>
-                </div>
-              </div>
+              <div class="phone-player" id="phoneStage"><!-- 由 JS 渲染当前选中文件 --></div>
               <div class="phone-list">
-                <div class="phone-row" onclick="openModal('video')"><div class="file-icon type-video"><svg><use href="#ic-video"/></svg></div><span class="name">碟中谍8.mkv</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">5.28G</span></div>
-                <div class="phone-row" onclick="openModal('image')"><div class="file-icon type-image"><svg><use href="#ic-image"/></svg></div><span class="name">cover-01.jpg</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">2.1M</span></div>
-                <div class="phone-row" onclick="openModal('pdf')"><div class="file-icon type-pdf"><svg><use href="#ic-pdf"/></svg></div><span class="name">说明文档.pdf</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">3.4M</span></div>
-                <div class="phone-row" onclick="openModal('audio')"><div class="file-icon type-audio"><svg><use href="#ic-audio"/></svg></div><span class="name">theme.mp3</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">4.8M</span></div>
+                <div class="phone-row active" data-file="video" onclick="selectFileMobile('video')"><div class="file-icon type-video"><svg><use href="#ic-video"/></svg></div><span class="name">碟中谍8.mkv</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">5.28G</span></div>
+                <div class="phone-row" data-file="image" onclick="selectFileMobile('image')"><div class="file-icon type-image"><svg><use href="#ic-image"/></svg></div><span class="name">cover-01.jpg</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">2.1M</span></div>
+                <div class="phone-row" data-file="pdf" onclick="selectFileMobile('pdf')"><div class="file-icon type-pdf"><svg><use href="#ic-pdf"/></svg></div><span class="name">说明文档.pdf</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">3.4M</span></div>
+                <div class="phone-row" data-file="audio" onclick="selectFileMobile('audio')"><div class="file-icon type-audio"><svg><use href="#ic-audio"/></svg></div><span class="name">theme.mp3</span><span class="size font-tech" style="font-size:10px;color:var(--text-tertiary)">4.8M</span></div>
               </div>
               <div class="phone-cta"><button class="btn">⬇ 打包下载 18.22 GB</button></div>
             </div>
@@ -540,17 +533,6 @@ body {
 </div>
 
 <div class="footer-note">DRIVEN BY SDP ENGINE · 拿呀呀 NYY</div>
-
-<div class="modal-overlay" id="modal">
-  <div class="modal">
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="modal-header">
-      <span class="name" id="modalName">碟中谍8-最后的清算.mkv</span>
-      <span class="counter" id="modalCounter">1 / 5</span>
-    </div>
-    <div class="modal-body" id="modalBody"></div>
-  </div>
-</div>
 
 <script>
 // ===== 主题切换 =====
@@ -578,51 +560,62 @@ document.getElementById('viewToggle').addEventListener('click', e => {
   card.classList.toggle('is-grid', btn.dataset.view === 'grid');
   card.classList.toggle('is-list', btn.dataset.view === 'list');
 });
-// 初始化 list 视图类
 document.querySelector('#viewToggle').closest('.card').classList.add('is-list');
 
-// ===== Modal 预览 =====
-const modal = document.getElementById('modal');
-const modalBody = document.getElementById('modalBody');
-const META = {
-  video: { name: '碟中谍8-最后的清算.mkv', idx: 1 },
-  image: { name: 'cover-01.jpg', idx: 2 },
-  pdf:   { name: '说明文档.pdf', idx: 3 },
-  audio: { name: 'theme.mp3', idx: 4 },
-  text:  { name: 'readme.txt', idx: 5 },
+// ===== 文件元数据 =====
+const FILES = {
+  video: { name: '碟中谍8-最后的清算.mkv', meta: '1920×1080 · 2H 49M · 5.28 GB · MKV' },
+  image: { name: 'cover-01.jpg', meta: '3840×2160 · 2.1 MB · JPEG' },
+  pdf:   { name: '说明文档.pdf', meta: '2 页 · 3.4 MB · PDF' },
+  audio: { name: 'theme.mp3', meta: 'Lorne Balfe · 320 kbps · 4.8 MB' },
+  text:  { name: 'readme.txt', meta: 'UTF-8 · 1 KB · 纯文本' },
 };
 
-function viewerHTML(type) {
+// ===== 内联预览舞台:渲染当前选中文件(唯一预览区) =====
+function stageHTML(type) {
   switch (type) {
-    case 'video': return `<div class="player" style="width:100%;height:100%;aspect-ratio:auto;border:none;border-radius:0">
-      <div class="player-stage"><div class="player-video-mock"><div class="vtitle">碟中谍 8</div></div><button class="play-big" aria-label="播放"></button></div>
-      <div class="player-hud"><button class="hud-btn"><svg><use href="#ic-pause"/></svg></button><div class="hud-progress"><div class="hud-progress-fill"></div></div><span class="hud-time">00:32:14 / 02:49:36</span><button class="hud-btn"><svg><use href="#ic-volume"/></svg></button><button class="hud-btn"><svg><use href="#ic-settings"/></svg></button><button class="hud-btn"><svg><use href="#ic-fullscreen"/></svg></button></div></div>`;
-    case 'image': return `<div class="image-mock"></div>`;
-    case 'audio': return `<div class="player-audio-mock" style="position:relative;width:100%;height:100%">
+    case 'video': return `<div class="player-stage"><div class="player-video-mock"><div class="vtitle">碟中谍 8</div></div><button class="play-big" onclick="this.closest('.inline-stage').classList.add('playing')" aria-label="播放"></button></div>
+      <div class="player-hud"><button class="hud-btn"><svg><use href="#ic-play"/></svg></button><div class="hud-progress"><div class="hud-progress-fill"></div></div><span class="hud-time">00:32:14 / 02:49:36</span><button class="hud-btn"><svg><use href="#ic-volume"/></svg></button><button class="hud-btn"><svg><use href="#ic-settings"/></svg></button><button class="hud-btn" onclick="goFullscreen('inlineStage')" title="全屏"><svg><use href="#ic-fullscreen"/></svg></button></div>`;
+    case 'image': return `<div class="image-stage"><div class="image-mock"></div><button class="stage-fs" onclick="goFullscreen('inlineStage')" title="全屏"><svg width="18" height="18"><use href="#ic-fullscreen"/></svg></button></div>`;
+    case 'audio': return `<div class="player-audio-mock">
       <div class="cover"><svg width="64" height="64" style="color:#fff"><use href="#ic-audio"/></svg></div>
       <div class="aname font-tech">theme.mp3</div><div class="aartist">Lorne Balfe · 320 kbps</div>
       <div class="audio-wave">${Array(24).fill(0).map((_, i) => `<i style="animation-delay:${i * 0.06}s"></i>`).join('')}</div>
       <div class="player-hud"><button class="hud-btn"><svg><use href="#ic-pause"/></svg></button><div class="hud-progress"><div class="hud-progress-fill" style="width:28%"></div></div><span class="hud-time">01:23 / 04:56</span><button class="hud-btn"><svg><use href="#ic-volume"/></svg></button></div></div>`;
     case 'text': return `<div class="text-scroll"><div class="text-content"><span class="com"># 拿呀呀 · 分享说明</span><br><br>感谢你查看本分享!<br><br>本分享包含 5 个文件:<br>  - 视频主文件(<span class="str">"碟中谍8-最后的清算.mkv"</span>)<br>  - 封面海报(<span class="str">"cover-01.jpg"</span>)<br>  - 说明文档(<span class="str">"说明文档.pdf"</span>)<br>  - 主题音乐(<span class="str">"theme.mp3"</span>)<br>  - 本文件<br><br>使用 <span class="kw">nyy</span> 自研 SDP 引擎播放视频。</div></div>`;
-    case 'pdf': return `<div class="pdf-scroll" id="pdfScroll"><div class="modal-pdf-loading">PDF 渲染中…</div></div>`;
+    case 'pdf': return `<div class="pdf-scroll" id="pdfScroll"><div class="modal-pdf-loading">PDF 渲染中…</div></div>
+      <button class="stage-fs" onclick="goFullscreen('inlineStage')" title="全屏"><svg width="18" height="18"><use href="#ic-fullscreen"/></svg></button>`;
   }
   return '';
 }
 
-function openModal(type) {
-  const meta = META[type];
-  document.getElementById('modalName').textContent = meta.name;
-  document.getElementById('modalCounter').textContent = meta.idx + ' / 5';
-  modalBody.innerHTML = viewerHTML(type);
-  modal.classList.add('show');
+// 点右侧文件 → 左侧内联区即时切换(桌面)
+function selectFile(type) {
+  const f = FILES[type];
+  document.getElementById('inlineStage').innerHTML = stageHTML(type);
+  document.getElementById('inlineBar').innerHTML =
+    `<div class="inline-info"><div class="iname font-tech">${f.name}</div><div class="imeta font-tech">${f.meta}</div></div>
+     <div class="inline-acts"><button class="btn-ghost" onclick="goFullscreen('inlineStage')">⛶ 全屏</button><button class="btn">⬇ 下载</button></div>`;
+  document.querySelectorAll('#stateMulti [data-file]').forEach(el => el.classList.toggle('active', el.dataset.file === type));
   if (type === 'pdf') renderPDF();
 }
-function closeModal() { modal.classList.remove('show'); modalBody.innerHTML = ''; }
-modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-// ===== PDF.js:用 jsPDF 风格的内嵌数据渲染真实 PDF =====
-// 这里用一个内嵌的最小 PDF(base64)做真实渲染演示
+// 移动端:点文件 → 上方预览区切换
+function selectFileMobile(type) {
+  document.getElementById('phoneStage').innerHTML = stageHTML(type);
+  document.querySelectorAll('#stateMobile [data-file]').forEach(el => el.classList.toggle('active', el.dataset.file === type));
+  if (type === 'pdf') renderPDF();
+}
+
+// ===== 原生全屏(替代 Modal 沉浸观看) =====
+function goFullscreen(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+}
+
+// ===== PDF.js:内嵌测试 PDF 真实渲染 =====
 const PDF_DATA_URL = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCA2MTIgNzkyXS9SZXNvdXJjZXM8PC9Gb250PDwvRjEgNCAwIFI+Pj4+L0NvbnRlbnRzIDUgMCBSPj4KZW5kb2JqCjQgMCBvYmoKPDwvVHlwZS9Gb250L1N1YnR5cGUvVHlwZTEvQmFzZUZvbnQvSGVsdmV0aWNhPj4KZW5kb2JqCjUgMCBvYmoKPDwvTGVuZ3RoIDExMD4+CnN0cmVhbQpCVAovRjEgMjQgVGYKNzIgNzAwIFRkCijmi7/lkYDlkYAg5YiG5Lqr6K+05piOKSBUagovRjEgMTQgVGYKMCAtNDAgVGQKKDEuIOaWh+S7tua4heWNlSAtIDUgZmlsZXMpIFRqCjAgLTI1IFRkCigyLiBTRFAgZW5naW5lIHBvd2VyZWQpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTUgMDAwMDAgbiAKMDAwMDAwMDExMCAwMDAwMCBuIAowMDAwMDAwMjUxIDAwMDAwIG4gCjAwMDAwMDAzMjQgMDAwMDAgbiAKdHJhaWxlcgo8PC9TaXplIDYvUm9vdCAxIDAgUj4+CnN0YXJ0eHJlZgo0ODQKJSVFT0YK';
 
 async function renderPDF() {
@@ -666,6 +659,10 @@ function renderQR(id) {
   }
 }
 renderQR('qr1');
+
+// ===== 初始化:默认选中第一个文件 =====
+selectFile('video');
+selectFileMobile('video');
 </script>
 
 </body>
