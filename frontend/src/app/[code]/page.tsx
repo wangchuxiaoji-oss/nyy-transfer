@@ -386,26 +386,27 @@ export default function SharePage() {
         <div className={`grid gap-5 ${s.desktopTwoCol}`}>
           {/* 左:内联预览舞台 */}
           <div>
-            {downloads.length > 0 ? (
-              <div className="animate-fade-in">
-                <div className={s.stagePlayer}>
+            {/* 黑色 16:9 外框始终存在、不卸载，仅内部内容切换时淡入，杜绝闪烁 */}
+            <div className={s.stagePlayer}>
+              {downloads.length > 0 && selectedFile ? (
+                <div key={`${selectedType}-${selectedIdx}`} className={s.stageContent}>
                   {/* 视频:SDP 播放器 */}
-                  {selectedType === "video" && selectedFile && (
+                  {selectedType === "video" && (
                     <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
                   )}
                   {/* 图片 */}
-                  {selectedType === "image" && selectedFile && isSafeUrl(selectedFile.download_url) && (
+                  {selectedType === "image" && isSafeUrl(selectedFile.download_url) && (
                     <div className={s.imageStage}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={selectedFile.download_url} alt={selectedFile.file_name} className="max-w-full max-h-full object-contain rounded-lg" />
                     </div>
                   )}
                   {/* PDF */}
-                  {selectedType === "pdf" && selectedFile && (
+                  {selectedType === "pdf" && (
                     <PdfPreview url={selectedFile.download_url} className={`w-full h-full ${s.pdfScroll}`} />
                   )}
                   {/* 音频 */}
-                  {selectedType === "audio" && selectedFile && (
+                  {selectedType === "audio" && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-yc-bg via-yc-mesh-1 to-yc-mesh-2">
                       <div className="w-44 h-44 rounded-2xl bg-gradient-to-br from-yc-accent to-yc-accent-3 flex items-center justify-center text-6xl text-white shadow-[0_0_48px_rgba(255,138,61,0.5)]">♪</div>
                       <p className={`font-tech font-bold tracking-widest ${s.tPrimary}`}>{selectedFile.file_name}</p>
@@ -416,7 +417,7 @@ export default function SharePage() {
                     </div>
                   )}
                   {/* 文本 */}
-                  {selectedType === "text" && selectedFile && (
+                  {selectedType === "text" && (
                     <div className={s.textScroll}>
                       <div className={s.textContent}>
                         <p className={`${s.tMuted} mb-2`}># {selectedFile.file_name}</p>
@@ -426,7 +427,7 @@ export default function SharePage() {
                     </div>
                   )}
                   {/* 其他 */}
-                  {selectedType === "other" && selectedFile && (
+                  {selectedType === "other" && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                       <div className="w-20 h-20 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-3xl">⋯</div>
                       <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>{selectedFile.file_name}</p>
@@ -434,37 +435,37 @@ export default function SharePage() {
                     </div>
                   )}
                 </div>
-                {/* 文件名 + 操作栏 */}
-                {selectedFile && (
-                <div className="flex items-center justify-between gap-4 mt-4 flex-wrap">
-                  <div className="min-w-0">
-                    <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedFile.file_name}</p>
-                    <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
-                      {formatSize(selectedFile.file_size)}
-                      {selectedFile.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
+              ) : (
+                /* 占位（加载中/仅空文件夹）——同一外框内淡入，外框尺寸不变故无跳变 */
+                <div className={`${s.stageContent} flex items-center justify-center`}>
+                  <div className="text-center">
+                    <BrandLogo className="w-20 h-auto mx-auto mb-4 opacity-30" />
+                    <p className={`font-tech text-xs tracking-widest ${s.tMuted}`}>
+                      {hasOnlyEmptyDirs ? "该分享仅包含空文件夹" : "选择一个文件开始预览"}
                     </p>
                   </div>
-                  <div className="flex gap-3">
-                    {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
-                      <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
-                    )}
-                    <button onClick={handleDownloadAll} disabled={downloading}
-                      className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
-                      <Package className="w-4 h-4" />
-                      {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
-                    </button>
-                  </div>
                 </div>
-                )}
-              </div>
-            ) : (
-              /* 没有 downloads 时显示占位 */
-              <div className={`${s.stagePlayer} flex items-center justify-center`}>
-                <div className="text-center">
-                  <BrandLogo className="w-20 h-auto mx-auto mb-4 opacity-30" />
-                  <p className={`font-tech text-xs tracking-widest ${s.tMuted}`}>
-                    {hasOnlyEmptyDirs ? "该分享仅包含空文件夹" : "选择一个文件开始预览"}
+              )}
+            </div>
+            {/* 文件名 + 操作栏 */}
+            {downloads.length > 0 && selectedFile && (
+              <div className="flex items-center justify-between gap-4 mt-4 flex-wrap">
+                <div className="min-w-0">
+                  <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedFile.file_name}</p>
+                  <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
+                    {formatSize(selectedFile.file_size)}
+                    {selectedFile.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
                   </p>
+                </div>
+                <div className="flex gap-3">
+                  {!selectedFile.is_chunked && isSafeUrl(selectedFile.download_url) && (
+                    <a href={selectedFile.download_url} download={selectedFile.file_name} className={`${s.ghostBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}><Download className="w-4 h-4" /> 下载</a>
+                  )}
+                  <button onClick={handleDownloadAll} disabled={downloading}
+                    className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+                    <Package className="w-4 h-4" />
+                    {downloading ? "打包中…" : `打包 ${formatSize(share.total_bytes)}`}
+                  </button>
                 </div>
               </div>
             )}

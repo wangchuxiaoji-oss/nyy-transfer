@@ -331,3 +331,15 @@
   min-width: 0;
   max-width: 100%;
 }
+
+/* ===== 舞台内容层：外框（.stagePlayer）持久不卸载，仅内容切换时淡入 =====
+   绝对铺满舞台，避免占位/预览切换时整块 DOM 重建造成的闪烁 */
+.stageContent {
+  position: absolute;
+  inset: 0;
+  animation: stage-fade 0.32s ease both;
+}
+@keyframes stage-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
