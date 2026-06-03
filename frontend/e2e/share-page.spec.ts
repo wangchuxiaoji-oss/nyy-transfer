@@ -367,8 +367,8 @@ test.describe("移动端横向溢出回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    // 等 share info 渲染出侧栏（“分享信息”出现），此时 download 仍在延迟中
-    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+    // 等 share info 渲染出侧栏（“分享概览”出现），此时 download 仍在延迟中
+    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
 
     // download 到达前：右侧栏整体的 Y 坐标（移动端单栏时它紧跟在播放器列之后，
     // 若操作栏从无到有撑开，aside 会被整体下推）
@@ -557,7 +557,7 @@ test.describe("骨架屏回归", () => {
     expect(before).not.toBeNull();
 
     // 等 share info 返回（ready 状态，真实 Topbar/文件列表渲染）
-    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
     await page.waitForTimeout(200);
     const after = await asideTop();
     expect(after).not.toBeNull();
@@ -579,7 +579,7 @@ test.describe("骨架屏回归", () => {
     const before = await asideTop();
     expect(before).not.toBeNull();
 
-    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
     await page.waitForTimeout(200);
     const after = await asideTop();
     expect(after).not.toBeNull();
@@ -632,7 +632,7 @@ test.describe("文件列表折叠/展开", () => {
     await page.waitForTimeout(2000);
 
     // 应显示 4 条文件行
-    const rows = page.locator("aside [role='button']");
+    const rows = page.locator("aside button[aria-label^='预览 ']");
     await expect(rows).toHaveCount(4);
 
     // 应有"展开更多"按钮，显示剩余数量
@@ -652,7 +652,7 @@ test.describe("文件列表折叠/展开", () => {
     await page.locator("aside button:has-text('展开更多')").click();
 
     // 应显示全部 8 条
-    const rows = page.locator("aside [role='button']");
+    const rows = page.locator("aside button[aria-label^='预览 ']");
     await expect(rows).toHaveCount(8);
 
     // "展开更多"按钮应消失
@@ -681,7 +681,7 @@ test.describe("文件列表折叠/展开", () => {
     await page.waitForTimeout(2000);
 
     // 4 条文件行
-    const rows = page.locator("aside [role='button']");
+    const rows = page.locator("aside button[aria-label^='预览 ']");
     await expect(rows).toHaveCount(4);
 
     // 无"展开更多"按钮
@@ -739,6 +739,52 @@ test.describe("单/多文件按钮区布局回归", () => {
     expect(h).toBe(96);
   });
 
+  test("顶部展示分享话术和内容摘要，不展示分享码", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    await expect(page.getByText("有人通过拿呀²分享给你").first()).toBeVisible();
+    await expect(page.getByText("1 个视频 · 976.6 KB").first()).toBeVisible();
+    await expect(page.locator("main").getByText(MOCK_CODE, { exact: true })).toHaveCount(0);
+  });
+
+  test("单文件隐藏文件列表，多文件显示文件列表", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+    await expect(page.locator("aside").getByText("文件列表")).toHaveCount(0);
+
+    await page.unroute("**/api/v1/shares/" + C);
+    await page.unroute("**/api/v1/shares/" + C + "/download");
+    await page.unroute("https://example.com/**");
+    await setup(page, 3);
+    await page.goto(`/${C}`);
+    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+    await expect(page.locator("aside").getByText("文件列表")).toBeVisible();
+  });
+
+  test("分享概览集中显示内容/到期/下载", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${C}`);
+    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const overview = page.locator("aside > div").filter({ hasText: "分享概览" }).first();
+    await expect(overview.getByText("内容")).toBeVisible();
+    await expect(overview.getByText("1 个视频 · 976.6 KB")).toBeVisible();
+    await expect(overview.getByText("到期")).toBeVisible();
+    await expect(overview.getByText("长期有效")).toBeVisible();
+    await expect(overview.getByText("下载", { exact: true })).toBeVisible();
+    await expect(overview.getByText("0 次")).toBeVisible();
+  });
+
   test("多文件侧栏按钮区高度 = 96px（与单文件一致）", async ({ page }) => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -769,16 +815,16 @@ test.describe("单/多文件按钮区布局回归", () => {
     await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(0);
   });
 
-  test("多文件舞台有'下载'+'打包'、列表有下载图标、侧栏有'打包下载'", async ({ page }) => {
+  test("多文件舞台无操作按钮、列表有下载图标、侧栏有'打包下载'", async ({ page }) => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
     await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 舞台操作栏应有"下载"链接 + "打包"按钮
-    await expect(page.locator("main [class*='stagePlayer'] ~ div a:has-text('下载')")).toHaveCount(1);
-    await expect(page.locator("main [class*='stagePlayer'] ~ div button:has-text('打包')")).toHaveCount(1);
+    // 舞台操作栏不再承载任何下载/打包按钮
+    const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
+    await expect(stageBtns).toHaveCount(0);
 
     // 侧栏应有"打包下载"
     await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(1);
@@ -811,8 +857,7 @@ test.describe("单/多文件按钮区布局回归", () => {
 
     // 骨架阶段侧栏按钮区高度
     const skeletonH = await page.evaluate(() => {
-      const divs = Array.from(document.querySelectorAll("aside .flex.flex-col.gap-2"));
-      const target = divs[divs.length - 1] as HTMLElement | null;
+      const target = document.querySelector("aside .min-h-\\[96px\\]") as HTMLElement | null;
       return target ? Math.round(target.getBoundingClientRect().height) : null;
     });
     expect(skeletonH).toBe(96);
