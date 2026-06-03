@@ -23,8 +23,10 @@ export function PdfPreview({ url, className = "" }: PdfPreviewProps) {
         setStatus("loading");
         // 动态加载 PDF.js（避免首次 bundle 过大）
         const pdfjsLib = await import("pdfjs-dist");
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";
+        // worker 由 scripts/copy-pdf-worker.mjs 在 predev/prebuild 时
+        // 从 node_modules 复制到 public/，版本与主库永远一致；
+        // 走同源静态路径，不依赖外部 CDN（国内网络/内网/离线均可用）
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

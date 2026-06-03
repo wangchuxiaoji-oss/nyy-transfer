@@ -9,6 +9,10 @@
 # testing
 /coverage
 /test-results
+/playwright-report
+
+# 由 scripts/copy-pdf-worker.mjs 在 predev/prebuild 时自动生成
+/public/pdf.worker.min.mjs
 
 # next.js
 /.next/
