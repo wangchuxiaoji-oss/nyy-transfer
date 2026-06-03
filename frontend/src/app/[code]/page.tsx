@@ -459,7 +459,7 @@ export default function SharePage() {
               </div>
             ) : (
               /* 没有 downloads 时显示占位 */
-              <div className={`${s.stagePlayer} min-h-[320px] flex items-center justify-center`}>
+              <div className={`${s.stagePlayer} flex items-center justify-center`}>
                 <div className="text-center">
                   <BrandLogo className="w-20 h-auto mx-auto mb-4 opacity-30" />
                   <p className={`font-tech text-xs tracking-widest ${s.tMuted}`}>
