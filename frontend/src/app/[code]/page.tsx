@@ -91,6 +91,18 @@ export default function SharePage() {
 
   const appendDebugLog = useCallback<DebugLogFn>(() => {}, []);
 
+  // 主题切换按钮——定义在顶层，骨架布局与状态页均可使用
+  const ThemeToggle = () => (
+    <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
+      {(["light", "auto", "dark"] as const).map((t) => (
+        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
+          className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
+          {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
+        </button>
+      ))}
+    </div>
+  );
+
   // ===== 主题 =====
   useEffect(() => {
     const saved = localStorage.getItem("nyy-theme-4c");
@@ -246,25 +258,131 @@ export default function SharePage() {
   // 据此让文件名+操作栏区域提前以恒定高度渲染，避免 downloads 后到时把布局挤开。
   const selectedMeta = share && share.files.length > 0 ? share.files[Math.min(selectedIdx, share.files.length - 1)] : null;
 
-  // 主题切换按钮（三处状态页/主页面共用，统一主题感知配色）
-  const ThemeToggle = () => (
-    <div className="fixed top-4 right-4 z-50 flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1">
-      {(["light", "auto", "dark"] as const).map((t) => (
-        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
-          className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
-          {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
-        </button>
-      ))}
-    </div>
-  );
-
   // ===== 状态页渲染 =====
+  // loading：渲染与 ready 完全等尺寸的骨架布局，数据到达后原地替换，零布局跳变。
+  // 注意：此处 share===null，不得访问 share.* 任何字段。
   if (pageState === "loading") {
     return (
-      <main className={`min-h-dvh flex items-center justify-center ${s.meshBg}`}>
-        <div className="text-center">
-          <BrandLogo className={`w-32 h-auto mx-auto mb-4 ${s.logoBreath}`} />
-          <p className={`font-tech text-sm tracking-[0.2em] ${s.tSecondary}`}>正在打开保险库…</p>
+      <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
+        <ThemeToggle />
+        <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
+
+          {/* ── Topbar 骨架 ── */}
+          <div className={`${s.glass} flex items-center justify-between gap-4 px-6 py-4 mb-5`}>
+            {/* 左：Logo 真实渲染 + 分享码 shimmer */}
+            <div className="flex items-center gap-3">
+              <BrandLogo className="w-28 h-auto" />
+              <div className={`${s.skel} h-8 w-24 rounded-md`} />
+            </div>
+            {/* 右：桌面端三列数据 shimmer（移动端 hidden，与真实布局一致） */}
+            <div className="hidden md:flex items-center gap-6">
+              <div className="flex flex-col gap-1.5">
+                <div className={`${s.skel} h-3 w-10`} />
+                <div className={`${s.skel} h-4 w-8`} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className={`${s.skel} h-3 w-10`} />
+                <div className={`${s.skel} h-4 w-14`} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className={`${s.skel} h-3 w-10`} />
+                <div className={`${s.skel} h-4 w-12`} />
+              </div>
+            </div>
+          </div>
+
+          {/* ── 主体两栏 骨架 ── */}
+          <div className={`grid gap-5 ${s.desktopTwoCol}`}>
+
+            {/* 左列：舞台 + 操作栏 */}
+            <div>
+              {/* 舞台：16:9 黑框与 ready 完全同尺寸 */}
+              <div className={s.stagePlayer}>
+                <div className={`${s.stageContent} flex items-center justify-center`}>
+                  <BrandLogo className={`w-20 h-auto opacity-20 ${s.logoBreath}`} />
+                </div>
+              </div>
+              {/* 操作栏骨架：结构与真实操作栏完全镜像，确保高度零差异 */}
+              <div className="flex items-center justify-between gap-4 mt-4 min-h-[38px]">
+                <div className="min-w-0 flex-1">
+                  <div className={`${s.skel} h-7 w-3/4`} />
+                  <div className={`${s.skel} h-4 w-1/4 mt-1`} />
+                </div>
+                <div className="flex gap-3 shrink-0">
+                  <div className={`${s.skel} h-[38px] w-24`} />
+                  <div className={`${s.skel} h-[38px] w-36`} />
+                </div>
+              </div>
+            </div>
+
+            {/* 右列：侧栏骨架 */}
+            <aside className="flex flex-col gap-4">
+
+              {/* 文件列表卡片骨架 */}
+              <div className={`${s.glass} p-4`}>
+                {/* 标题行：项目数 + 视图切换按钮 */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className={`${s.skel} h-3.5 w-28`} />
+                  <div className={`${s.skel} h-6 w-14 rounded-md`} />
+                </div>
+                {/* 3 条文件行占位（与真实 list 视图项结构一致） */}
+                <div className="flex flex-col gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
+                      <div className={`${s.skel} w-9 h-9 rounded-lg shrink-0`} />
+                      <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                        <div className={`${s.skel} h-3.5 w-full`} />
+                        <div className={`${s.skel} h-3 w-1/3`} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 分享信息卡片骨架 */}
+              <div className={`${s.glass} p-4`}>
+                <div className={`${s.skel} h-3.5 w-16 mb-3`} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <div className={`${s.skel} h-3 w-12`} />
+                    <div className={`${s.skel} h-4 w-8`} />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <div className={`${s.skel} h-3 w-12`} />
+                    <div className={`${s.skel} h-4 w-16`} />
+                  </div>
+                </div>
+              </div>
+
+              {/* QR 卡片骨架（仅桌面端，与真实 hidden lg:block 一致） */}
+              <div className={`${s.glass} p-4 hidden lg:block`}>
+                <div className={`${s.skel} h-3.5 w-16 mb-3`} />
+                <div className="flex items-center gap-3">
+                  <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} />
+                  <div className="flex flex-col gap-2">
+                    <div className={`${s.skel} h-3.5 w-16`} />
+                    <div className={`${s.skel} h-3.5 w-20`} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 操作按钮区骨架（主按钮 + 复制链接，与最常见的 ready 状态对齐） */}
+              <div className="flex flex-col gap-2">
+                <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
+                <div className={`${s.skel} h-[42px] w-full rounded-lg`} />
+              </div>
+
+              {/* 举报/首页链接占位（保持高度稳定） */}
+              <div className="flex items-center justify-center gap-5">
+                <div className={`${s.skel} h-3.5 w-10`} />
+                <div className={`${s.skel} h-3.5 w-16`} />
+              </div>
+
+            </aside>
+          </div>
+
+          {/* 底部品牌（与 ready 一致，立即渲染） */}
+          <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
         </div>
       </main>
     );
@@ -574,18 +692,20 @@ export default function SharePage() {
               </div>
             </div>
 
-            {/* 二维码（移动端隐藏，仅复制链接即可） */}
-            {qr && (
-              <div className={`${s.glass} p-4 hidden lg:block`}>
-                <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>扫码取件</p>
-                <div className="flex items-center gap-3">
+            {/* 二维码（移动端隐藏；qr 未就绪时 shimmer 占位撑住高度，避免卡片出现时推动下方按钮） */}
+            <div className={`${s.glass} p-4 hidden lg:block`}>
+              <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>扫码取件</p>
+              <div className="flex items-center gap-3">
+                {qr ? (
                   <Image src={qr} alt="二维码" width={92} height={92} unoptimized className="rounded-lg" />
-                  <div className={`text-xs ${s.tMuted}`}>
-                    <p>手机扫码</p><p>随时随地取件</p>
-                  </div>
+                ) : (
+                  <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} aria-hidden="true" />
+                )}
+                <div className={`text-xs ${s.tMuted}`}>
+                  <p>手机扫码</p><p>随时随地取件</p>
                 </div>
               </div>
-            )}
+            </div>
 
             {/* 操作按钮 */}
             <div className="flex flex-col gap-2">

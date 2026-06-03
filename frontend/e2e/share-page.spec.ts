@@ -482,3 +482,108 @@ test.describe("反馈修复回归", () => {
     }
   });
 });
+
+// ===== 骨架屏回归 =====
+test.describe("骨架屏回归", () => {
+  // 辅助：share info 延迟 N ms 返回，download 也延迟，模拟慢网络下的 loading 阶段
+  async function mockSlow(page: import("@playwright/test").Page, delayMs: number) {
+    const NAME = "演示视频.mp4";
+    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
+    const info = {
+      code: MOCK_CODE,
+      files: [{ file_name: NAME, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META }],
+      empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+    };
+    const dl = {
+      files: [{ file_name: NAME, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }],
+      empty_dirs: [], expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, async (route) => {
+      await new Promise((r) => setTimeout(r, delayMs));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) });
+    });
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
+      await new Promise((r) => setTimeout(r, delayMs + 800));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(dl) });
+    });
+    await page.route("https://example.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+  }
+
+  test("loading 阶段已渲染两栏布局骨架（不是全屏 loading 页）", async ({ page }) => {
+    await mockSlow(page, 1500);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+
+    // 在 share info 返回之前（loading 阶段）取快照
+    await page.waitForTimeout(400);
+
+    // 骨架布局：stagePlayer 和 aside 已存在于 DOM
+    const hasStage = await page.evaluate(() => !!document.querySelector('main [class*="stagePlayer"]'));
+    const hasAside = await page.evaluate(() => !!document.querySelector("main aside"));
+    expect(hasStage).toBe(true);
+    expect(hasAside).toBe(true);
+
+    // 不应存在全屏 loading 文字
+    await expect(page.locator("text=正在打开保险库")).not.toBeVisible();
+  });
+
+  test("loading 阶段移动端骨架不横向溢出", async ({ page }) => {
+    await mockSlow(page, 1500);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await page.waitForTimeout(400);
+
+    const { sw, cw } = await page.evaluate(() => ({
+      sw: document.documentElement.scrollWidth,
+      cw: document.documentElement.clientWidth,
+    }));
+    expect(sw).toBeLessThanOrEqual(cw + 1);
+  });
+
+  test("loading → ready 侧栏 Y 坐标零跳变（桌面端）", async ({ page }) => {
+    await mockSlow(page, 1200);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+
+    // loading 阶段：等骨架渲染稳定
+    await page.waitForTimeout(400);
+    const asideTop = () => page.evaluate(() => {
+      const el = document.querySelector("main aside");
+      return el ? Math.round(el.getBoundingClientRect().top) : null;
+    });
+    const before = await asideTop();
+    expect(before).not.toBeNull();
+
+    // 等 share info 返回（ready 状态，真实 Topbar/文件列表渲染）
+    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(200);
+    const after = await asideTop();
+    expect(after).not.toBeNull();
+
+    // 骨架与真实布局完全等尺寸，aside Y 坐标应零变化（允许 2px）
+    expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
+  });
+
+  test("loading → ready 侧栏 Y 坐标零跳变（移动端）", async ({ page }) => {
+    await mockSlow(page, 1200);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await page.waitForTimeout(400);
+
+    const asideTop = () => page.evaluate(() => {
+      const el = document.querySelector("main aside");
+      return el ? Math.round(el.getBoundingClientRect().top) : null;
+    });
+    const before = await asideTop();
+    expect(before).not.toBeNull();
+
+    await expect(page.locator("aside").getByText("分享信息")).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(200);
+    const after = await asideTop();
+    expect(after).not.toBeNull();
+
+    expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
+  });
+});
