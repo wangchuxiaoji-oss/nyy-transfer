@@ -86,6 +86,11 @@ export default function SharePage() {
   const [reportReason, setReportReason] = useState("");
   const [theme, setTheme] = useState<"dark" | "light" | "auto">("dark");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [listExpanded, setListExpanded] = useState(false);
+
+  // 文件列表折叠阈值：超过 COLLAPSE_THRESHOLD 个文件时默认折叠，只显示 COLLAPSE_SHOW 条
+  const COLLAPSE_THRESHOLD = 5;
+  const COLLAPSE_SHOW = 4;
 
   // ===== Debug（精简版，保留 appendDebugLog 用于 SDP 播放器回调） =====
 
@@ -325,17 +330,15 @@ export default function SharePage() {
                   <div className={`${s.skel} h-3.5 w-28`} />
                   <div className={`${s.skel} h-6 w-14 rounded-md`} />
                 </div>
-                {/* 3 条文件行占位（与真实 list 视图项结构一致） */}
+                {/* 文件行占位：1 条（单文件最常见，多文件跳变方向是"内容加载"，体验优于"布局收缩"） */}
                 <div className="flex flex-col gap-1.5">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
-                      <div className={`${s.skel} w-9 h-9 rounded-lg shrink-0`} />
-                      <div className="min-w-0 flex-1 flex flex-col gap-1.5">
-                        <div className={`${s.skel} h-3.5 w-full`} />
-                        <div className={`${s.skel} h-3 w-1/3`} />
-                      </div>
+                  <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
+                    <div className={`${s.skel} w-9 h-9 rounded-lg shrink-0`} />
+                    <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                      <div className={`${s.skel} h-3.5 w-full`} />
+                      <div className={`${s.skel} h-3 w-1/3`} />
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
 
@@ -484,6 +487,12 @@ export default function SharePage() {
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
 
+  // 文件列表折叠：超过阈值时默认折叠，只显示前 COLLAPSE_SHOW 条
+  const effectiveFiles = downloads.length > 0 ? downloads : share.files;
+  const isCollapsed = effectiveFiles.length > COLLAPSE_THRESHOLD && !listExpanded;
+  const displayFiles = isCollapsed ? effectiveFiles.slice(0, COLLAPSE_SHOW) : effectiveFiles;
+  const hiddenFileCount = effectiveFiles.length - COLLAPSE_SHOW;
+
   return (
     <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
       <ThemeToggle />
@@ -625,7 +634,7 @@ export default function SharePage() {
               {/* 列表视图 */}
               {viewMode === "list" && downloads.length > 0 && (
                 <div className="flex flex-col gap-1.5">
-                  {downloads.map((dl, i) => {
+                  {displayFiles.map((dl, i) => {
                     const ft = classifyFile(dl.file_name);
                     const isActive = i === selectedIdx;
                     return (
@@ -640,34 +649,48 @@ export default function SharePage() {
                       </div>
                     );
                   })}
+                  {isCollapsed && (
+                    <button onClick={() => setListExpanded(true)}
+                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+                      展开更多（{hiddenFileCount} 项）
+                    </button>
+                  )}
                 </div>
               )}
 
               {/* 网格视图 */}
               {viewMode === "grid" && downloads.length > 0 && (
-                <div className="grid grid-cols-2 gap-2">
-                  {downloads.map((dl, i) => {
-                    const ft = classifyFile(dl.file_name);
-                    const isActive = i === selectedIdx;
-                    return (
-                    <div key={i} onClick={() => setSelectedIdx(i)} role="button" tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedIdx(i); } }}
-                      className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
-                        <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
-                          {getFileIcon(ft)}
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    {displayFiles.map((dl, i) => {
+                      const ft = classifyFile(dl.file_name);
+                      const isActive = i === selectedIdx;
+                      return (
+                      <div key={i} onClick={() => setSelectedIdx(i)} role="button" tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedIdx(i); } }}
+                        className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
+                          <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
+                            {getFileIcon(ft)}
+                          </div>
+                          <span className="text-xs truncate font-medium">{dl.file_name}</span>
+                          <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
                         </div>
-                        <span className="text-xs truncate font-medium">{dl.file_name}</span>
-                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                  {isCollapsed && (
+                    <button onClick={() => setListExpanded(true)}
+                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+                      展开更多（{hiddenFileCount} 项）
+                    </button>
+                  )}
+                </>
               )}
 
               {/* 没有 downloads 时显示文件名列表（结构与 list 视图项一致，避免就绪后跳动） */}
               {downloads.length === 0 && (
                 <div className="flex flex-col gap-1.5">
-                  {share.files.map((f, i) => {
+                  {displayFiles.map((f, i) => {
                     const ft = classifyFile(f.file_name);
                     return (
                       <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
@@ -679,6 +702,12 @@ export default function SharePage() {
                       </div>
                     );
                   })}
+                  {isCollapsed && (
+                    <button onClick={() => setListExpanded(true)}
+                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+                      展开更多（{hiddenFileCount} 项）
+                    </button>
+                  )}
                 </div>
               )}
             </div>

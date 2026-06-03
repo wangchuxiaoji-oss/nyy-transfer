@@ -587,3 +587,104 @@ test.describe("骨架屏回归", () => {
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
   });
 });
+
+// ===== 文件列表折叠/展开 =====
+test.describe("文件列表折叠/展开", () => {
+  // 8 个文件的 mock（超过 COLLAPSE_THRESHOLD=5）
+  const MANY_FILES = Array.from({ length: 8 }, (_, i) => ({
+    file_name: `文件_${i + 1}.mp4`,
+    file_size: 1000000 * (i + 1),
+    file_ext: "mp4",
+    content_type: "video/mp4",
+    index: i,
+    is_chunked: false,
+    chunk_count: 0,
+  }));
+  const MANY_DL = MANY_FILES.map((f) => ({
+    file_name: f.file_name,
+    file_size: f.file_size,
+    content_type: f.content_type,
+    is_chunked: false,
+    download_url: `https://example.com/${f.file_name}`,
+    chunks: [],
+  }));
+
+  async function mockManyFiles(page: import("@playwright/test").Page) {
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        code: MOCK_CODE, files: MANY_FILES, empty_dirs: [], total_bytes: 36000000,
+        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+      }) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: MANY_DL, empty_dirs: [], expires_in: 3600 }) })
+    );
+    await page.route("https://example.com/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+  }
+
+  test("8 个文件默认只显示 4 条 + 展开更多按钮", async ({ page }) => {
+    await mockManyFiles(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(2000);
+
+    // 应显示 4 条文件行
+    const rows = page.locator("aside [role='button']");
+    await expect(rows).toHaveCount(4);
+
+    // 应有"展开更多"按钮，显示剩余数量
+    const expandBtn = page.locator("aside button:has-text('展开更多')");
+    await expect(expandBtn).toBeVisible();
+    await expect(expandBtn).toContainText("4 项"); // 8 - 4 = 4
+  });
+
+  test("点击展开更多后显示全部 8 条", async ({ page }) => {
+    await mockManyFiles(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(2000);
+
+    // 点击展开
+    await page.locator("aside button:has-text('展开更多')").click();
+
+    // 应显示全部 8 条
+    const rows = page.locator("aside [role='button']");
+    await expect(rows).toHaveCount(8);
+
+    // "展开更多"按钮应消失
+    await expect(page.locator("aside button:has-text('展开更多')")).not.toBeVisible();
+  });
+
+  test("4 个文件不显示展开更多按钮", async ({ page }) => {
+    const files4 = MANY_FILES.slice(0, 4);
+    const dl4 = MANY_DL.slice(0, 4);
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        code: MOCK_CODE, files: files4, empty_dirs: [], total_bytes: 10000000,
+        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
+      }) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dl4, empty_dirs: [], expires_in: 3600 }) })
+    );
+    await page.route("https://example.com/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(2000);
+
+    // 4 条文件行
+    const rows = page.locator("aside [role='button']");
+    await expect(rows).toHaveCount(4);
+
+    // 无"展开更多"按钮
+    await expect(page.locator("aside button:has-text('展开更多')")).not.toBeVisible();
+  });
+});
