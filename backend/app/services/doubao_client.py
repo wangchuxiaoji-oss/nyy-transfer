@@ -14,7 +14,6 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
@@ -84,6 +83,16 @@ def _aws_sign_v4(
 
 class DoubaoClientError(Exception):
     """豆包 API 调用失败。"""
+
+
+@dataclass
+class UploadAuthResult:
+    """豆包上传授权, 用于 ApplyImageUpload / CommitImageUpload 签名。"""
+
+    service_id: str
+    access_key: str
+    secret_key: str
+    session_token: str
 
 
 @dataclass
@@ -186,16 +195,9 @@ class DoubaoUploadClient:
             "fp": self.fp,
         }
 
-    # ------------------------------------------------------------------
-    # Step 1+2: init_upload (prepare + apply)
-    # 返回浏览器直传所需的 upload_url 和 auth
-    # ------------------------------------------------------------------
-
-    async def init_upload(self, file_size: int, file_ext: str = "") -> UploadInitResult:
-        """调用豆包 prepare_upload + ApplyImageUpload，返回 TOS 上传凭证。"""
+    async def _prepare_upload_auth(self) -> UploadAuthResult:
+        """获取一组新的豆包上传 STS 授权。"""
         params = self._security_params()
-
-        # --- prepare_upload ---
         prepare_url = f"{_BASE_URL}/alice/resource/prepare_upload?{urlencode(params)}"
         resp = await self.http.post(
             prepare_url,
@@ -206,22 +208,40 @@ class DoubaoUploadClient:
             raise DoubaoClientError(f"prepare_upload failed: {body.get('msg', body)}")
 
         data = body["data"]
-        service_id = data["service_id"]
         auth_token = data["upload_auth_token"]
-        access_key = auth_token["access_key"]
-        secret_key = auth_token["secret_key"]
-        session_token = auth_token["session_token"]
+        return UploadAuthResult(
+            service_id=data["service_id"],
+            access_key=auth_token["access_key"],
+            secret_key=auth_token["secret_key"],
+            session_token=auth_token["session_token"],
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1+2: init_upload (prepare + apply)
+    # 返回浏览器直传所需的 upload_url 和 auth
+    # ------------------------------------------------------------------
+
+    async def init_upload(self, file_size: int, file_ext: str = "") -> UploadInitResult:
+        """调用豆包 prepare_upload + ApplyImageUpload，返回 TOS 上传凭证。"""
+        auth = await self._prepare_upload_auth()
 
         # --- ApplyImageUpload ---
         ext_part = f".{file_ext}" if file_ext else ""
         apply_url = (
             f"{_BASE_URL}/top/v1?"
             f"Action=ApplyImageUpload&Version=2018-08-01"
-            f"&ServiceId={service_id}&NeedFallback=true"
+            f"&ServiceId={auth.service_id}&NeedFallback=true"
             f"&FileSize={file_size}&FileExtension={ext_part}"
             f"&s=jdnfglwfkl"
         )
-        sign_headers = _aws_sign_v4("GET", apply_url, "", access_key, secret_key, session_token)
+        sign_headers = _aws_sign_v4(
+            "GET",
+            apply_url,
+            "",
+            auth.access_key,
+            auth.secret_key,
+            auth.session_token,
+        )
         resp = await self.http.get(apply_url, headers=sign_headers)
         body = resp.json()
         result_data = body.get("Result")
@@ -247,10 +267,10 @@ class DoubaoUploadClient:
             store_uri=store_uri,
             session_key=session_key,
             tos_host=tos_host,
-            service_id=service_id,
-            access_key=access_key,
-            secret_key=secret_key,
-            session_token=session_token,
+            service_id=auth.service_id,
+            access_key=auth.access_key,
+            secret_key=auth.secret_key,
+            session_token=auth.session_token,
         )
 
     # ------------------------------------------------------------------
@@ -321,8 +341,19 @@ class DoubaoUploadClient:
         access_key: str,
         secret_key: str,
         session_token: str,
+        *,
+        refresh_auth: bool = True,
     ) -> CommitResult:
         """调用 CommitImageUpload 确认文件上传完成。"""
+        # Redis 中的 commit_token 可保留 72 小时, 但豆包 STS 通常更早过期;
+        # CommitImageUpload 只依赖旧 SessionKey, 签名凭证必须提交前刷新。
+        if refresh_auth:
+            auth = await self._prepare_upload_auth()
+            service_id = auth.service_id
+            access_key = auth.access_key
+            secret_key = auth.secret_key
+            session_token = auth.session_token
+
         commit_url = (
             f"{_BASE_URL}/top/v1?"
             f"Action=CommitImageUpload&Version=2018-08-01"

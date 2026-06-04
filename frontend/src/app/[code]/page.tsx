@@ -7,6 +7,7 @@ import QRCode from "qrcode";
 import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder, Play } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { SelfDevelopPlayer } from "@/components/self-develop-player";
+import { NativeVideoPlayer } from "@/components/native-video-player";
 import { PdfPreview } from "@/components/pdf-preview";
 import {
   getShareInfo, verifyShare, downloadShare, reportShare,
@@ -21,6 +22,7 @@ import s from "./share-4c.module.css";
 type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "error";
 type FileType = "video" | "image" | "pdf" | "audio" | "text" | "other";
 type DownloadLinksState = "idle" | "loading" | "ready" | "error";
+type MobilePanel = "files" | "overview" | "scan";
 
 // 分类文件类型（用于选择图标 + 预览策略）
 function classifyFile(name: string): FileType {
@@ -94,6 +96,59 @@ function getDownloadLabel(share: ShareInfo): string {
   return share.max_downloads > 0 ? `${share.download_count} / ${share.max_downloads}` : `${share.download_count} 次`;
 }
 
+function getDefaultMobilePanel(share: ShareInfo): MobilePanel {
+  return share.files.length === 1 && share.empty_dirs.length === 0 ? "overview" : "files";
+}
+
+function getNativeVideoMime(file: ShareFileDownload): string {
+  if (file.content_type?.startsWith("video/")) return file.content_type;
+  const ext = file.file_name.split(".").pop()?.toLowerCase() || "";
+  switch (ext) {
+    case "mp4": return "video/mp4";
+    case "webm": return "video/webm";
+    case "ogg":
+    case "ogv": return "video/ogg";
+    case "mov": return "video/quicktime";
+    case "mkv": return "video/x-matroska";
+    default: return "video/mp4";
+  }
+}
+
+function isMkvFile(file: ShareFileDownload): boolean {
+  return file.file_name.split(".").pop()?.toLowerCase() === "mkv";
+}
+
+function NativeVideoPreview({ file, onDownload, forceUnsupported = false }: { file: ShareFileDownload; onDownload: () => void; forceUnsupported?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const mime = getNativeVideoMime(file);
+  const safeUrl = isSafeUrl(file.download_url);
+
+  useEffect(() => {
+    setFailed(false);
+    if (forceUnsupported || !safeUrl || typeof document === "undefined") return;
+    const probe = document.createElement("video");
+    if (mime && probe.canPlayType(mime) === "") setFailed(true);
+  }, [file.download_url, forceUnsupported, mime, safeUrl]);
+
+  if (forceUnsupported || !safeUrl || failed) {
+    return (
+      <div data-testid="native-video-preview" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-2xl text-yc-accent">▶</div>
+        <div>
+          <p className={`font-tech text-sm font-bold tracking-widest ${s.tPrimary}`}>浏览器无法直接预览此视频</p>
+          <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。</p>
+        </div>
+        <button type="button" onClick={onDownload}
+          className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+          <Download className="w-4 h-4" /> 下载此文件
+        </button>
+      </div>
+    );
+  }
+
+  return <NativeVideoPlayer src={file.download_url} type={mime} fileName={file.file_name} onError={() => setFailed(true)} onDownload={onDownload} />;
+}
+
 export default function SharePage() {
   const params = useParams();
   const code = params.code as string;
@@ -117,25 +172,35 @@ export default function SharePage() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [listExpanded, setListExpanded] = useState(false);
   const [downloadState, setDownloadState] = useState<DownloadLinksState>("idle");
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>("files");
 
   // 文件列表折叠阈值：超过 COLLAPSE_THRESHOLD 个文件时默认折叠，只显示 COLLAPSE_SHOW 条
   const COLLAPSE_THRESHOLD = 5;
   const COLLAPSE_SHOW = 4;
 
-  // ===== Debug（精简版，保留 appendDebugLog 用于 SDP 播放器回调） =====
-
   const appendDebugLog = useCallback<DebugLogFn>(() => {}, []);
 
-  // 主题切换按钮：主布局内嵌到 Topbar，状态页通过 className 固定到右上角
-  const ThemeToggle = ({ className = "" }: { className?: string }) => (
-    <div className={`flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1 ${className}`}>
-      {(["light", "dark"] as const).map((t) => (
-        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "白天" : "黑夜"}
-          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
-          {t === "light" ? "☀" : "☾"}
-        </button>
-      ))}
-    </div>
+  // 主题切换按钮：改为单按钮，点击在白天/黑夜间切换
+  const ThemeToggle = ({ className = "" }: { className?: string }) => {
+    const isLight = theme === "light";
+    const nextThemeLabel = isLight ? "黑夜" : "白天";
+    return (
+      <button
+        type="button"
+        onClick={() => setTheme(isLight ? "dark" : "light")}
+        title={`当前${isLight ? "白天" : "黑夜"}，点击切换到${nextThemeLabel}`}
+        aria-label={`当前${isLight ? "白天" : "黑夜"}，点击切换到${nextThemeLabel}`}
+        className={`h-10 w-10 rounded-xl border border-white/10 bg-white/6 text-sm backdrop-blur-xl flex items-center justify-center transition-all hover:opacity-90 ${theme === "light" ? "text-white shadow-[0_0_14px_rgba(255,138,61,0.35)]" : `${s.tPrimary} shadow-[0_0_14px_rgba(255,138,61,0.18)]`} ${className}`}
+      >
+        {isLight ? "☀" : "☾"}
+      </button>
+    );
+  };
+
+  const FooterSlogan = () => (
+    <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
+      文件中转，就用拿呀² · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">nyy.app</a>
+    </p>
   );
 
   // ===== 主题 =====
@@ -156,6 +221,7 @@ export default function SharePage() {
     getShareInfo(code)
       .then((data) => {
         setShare(data);
+        setMobilePanel(getDefaultMobilePanel(data));
         setDownloadState(data.has_password ? "idle" : "loading");
         setPageState(data.has_password ? "locked" : "ready");
         if (!data.has_password) void autoFetchDownloads();
@@ -326,17 +392,17 @@ export default function SharePage() {
         <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
 
           {/* ── Topbar 骨架 ── */}
-          <div className={`${s.glass} min-h-[80px] px-4 py-3 sm:min-h-0 sm:px-6 sm:py-4 mb-5`}>
-            <div className="flex items-start justify-between gap-3 sm:items-center sm:gap-4">
-              {/* 左：Logo 真实渲染 + 分享话术/摘要 shimmer（移动端也内联） */}
-              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                <BrandLogo className="w-24 h-auto shrink-0 sm:w-28" />
-                <div className="min-w-0 flex-1">
-                  <div className={`${s.skel} h-4 w-36 max-w-[42vw] sm:h-5 sm:w-44 sm:max-w-[52vw]`} />
-                  <div className={`${s.skel} h-4 w-24 max-w-[32vw] mt-1 sm:w-32 sm:max-w-[42vw]`} />
-                </div>
+          <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
+            <div className="flex min-w-0 items-center gap-3 sm:gap-5">
+              <BrandLogo className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
+              <div className="min-w-0 flex-1">
+                <div className={`${s.skel} h-4 w-full max-w-[11.5rem] sm:h-5 sm:max-w-[18rem]`} />
+                <div className={`${s.skel} mt-2 h-3.5 w-28 sm:w-36`} />
               </div>
-              <ThemeToggle className="shrink-0 self-start sm:self-center" />
+              <ThemeToggle className="shrink-0 lg:hidden" />
+            </div>
+            <div className="hidden justify-end lg:flex">
+              <ThemeToggle className="shrink-0" />
             </div>
           </div>
 
@@ -352,7 +418,7 @@ export default function SharePage() {
                 </div>
               </div>
               {/* 当前文件信息骨架：播放器下方只保留文件名/大小 */}
-              <div className="flex items-center justify-between gap-4 mt-4 min-h-[38px]">
+              <div className="flex items-center justify-between gap-4 mt-3 min-h-[44px]">
                 <div className="min-w-0 flex-1">
                   <div className={`${s.skel} h-7 w-3/4`} />
                   <div className={`${s.skel} h-4 w-1/4 mt-1`} />
@@ -363,38 +429,40 @@ export default function SharePage() {
             {/* 右列：侧栏骨架 */}
             <aside className="flex flex-col gap-4">
 
-              {/* 主操作区骨架（首行主按钮 + 次行复制链接） */}
-              <div className="grid grid-cols-2 gap-2 min-h-[96px]">
+              {/* 主操作区骨架：复制链接已移到当前文件信息区，下载动作只占一行 */}
+              <div data-testid="share-actions" className="grid grid-cols-2 gap-2 min-h-[46px]">
                 <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
                 <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
-                <div className={`${s.skel} col-span-2 h-[42px] w-full rounded-lg`} />
               </div>
 
               {/* 分享概览 + 扫码取件卡片骨架 */}
               <div className={`${s.glass} p-4`}>
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className={`${s.skel} h-3.5 w-16 mb-3`} />
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-col gap-1.5">
-                        <div className={`${s.skel} h-3 w-10`} />
-                        <div className={`${s.skel} h-4 w-28`} />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <div className={`${s.skel} h-3 w-10`} />
-                        <div className={`${s.skel} h-4 w-16`} />
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <div className={`${s.skel} h-3 w-10`} />
-                        <div className={`${s.skel} h-4 w-12`} />
-                      </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className={`${s.skel} h-3.5 w-16`} />
+                  <div className={`${s.skel} h-3.5 w-16`} />
+                </div>
+                <div className="mt-4 flex items-stretch gap-3 sm:gap-4">
+                  <div className="grid min-w-0 flex-1 gap-2 sm:gap-2.5">
+                    <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+                      <div className={`${s.skel} h-3 w-10`} />
+                      <div className={`${s.skel} h-4 w-24 mt-2 sm:h-5 sm:w-32`} />
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+                      <div className={`${s.skel} h-3 w-10`} />
+                      <div className={`${s.skel} h-4 w-16 mt-2 sm:h-5 sm:w-20`} />
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+                      <div className={`${s.skel} h-3 w-10`} />
+                      <div className={`${s.skel} h-4 w-14 mt-2 sm:h-5 sm:w-16`} />
                     </div>
                   </div>
-                  <div className="hidden lg:flex items-center gap-3 border-l border-white/10 pl-4">
-                    <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} />
-                    <div className="flex flex-col gap-2">
-                      <div className={`${s.skel} h-3.5 w-16`} />
-                      <div className={`${s.skel} h-3.5 w-20`} />
+                  <div className="w-[116px] shrink-0 rounded-2xl border border-white/10 bg-white/4 p-2.5 sm:w-[156px] sm:p-3">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className={`${s.skel} h-[92px] w-[92px] rounded-xl shrink-0 sm:h-[108px] sm:w-[108px]`} />
+                      <div className="flex flex-col items-center gap-2">
+                        <div className={`${s.skel} h-3.5 w-16`} />
+                        <div className={`${s.skel} h-3.5 w-20`} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -410,7 +478,7 @@ export default function SharePage() {
           </div>
 
           {/* 底部品牌（与 ready 一致，立即渲染） */}
-          <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
+          <FooterSlogan />
         </div>
       </main>
     );
@@ -503,7 +571,9 @@ export default function SharePage() {
         </div>
 
         {/* 底部品牌 */}
-        <p className={`mt-8 font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
+        <p className={`mt-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
+          文件中转，就用拿呀² · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">nyy.app</a>
+        </p>
       </main>
     );
   }
@@ -524,21 +594,172 @@ export default function SharePage() {
   const showLinkFetchButton =
     (isSingle && downloadState === "error") ||
     (!isSingle && !hasOnlyEmptyDirs && !showMultiDownloadActions);
+  const activeMobilePanel = isSingle && mobilePanel === "files" ? "overview" : mobilePanel;
+  const mobileTabs: Array<{ id: MobilePanel; label: string }> = isSingle
+    ? [{ id: "overview", label: "概览" }, { id: "scan", label: "扫码" }]
+    : [{ id: "files", label: "文件" }, { id: "overview", label: "概览" }, { id: "scan", label: "扫码" }];
+
+  const renderFileListContent = () => (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <span className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted}`}>文件列表</span>
+        <div className="flex gap-1 bg-white/6 border border-white/10 rounded-md p-0.5">
+          <button onClick={() => setViewMode("list")} title="列表视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "list" ? "bg-yc-accent text-white" : s.tMuted}`}>≡</button>
+          <button onClick={() => setViewMode("grid")} title="网格视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "grid" ? "bg-yc-accent text-white" : s.tMuted}`}>▦</button>
+        </div>
+      </div>
+
+      {share.empty_dirs.map((dir) => (
+        <div key={dir} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
+          <Folder className="w-5 h-5 text-yc-accent flex-shrink-0" />
+          <span className="text-sm truncate flex-1">{dir}</span>
+          <span className={`font-tech text-[10px] ${s.tMuted}`}>空</span>
+        </div>
+      ))}
+
+      {viewMode === "list" && downloads.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {displayFiles.map((_dl, i) => {
+            const dl = _dl as ShareFileDownload;
+            const ft = classifyFile(dl.file_name);
+            const isActive = i === selectedIdx;
+            return (
+              <div key={i}
+                className={`${s.fileRow} flex items-center gap-3 px-3 py-2.5 rounded-lg border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"}`}>
+                <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
+                  className="min-w-0 flex flex-1 items-center gap-3 text-left">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
+                    {getFileIcon(ft)}
+                  </div>
+                  <span className="text-sm truncate flex-1 font-medium">{dl.file_name}</span>
+                  <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
+                </button>
+                <button type="button" onClick={() => void downloadOneFile(dl)}
+                  className={`shrink-0 p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
+                  title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
+          {isCollapsed && (
+            <button onClick={() => setListExpanded(true)}
+              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+              展开更多（{hiddenFileCount} 项）
+            </button>
+          )}
+        </div>
+      )}
+
+      {viewMode === "grid" && downloads.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {displayFiles.map((_dl, i) => {
+              const dl = _dl as ShareFileDownload;
+              const ft = classifyFile(dl.file_name);
+              const isActive = i === selectedIdx;
+              return (
+                <div key={i}
+                  className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
+                  <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
+                    className="min-w-0 flex flex-col gap-2 text-left">
+                    <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
+                      {getFileIcon(ft)}
+                    </div>
+                    <span className="text-xs truncate font-medium">{dl.file_name}</span>
+                    <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
+                  </button>
+                  <button type="button" onClick={() => void downloadOneFile(dl)}
+                    className={`self-end p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
+                    title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {isCollapsed && (
+            <button onClick={() => setListExpanded(true)}
+              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+              展开更多（{hiddenFileCount} 项）
+            </button>
+          )}
+        </>
+      )}
+
+      {downloads.length === 0 && (
+        <div className="flex flex-col gap-1.5">
+          {displayFiles.map((f, i) => {
+            const ft = classifyFile(f.file_name);
+            return (
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
+                  {getFileIcon(ft)}
+                </div>
+                <span className="text-sm truncate flex-1 font-medium">{f.file_name}</span>
+                <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</span>
+              </div>
+            );
+          })}
+          {isCollapsed && (
+            <button onClick={() => setListExpanded(true)}
+              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
+              展开更多（{hiddenFileCount} 项）
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const renderOverviewStats = () => (
+    <div className="grid min-w-0 flex-1 gap-2 sm:gap-2.5">
+      <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+        <span className={`block font-tech text-[10px] ${s.tMuted}`}>内容</span>
+        <span className="mt-1 block break-words font-tech text-[12px] font-bold leading-4 sm:text-sm sm:leading-5">{contentSummary}</span>
+      </div>
+      <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+        <span className={`block font-tech text-[10px] ${s.tMuted}`}>到期</span>
+        <span className="mt-1 block font-tech text-[12px] font-bold leading-4 sm:text-sm sm:leading-5">{expiryLabel}</span>
+      </div>
+      <div className="rounded-xl border border-white/10 bg-white/4 px-3 py-2.5 sm:py-3">
+        <span className={`block font-tech text-[10px] ${s.tMuted}`}>下载</span>
+        <span className="mt-1 block font-tech text-[12px] font-bold leading-4 sm:text-sm sm:leading-5">{downloadLabel}</span>
+      </div>
+    </div>
+  );
+
+  const renderScanContent = () => (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+      {qr ? (
+        <div className="rounded-xl bg-white p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] sm:p-2">
+          <Image src={qr} alt="二维码" width={108} height={108} unoptimized className="h-[92px] w-[92px] rounded-md sm:h-[108px] sm:w-[108px]" />
+        </div>
+      ) : (
+        <div className={`${s.skel} h-[92px] w-[92px] rounded-xl shrink-0 sm:h-[108px] sm:w-[108px]`} aria-hidden="true" />
+      )}
+      <div>
+        <p className="font-tech text-[10px] tracking-[0.1em] text-nyy-300">扫码取件</p>
+        <p className={`mt-1 text-[11px] leading-4 sm:text-xs ${s.tMuted}`}>手机扫码取件</p>
+      </div>
+    </div>
+  );
 
   return (
     <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
       <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
         {/* Topbar */}
-        <div className={`${s.glass} min-h-[80px] px-4 py-3 sm:min-h-0 sm:px-6 sm:py-4 mb-5`}>
-          <div className="flex items-start justify-between gap-3 sm:items-center sm:gap-4">
-            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-              <BrandLogo className="w-24 h-auto shrink-0 sm:w-28" />
-              <div className="min-w-0">
-                <p className={`font-tech text-[13px] font-bold leading-4 tracking-[0.06em] sm:text-sm sm:tracking-[0.08em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
-                <p className={`mt-1 truncate text-[11px] sm:text-xs ${s.tMuted}`}>{contentSummary}</p>
-              </div>
+        <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
+          <div className="flex min-w-0 items-center gap-3 sm:gap-5">
+            <BrandLogo className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
+            <div className="min-w-0 flex-1">
+              <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-tech text-sm font-bold leading-none tracking-[0.03em] sm:text-base sm:tracking-[0.06em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
+              <p className={`mt-2 truncate text-[11px] sm:text-[13px] ${s.tMuted}`}>{contentSummary}</p>
             </div>
-            <ThemeToggle className="shrink-0 self-start sm:self-center" />
+            <ThemeToggle className="shrink-0 lg:hidden" />
+          </div>
+          <div className="hidden justify-end lg:flex">
+            <ThemeToggle className="shrink-0" />
           </div>
         </div>
 
@@ -550,9 +771,20 @@ export default function SharePage() {
             <div className={s.stagePlayer}>
               {downloads.length > 0 && selectedFile ? (
                 <div key={`${selectedType}-${selectedIdx}`} className={s.stageContent}>
-                  {/* 视频:SDP 播放器 */}
+                  {/* 视频：分享页默认使用浏览器原生播放器；SDP 代码保留但不作为默认路径 */}
                   {selectedType === "video" && (
-                    <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
+                    isMkvFile(selectedFile) ? (
+                      <>
+                        <div data-testid="mobile-mkv-sdp-preview" className="absolute inset-0 sm:hidden">
+                          <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
+                        </div>
+                        <div className="hidden sm:block">
+                          <NativeVideoPreview file={selectedFile} forceUnsupported onDownload={() => { void downloadOneFile(selectedFile); }} />
+                        </div>
+                      </>
+                    ) : (
+                      <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
+                    )
                   )}
                   {/* 图片 */}
                   {selectedType === "image" && isSafeUrl(selectedFile.download_url) && (
@@ -609,20 +841,34 @@ export default function SharePage() {
             </div>
             {/* 当前文件信息：下载动作统一放到主操作区/文件列表 */}
             {selectedMeta && (
-              <div className="mt-4 min-h-[38px]">
-                <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedMeta.file_name}</p>
-                <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
-                  {formatSize(selectedMeta.file_size)}
-                  {selectedFile?.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
-                </p>
+              <div className="mt-3 flex min-h-[44px] items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-tech text-lg font-bold tracking-wide truncate ${s.tPrimary}`}>{selectedMeta.file_name}</p>
+                  <p className={`font-tech text-xs ${s.tMuted} mt-1`}>
+                    {formatSize(selectedMeta.file_size)}
+                    {selectedFile?.is_chunked && ` · ${selectedFile.chunks.length} 分片`}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                  {!isSingle && share.files.length > 1 && (
+                    <span className={`rounded-full border border-white/10 bg-white/6 px-2.5 py-1 font-tech text-[10px] ${s.tMuted}`}>
+                      {Math.min(selectedIdx + 1, share.files.length)} / {share.files.length}
+                    </span>
+                  )}
+                  <button type="button" onClick={handleCopyLink}
+                    className={`${s.ghostBtn} h-9 w-9 flex items-center justify-center rounded-lg`}
+                    title="复制链接" aria-label="复制链接">
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
           {/* 右:侧栏 */}
           <aside className="flex flex-col gap-4">
-            {/* 主操作区：单文件保留直下，多文件拆成“当前文件 / 整体打包” */}
-            <div className="grid grid-cols-2 gap-2 min-h-[96px]">
+            {/* 主操作区：复制链接移到当前文件信息区，这里只保留下载主动作 */}
+            <div data-testid="share-actions" className="grid grid-cols-2 gap-2 min-h-[46px]">
               {hasOnlyEmptyDirs && (
                 <button onClick={handleDownloadAll} disabled={downloading}
                   className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
@@ -665,150 +911,54 @@ export default function SharePage() {
                   {downloading || downloadState === "loading" ? "获取中…" : "获取下载链接"}
                 </button>
               )}
-              <button onClick={handleCopyLink}
-                className={`${s.ghostBtn} col-span-2 w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
-                <Copy className="w-4 h-4" /> 复制链接
-              </button>
+              {!selectedMeta && (
+                <button onClick={handleCopyLink}
+                  className={`${s.ghostBtn} col-span-2 w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  <Copy className="w-4 h-4" /> 复制链接
+                </button>
+              )}
             </div>
 
-            {/* 文件列表 */}
-            {!isSingle && <div className={`${s.glass} p-4`}>
-              <div className="flex items-center justify-between mb-3">
-                <span className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted}`}>文件列表</span>
-                <div className="flex gap-1 bg-white/6 border border-white/10 rounded-md p-0.5">
-                  <button onClick={() => setViewMode("list")} title="列表视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "list" ? "bg-yc-accent text-white" : s.tMuted}`}>≡</button>
-                  <button onClick={() => setViewMode("grid")} title="网格视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "grid" ? "bg-yc-accent text-white" : s.tMuted}`}>▦</button>
-                </div>
+            {/* 移动端：文件 / 概览 / 扫码选项卡 */}
+            <div className={`${s.glass} p-3 sm:hidden`}>
+              <div role="tablist" aria-label="分享信息" className={`grid gap-1 rounded-xl border border-white/10 bg-white/6 p-1 ${isSingle ? "grid-cols-2" : "grid-cols-3"}`}>
+                {mobileTabs.map((tab) => {
+                  const active = activeMobilePanel === tab.id;
+                  return (
+                    <button key={tab.id} type="button" role="tab" aria-selected={active}
+                      onClick={() => setMobilePanel(tab.id)}
+                      className={`rounded-lg py-2 font-tech text-[11px] tracking-[0.12em] transition-all ${active ? "bg-yc-accent text-white shadow-[0_0_18px_rgba(255,138,61,0.35)]" : `${s.tMuted} hover:text-yc-accent`}`}>
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
-
-              {/* 空文件夹 */}
-              {share.empty_dirs.map((dir) => (
-                <div key={dir} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
-                  <Folder className="w-5 h-5 text-yc-accent flex-shrink-0" />
-                  <span className="text-sm truncate flex-1">{dir}</span>
-                  <span className={`font-tech text-[10px] ${s.tMuted}`}>空</span>
-                </div>
-              ))}
-
-              {/* 列表视图 */}
-              {viewMode === "list" && downloads.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {displayFiles.map((_dl, i) => {
-                    const dl = _dl as ShareFileDownload;
-                    const ft = classifyFile(dl.file_name);
-                    const isActive = i === selectedIdx;
-                    return (
-                    <div key={i}
-                      className={`${s.fileRow} flex items-center gap-3 px-3 py-2.5 rounded-lg border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"}`}>
-                      <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
-                        className="min-w-0 flex flex-1 items-center gap-3 text-left">
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
-                          {getFileIcon(ft)}
-                        </div>
-                        <span className="text-sm truncate flex-1 font-medium">{dl.file_name}</span>
-                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
-                      </button>
-                      <button type="button" onClick={() => void downloadOneFile(dl)}
-                        className={`shrink-0 p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
-                        title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    );
-                  })}
-                  {isCollapsed && (
-                    <button onClick={() => setListExpanded(true)}
-                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-                      展开更多（{hiddenFileCount} 项）
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* 网格视图 */}
-              {viewMode === "grid" && downloads.length > 0 && (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    {displayFiles.map((_dl, i) => {
-                      const dl = _dl as ShareFileDownload;
-                      const ft = classifyFile(dl.file_name);
-                      const isActive = i === selectedIdx;
-                      return (
-                      <div key={i}
-                        className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
-                        <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
-                          className="min-w-0 flex flex-col gap-2 text-left">
-                          <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
-                            {getFileIcon(ft)}
-                          </div>
-                          <span className="text-xs truncate font-medium">{dl.file_name}</span>
-                          <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
-                        </button>
-                        <button type="button" onClick={() => void downloadOneFile(dl)}
-                          className={`self-end p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
-                          title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      );
-                    })}
+              <div role="tabpanel" className="mt-3">
+                {!isSingle && activeMobilePanel === "files" && renderFileListContent()}
+                {activeMobilePanel === "overview" && renderOverviewStats()}
+                {activeMobilePanel === "scan" && (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_24px_rgba(255,138,61,0.08)]">
+                    {renderScanContent()}
                   </div>
-                  {isCollapsed && (
-                    <button onClick={() => setListExpanded(true)}
-                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-                      展开更多（{hiddenFileCount} 项）
-                    </button>
-                  )}
-                </>
-              )}
+                )}
+              </div>
+            </div>
 
-              {/* 没有 downloads 时显示文件名列表（结构与 list 视图项一致，避免就绪后跳动） */}
-              {downloads.length === 0 && (
-                <div className="flex flex-col gap-1.5">
-                  {displayFiles.map((f, i) => {
-                    const ft = classifyFile(f.file_name);
-                    return (
-                      <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
-                          {getFileIcon(ft)}
-                        </div>
-                        <span className="text-sm truncate flex-1 font-medium">{f.file_name}</span>
-                        <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</span>
-                      </div>
-                    );
-                  })}
-                  {isCollapsed && (
-                    <button onClick={() => setListExpanded(true)}
-                      className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-                      展开更多（{hiddenFileCount} 项）
-                    </button>
-                  )}
-                </div>
-              )}
+            {/* 桌面/平板：保持文件列表展开展示 */}
+            {!isSingle && <div className={`${s.glass} hidden p-4 sm:block`}>
+              {renderFileListContent()}
             </div>}
 
-            {/* 分享概览 + 扫码取件 */}
-            <div className={`${s.glass} p-4`}>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0 flex-1">
-                  <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>分享概览</p>
-                  <div className="flex flex-col gap-3 text-xs">
-                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>内容</span><span className="font-tech font-bold">{contentSummary}</span></div>
-                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>到期</span><span className="font-tech font-bold">{expiryLabel}</span></div>
-                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>下载</span><span className="font-tech font-bold">{downloadLabel}</span></div>
-                  </div>
-                </div>
-                <div className="hidden lg:flex shrink-0 items-center gap-3 border-l border-white/10 pl-4">
-                  {qr ? (
-                    <Image src={qr} alt="二维码" width={92} height={92} unoptimized className="rounded-lg" />
-                  ) : (
-                    <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} aria-hidden="true" />
-                  )}
-                  <div className={`text-xs ${s.tMuted}`}>
-                    <p className="font-tech text-[10px] tracking-[0.1em] mb-1">扫码取件</p>
-                    <p>手机扫码</p>
-                    <p>随时随地取件</p>
-                  </div>
+            {/* 桌面/平板：保持分享概览 + 扫码取件同屏展示 */}
+            <div className={`${s.glass} hidden p-4 sm:block`}>
+              <div className="flex items-center justify-between gap-3">
+                <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted}`}>分享概览</p>
+                <span className={`font-tech text-[10px] tracking-[0.1em] ${s.tMuted}`}>扫码取件</span>
+              </div>
+              <div className="mt-4 flex items-stretch gap-3 sm:gap-4">
+                {renderOverviewStats()}
+                <div className="w-[116px] shrink-0 rounded-2xl border border-white/10 bg-white/5 p-2.5 shadow-[0_0_24px_rgba(255,138,61,0.08)] sm:w-[156px] sm:p-3">
+                  {renderScanContent()}
                 </div>
               </div>
             </div>
@@ -837,7 +987,7 @@ export default function SharePage() {
         )}
 
         {/* 底部品牌 */}
-        <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.15em] ${s.tFaint}`}>由拿呀呀 SDP 自研引擎驱动</p>
+        <FooterSlogan />
       </div>
 
       {/* 举报 Modal */}

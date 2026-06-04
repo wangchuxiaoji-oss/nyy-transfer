@@ -88,7 +88,7 @@ export class SdpDemuxer {
         const seq = ++this.sourceReadSeq;
         const startedAt = performance.now();
         const readAbortController = new AbortController();
-        const onDisposeAbort = () => readAbortController.abort(this.abortController.signal.reason ?? new Error("source disposed"));
+        const onDisposeAbort = () => readAbortController.abort(this.abortController.signal.reason ?? createAbortError("source disposed"));
         if (this.abortController.signal.aborted) {
           onDisposeAbort();
         } else {
@@ -137,8 +137,8 @@ export class SdpDemuxer {
           this.abortController.signal.removeEventListener("abort", onDisposeAbort);
         }
       },
-      dispose: () => this.abortController.abort(),
-      prefetchProfile: "network",
+      dispose: () => this.abortController.abort(createAbortError("source disposed")),
+      prefetchProfile: this.prefetchProfile,
       maxCacheSize: 64 * 1024 * 1024,
     });
 
@@ -226,7 +226,7 @@ export class SdpDemuxer {
 
   abortActiveReads() {
     for (const controller of Array.from(this.activeReadControllers)) {
-      controller.abort(new Error("seek cancelled"));
+      controller.abort(createAbortError("seek cancelled"));
     }
   }
 
@@ -298,4 +298,14 @@ function isAc3Codec(codec: unknown): boolean {
   if (!codec) return false;
   const id = typeof codec === "string" ? codec : String(codec);
   return /^(ac-3|ac3|ec-3|eac3|e-ac-3|eac-3)$/i.test(id);
+}
+
+function createAbortError(message: string): Error {
+  try {
+    return new DOMException(message, "AbortError");
+  } catch {
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+  }
 }

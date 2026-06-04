@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import type { DebugLogFn } from "@/lib/debug";
 import { PlayerEngine, type BufferingState, type PlayerState } from "@/lib/sdp";
@@ -28,6 +28,12 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const [buffering, setBuffering] = useState<BufferingState | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  const reportRuntimeError = useCallback((reason: unknown) => {
+    if (isIgnorablePlayerAbort(reason)) return;
+    const message = reason instanceof Error ? reason.message : String(reason ?? "播放器发生未知错误");
+    debugLog?.("sdp-v2", "runtime:error", { error: message });
+    setError(formatPlayerError(message));
+  }, [debugLog]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -39,14 +45,24 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
     const engine = new PlayerEngine({ file, canvas, debugLog, prefetchProfile, seekParallelParts });
     engineRef.current = engine;
 
-    // 抑制 seek cancelled 导致的 unhandled rejection（mediabunny 内部 prefetch 不一定 catch abort 错误）
-    const suppressSeekAbort = (e: PromiseRejectionEvent) => {
-      const msg = e.reason instanceof Error ? e.reason.message : String(e.reason ?? "");
-      if (msg.includes("seek cancelled") || msg.includes("source disposed") || msg.includes("Range fetch aborted")) {
+    // 抑制播放器 Range 读取链路的已接管错误，避免 Next dev overlay 把它当成全局运行时错误。
+    const suppressHandledPlayerRejection = (e: PromiseRejectionEvent) => {
+      if (isHandledPlayerReadFailure(e.reason)) {
         e.preventDefault();
+        e.stopImmediatePropagation();
+        reportRuntimeError(e.reason);
       }
     };
-    window.addEventListener("unhandledrejection", suppressSeekAbort);
+    const suppressHandledPlayerError = (e: ErrorEvent) => {
+      const reason = e.error ?? e.message;
+      if (isHandledPlayerReadFailure(reason)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        reportRuntimeError(reason);
+      }
+    };
+    window.addEventListener("unhandledrejection", suppressHandledPlayerRejection, true);
+    window.addEventListener("error", suppressHandledPlayerError, true);
 
     engine.onStateChange = (s) => { if (!disposed) setState(s); };
     engine.onBufferingChange = (nextBuffering) => { if (!disposed) setBuffering(nextBuffering); };
@@ -55,36 +71,42 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       playheadRef.current = t;
       setCurrentTime(t);
     };
-    engine.onError = (msg) => { if (!disposed) setError(msg); };
+    engine.onError = (msg) => { if (!disposed && !isIgnorablePlayerAbort(msg)) setError(formatPlayerError(msg)); };
 
     const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
     if (debugEnabled) {
       (window as SdpDebugWindow).__nyySdpSeek = (seconds) => {
         const activeEngine = engineRef.current;
         if (!activeEngine) return false;
-        void activeEngine.seek(seconds);
+        const promise = activeEngine.seek(seconds);
+        promise.catch(reportRuntimeError);
         return true;
       };
     }
 
-    engine.init().then(() => {
-      if (!disposed && engine.state === "ready") {
-        setDuration(engine.duration);
-        // Prefetch feasibility probe (measurement only, gated by ?prefetch=1).
-        const prefetchEnabled =
-          typeof window !== "undefined" &&
-          new URLSearchParams(window.location.search).get("prefetch") === "1";
-        if (prefetchEnabled && engine.duration > 0) {
-          const probe = new PrefetchProbe(file, engine.duration, debugLog);
-          probeRef.current = probe;
-          probe.start(() => playheadRef.current);
+    engine.init()
+      .then(() => {
+        if (!disposed && engine.state === "ready") {
+          setDuration(engine.duration);
+          // Prefetch feasibility probe (measurement only, gated by ?prefetch=1).
+          const prefetchEnabled =
+            typeof window !== "undefined" &&
+            new URLSearchParams(window.location.search).get("prefetch") === "1";
+          if (prefetchEnabled && engine.duration > 0) {
+            const probe = new PrefetchProbe(file, engine.duration, debugLog);
+            probeRef.current = probe;
+            probe.start(() => playheadRef.current);
+          }
         }
-      }
-    });
+      })
+      .catch((err) => {
+        if (!disposed) reportRuntimeError(err);
+      });
 
     return () => {
       disposed = true;
-      window.removeEventListener("unhandledrejection", suppressSeekAbort);
+      window.removeEventListener("unhandledrejection", suppressHandledPlayerRejection, true);
+      window.removeEventListener("error", suppressHandledPlayerError, true);
       probeRef.current?.stop();
       probeRef.current = null;
       engine.dispose();
@@ -93,9 +115,15 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
         delete (window as SdpDebugWindow).__nyySdpSeek;
       }
     };
-  }, [file, debugLog]);
+  }, [file, debugLog, reportRuntimeError]);
 
-  const handlePlay = () => engineRef.current?.play();
+  const handlePlay = async () => {
+    try {
+      await engineRef.current?.play();
+    } catch (err) {
+      reportRuntimeError(err);
+    }
+  };
   const handlePause = () => engineRef.current?.pause();
   const canSeek = duration > 0 && state !== "loading" && state !== "idle";
   const viewState: PlayerViewState = {
@@ -133,7 +161,8 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
           pause: handlePause,
           seek: (seconds) => {
             // prewarmSeek 仅用于拖动预热，commitSeek 时直接 seek 即可
-            void engineRef.current?.seek(seconds);
+            const promise = engineRef.current?.seek(seconds);
+            promise?.catch(reportRuntimeError);
           },
           setVolume: (nextVolume) => {
             const safeVolume = Math.max(0, Math.min(1, nextVolume));
@@ -161,6 +190,37 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       )}
     </div>
   );
+}
+
+function isIgnorablePlayerAbort(reason: unknown): boolean {
+  const error = reason instanceof Error ? reason : null;
+  const message = error?.message ?? String(reason ?? "");
+  return error?.name === "AbortError"
+    || message.includes("seek cancelled")
+    || message.includes("source disposed")
+    || message.includes("Range fetch aborted");
+}
+
+function isHandledPlayerReadFailure(reason: unknown): boolean {
+  if (isIgnorablePlayerAbort(reason)) return true;
+  const error = reason instanceof Error ? reason : null;
+  const message = error?.message ?? String(reason ?? "");
+  const stack = error?.stack ?? "";
+  return message.includes("Range read timeout")
+    || message.includes("Range fetch failed")
+    || message.includes("Failed to fetch")
+    || stack.includes("range-file-reader")
+    || stack.includes("fetchChunkRange");
+}
+
+function formatPlayerError(message: string): string {
+  if (message.includes("Range read timeout") || message.includes("Range fetch failed") || message.includes("Failed to fetch")) {
+    return "远端视频读取超时，请稍后重试；如果仍失败，可以先下载文件后本地查看。";
+  }
+  if (message.startsWith("Demuxer init failed:")) {
+    return "视频初始化失败，请重试或下载文件查看。";
+  }
+  return message;
 }
 
 function mapSdpState(state: PlayerState): PlayerViewState["state"] {

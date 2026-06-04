@@ -42,33 +42,33 @@ test.describe("主题切换", () => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    // 找到主题切换按钮（☀、☾）
-    const lightBtn = page.locator("button:has-text('☀')");
-    const darkBtn = page.locator("button:has-text('☾')");
+    const themeBtn = page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first();
 
-    // 至少有 1 个主题按钮可见
-    const anyThemeBtn = page.locator("button").filter({ hasText: /^[☀☾]$/ });
-    await expect(anyThemeBtn.first()).toBeVisible({ timeout: 10000 });
+    await expect(themeBtn).toBeVisible({ timeout: 10000 });
 
-    // 点击浅色主题
-    await lightBtn.click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    const before = await page.locator("html").getAttribute("data-theme");
+    expect(before).toMatch(/^(light|dark)$/);
 
-    // 点击深色主题
-    await darkBtn.click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await themeBtn.click();
+    const afterFirstClick = await page.locator("html").getAttribute("data-theme");
+    expect(afterFirstClick).toMatch(/^(light|dark)$/);
+    expect(afterFirstClick).not.toBe(before);
+
+    await themeBtn.click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", before!);
   });
 
   test("主题持久化到 localStorage", async ({ page }) => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    const lightBtn = page.locator("button:has-text('☀')");
-    if (await lightBtn.isVisible()) {
-      await lightBtn.click();
-      const saved = await page.evaluate(() => localStorage.getItem("nyy-theme-4c"));
-      expect(saved).toBe("light");
-    }
+    const themeBtn = page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first();
+    await expect(themeBtn).toBeVisible({ timeout: 10000 });
+    const before = await page.locator("html").getAttribute("data-theme");
+    const expected = before === "light" ? "dark" : "light";
+    await themeBtn.click();
+    const saved = await page.evaluate(() => localStorage.getItem("nyy-theme-4c"));
+    expect(saved).toBe(expected);
   });
 });
 
@@ -181,9 +181,7 @@ test.describe("无障碍", () => {
     await page.waitForTimeout(3000);
 
     // 检查主题按钮存在
-    const buttons = page.locator("button").filter({ hasText: /^[☀☾]$/ });
-    const count = await buttons.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    await expect(page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first()).toBeVisible({ timeout: 10000 });
   });
 });
 
@@ -219,8 +217,7 @@ test.describe("4C CSS 模块", () => {
 // 用于复现并防止「视频播放器及其下方元素撑破手机屏幕宽度」的回归。
 const MOCK_CODE = "overflow-mock";
 const LONG_NAME = "超长文件名".repeat(8); // 制造一个会撑破布局的长名字
-// 关键：带 media_metadata（含音频轨）的 mp4 才会真正渲染 SDP 的 <canvas>，
-// 否则 SelfDevelopPlayer 不渲染 canvas，溢出回归就测不到真实场景。
+// 关键：保留 media_metadata 让 mock 接近真实视频文件；分享页默认预览走原生 <video>。
 const VIDEO_META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
 
 const MOCK_SHARE_INFO = {
@@ -290,7 +287,7 @@ test.describe("移动端横向溢出回归", () => {
     });
   }
 
-  test("两栏 grid 子项 min-width 为 0（防 canvas 撑破）", async ({ page }) => {
+  test("两栏 grid 子项 min-width 为 0（防播放器撑破）", async ({ page }) => {
     await mockReadyShare(page);
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
@@ -317,7 +314,7 @@ test.describe("移动端横向溢出回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
 
     const ratio = await page.evaluate(() => {
       const stage = document.querySelector('main [class*="stagePlayer"]') as HTMLElement | null;
@@ -361,8 +358,8 @@ test.describe("移动端横向溢出回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    // 等 share info 渲染出侧栏（“分享概览”出现），此时 download 仍在延迟中
-    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
+    // 等 share info 渲染出移动端 Tab，此时 download 仍在延迟中
+    await expect(page.locator("aside").getByRole("tab", { name: "文件" })).toBeVisible({ timeout: 5000 });
 
     // download 到达前：右侧栏整体的 Y 坐标（移动端单栏时它紧跟在播放器列之后，
     // 若操作栏从无到有撑开，aside 会被整体下推）
@@ -383,23 +380,16 @@ test.describe("移动端横向溢出回归", () => {
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
   });
 
-  // 真正复现「播放器超宽」：先确保 canvas 已渲染，再强制其固有宽度为大尺寸视频像素，
-  // 然后断言没有任何元素的可视宽度超过视口。
+  // 原生 video 预览也必须被舞台约束住，不能撑破移动端宽度。
   // 注意：不能只看 documentElement.scrollWidth —— main 上的 overflow-x-hidden 会把溢出裁掉、
   // 掩盖真实的“子元素比父级宽”问题，所以这里逐元素比对 boundingRect 宽度。
-  test("SDP canvas 固有宽度变大时播放器不超宽", async ({ page }) => {
+  test("原生 video 预览不超宽", async ({ page }) => {
     await mockReadyShare(page);
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
 
-    // 等待 SDP canvas 真正渲染出来
-    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
-
-    // 模拟 video-renderer 把 canvas 固有像素设为真实视频尺寸（1920x1080）
-    await page.evaluate(() => {
-      document.querySelectorAll("canvas").forEach((c) => { c.width = 1920; c.height = 1080; });
-    });
+    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(300);
 
     // 收集所有可视宽度超过视口的元素（允许 1px 误差）
@@ -416,6 +406,60 @@ test.describe("移动端横向溢出回归", () => {
     });
     expect(offenders, `溢出元素: ${JSON.stringify(offenders)}`).toEqual([]);
   });
+
+  test("原生 video 使用自定义 4C 控制条", async ({ page }) => {
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_SHARE_INFO) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_DOWNLOAD) })
+    );
+    await page.route("https://example.com/v.mp4", async () => {
+      await new Promise(() => undefined);
+    });
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
+
+    const video = page.locator('[data-testid="native-video-preview"] video').first();
+    await expect(video).toBeAttached();
+    expect(await video.getAttribute("controls")).toBeNull();
+    await expect(page.getByRole("button", { name: "播放" }).first()).toBeVisible();
+    await expect(page.getByRole("slider", { name: "播放进度" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
+  });
+
+  test("移动端 MKV 回退到 SDP 预览路径", async ({ page }) => {
+    const mkvInfo = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const mkvDownload = {
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/v.mkv", chunks: [], media_metadata: VIDEO_META },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
+    );
+    await page.route("https://example.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("mobile-mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
+  });
 });
 
 // ===== 反馈修复回归：浅色文字 / 移动端底栏 / QR =====
@@ -429,7 +473,7 @@ test.describe("反馈修复回归", () => {
     await page.waitForTimeout(1500);
 
     // 切到浅色主题
-    await page.locator("button:has-text('☀')").first().click();
+    await page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first().click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.waitForTimeout(300);
 
@@ -462,18 +506,49 @@ test.describe("反馈修复回归", () => {
     expect(hasFixedBottomBar).toBe(false);
   });
 
-  test("移动端隐藏二维码卡片", async ({ page }) => {
+  test("移动端通过扫码 Tab 展示二维码", async ({ page }) => {
     await mockReadyShare(page);
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(1500);
 
-    // 二维码 img 在移动端应不可见（lg:block + hidden）
+    await expect(page.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "扫码" }).click();
+
     const qr = page.locator('img[alt="二维码"]');
-    if (await qr.count() > 0) {
-      await expect(qr.first()).not.toBeVisible();
-    }
+    await expect(qr.first()).toBeVisible();
+  });
+
+  test("移动端顶部分享话术保持单行", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+
+    const metrics = await page.evaluate(() => {
+      const el = Array.from(document.querySelectorAll("p")).find((node) => node.textContent?.includes("有人通过拿呀²分享给你")) as HTMLElement | undefined;
+      if (!el) return null;
+      const style = getComputedStyle(el);
+      return {
+        height: el.getBoundingClientRect().height,
+        lineHeight: Number.parseFloat(style.lineHeight),
+      };
+    });
+    expect(metrics).not.toBeNull();
+    expect(metrics!.height).toBeLessThanOrEqual(metrics!.lineHeight + 1);
+  });
+
+  test("底部展示新 slogan 和官网", async ({ page }) => {
+    await mockReadyShare(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+
+    await expect(page.getByText("文件中转，就用拿呀²")).toBeVisible();
+    await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
   });
 });
 
@@ -573,7 +648,7 @@ test.describe("骨架屏回归", () => {
     const before = await asideTop();
     expect(before).not.toBeNull();
 
-    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("aside").getByRole("tab", { name: "概览" })).toBeVisible({ timeout: 5000 });
     await page.waitForTimeout(200);
     const after = await asideTop();
     expect(after).not.toBeNull();
@@ -626,11 +701,11 @@ test.describe("文件列表折叠/展开", () => {
     await page.waitForTimeout(2000);
 
     // 应显示 4 条文件行
-    const rows = page.locator("aside button[aria-label^='预览 ']");
+    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
     await expect(rows).toHaveCount(4);
 
     // 应有"展开更多"按钮，显示剩余数量
-    const expandBtn = page.locator("aside button:has-text('展开更多')");
+    const expandBtn = page.locator("aside button:has-text('展开更多'):visible");
     await expect(expandBtn).toBeVisible();
     await expect(expandBtn).toContainText("4 项"); // 8 - 4 = 4
   });
@@ -643,14 +718,14 @@ test.describe("文件列表折叠/展开", () => {
     await page.waitForTimeout(2000);
 
     // 点击展开
-    await page.locator("aside button:has-text('展开更多')").click();
+    await page.locator("aside button:has-text('展开更多'):visible").click();
 
     // 应显示全部 8 条
-    const rows = page.locator("aside button[aria-label^='预览 ']");
+    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
     await expect(rows).toHaveCount(8);
 
     // "展开更多"按钮应消失
-    await expect(page.locator("aside button:has-text('展开更多')")).not.toBeVisible();
+    await expect(page.locator("aside button:has-text('展开更多'):visible")).toHaveCount(0);
   });
 
   test("4 个文件不显示展开更多按钮", async ({ page }) => {
@@ -675,11 +750,11 @@ test.describe("文件列表折叠/展开", () => {
     await page.waitForTimeout(2000);
 
     // 4 条文件行
-    const rows = page.locator("aside button[aria-label^='预览 ']");
+    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
     await expect(rows).toHaveCount(4);
 
     // 无"展开更多"按钮
-    await expect(page.locator("aside button:has-text('展开更多')")).not.toBeVisible();
+    await expect(page.locator("aside button:has-text('展开更多'):visible")).toHaveCount(0);
   });
 });
 
@@ -712,36 +787,35 @@ test.describe("单/多文件按钮区布局回归", () => {
     );
   }
 
-  // 辅助：定位侧栏按钮容器（grid gap-2 且包含 复制链接 按钮）
+  // 辅助：定位侧栏主下载动作容器
   async function sidebarBtnArea(page: import("@playwright/test").Page) {
     return page.evaluate(() => {
-      const divs = Array.from(document.querySelectorAll("aside .grid.grid-cols-2.gap-2"));
-      const target = divs.find((d) => d.textContent?.includes("复制链接")) as HTMLElement | null;
+      const target = document.querySelector("aside [data-testid='share-actions']") as HTMLElement | null;
       return target ? Math.round(target.getBoundingClientRect().height) : null;
     });
   }
 
-  test("单文件侧栏按钮区高度 = 96px（不塌缩为 42px）", async ({ page }) => {
+  test("单文件侧栏主操作区高度 = 46px（只占一行）", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
     const h = await sidebarBtnArea(page);
     expect(h).not.toBeNull();
-    expect(h).toBe(96);
+    expect(h).toBe(46);
   });
 
   test("顶部展示分享话术和内容摘要，不展示分享码", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    await expect(page.getByText("有人通过拿呀²分享给你").first()).toBeVisible();
-    await expect(page.getByText("1 个视频 · 976.6 KB").first()).toBeVisible();
+    await expect(page.getByText("有人通过拿呀²分享给你").last()).toBeVisible();
+    await expect(page.getByText("1 个视频 · 976.6 KB").last()).toBeVisible();
     await expect(page.locator("main").getByText(MOCK_CODE, { exact: true })).toHaveCount(0);
   });
 
@@ -749,7 +823,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     await expect(page.locator("aside").getByText("文件列表")).toHaveCount(0);
 
@@ -760,14 +834,26 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.goto(`/${C}`);
     await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
-    await expect(page.locator("aside").getByText("文件列表")).toBeVisible();
+    await expect(page.locator("aside span:visible").filter({ hasText: "文件列表" })).toHaveCount(1);
+  });
+
+  test("移动端单文件只显示概览和扫码 Tab，默认概览", async ({ page }) => {
+    await setup(page, 1);
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`/${C}`);
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    await expect(page.getByRole("tab", { name: "文件" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "扫码" })).toBeVisible();
   });
 
   test("分享概览集中显示内容/到期/下载", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
     const overview = page.locator("aside > div").filter({ hasText: "分享概览" }).first();
@@ -779,7 +865,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     await expect(overview.getByText("0 次")).toBeVisible();
   });
 
-  test("多文件侧栏按钮区高度 = 96px（与单文件一致）", async ({ page }) => {
+  test("多文件侧栏主操作区高度 = 46px（与单文件一致）", async ({ page }) => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
@@ -788,19 +874,19 @@ test.describe("单/多文件按钮区布局回归", () => {
 
     const h = await sidebarBtnArea(page);
     expect(h).not.toBeNull();
-    expect(h).toBe(96);
+    expect(h).toBe(46);
   });
 
   test("单文件舞台无任何按钮、侧栏有'下载此文件'、无'整体打包下载'", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 舞台操作栏不应有任何按钮（单文件下载入口在侧栏，舞台已废弃）
-    const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
-    await expect(stageBtns).toHaveCount(0);
+    // 舞台信息区允许复制链接小按钮，但不应承载下载/打包动作
+    const stageDownloadBtns = page.locator("main [class*='stagePlayer'] ~ div button[aria-label^='下载'], main [class*='stagePlayer'] ~ div button:has-text('整体打包')");
+    await expect(stageDownloadBtns).toHaveCount(0);
 
     // 侧栏应有"下载此文件"按钮（单文件新下载入口）
     await expect(page.locator("aside button:has-text('下载此文件')")).toHaveCount(1);
@@ -816,9 +902,9 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // 舞台操作栏不再承载任何下载/打包按钮
-    const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
-    await expect(stageBtns).toHaveCount(0);
+    // 舞台信息区允许复制链接小按钮，但不应承载下载/打包动作
+    const stageDownloadBtns = page.locator("main [class*='stagePlayer'] ~ div button[aria-label^='下载'], main [class*='stagePlayer'] ~ div button:has-text('整体打包')");
+    await expect(stageDownloadBtns).toHaveCount(0);
 
     // 侧栏应有"下载当前文件"和"整体打包下载"
     await expect(page.locator("aside button:has-text('下载当前文件')")).toHaveCount(1);
@@ -830,7 +916,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     expect(count).toBeGreaterThanOrEqual(3);
   });
 
-  test("骨架→ready 侧栏按钮区高度始终 96px", async ({ page }) => {
+  test("骨架→ready 侧栏主操作区高度始终 46px", async ({ page }) => {
     // 延迟响应，捕获骨架阶段
     let relInfo: () => void; const gInfo = new Promise<void>((r) => { relInfo = r; });
     const gDl = new Promise<void>((r) => { setTimeout(r, 800); });
@@ -850,20 +936,20 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.goto(`/${C}`);
     await page.waitForTimeout(400);
 
-    // 骨架阶段侧栏按钮区高度
+    // 骨架阶段侧栏主操作区高度
     const skeletonH = await page.evaluate(() => {
-      const target = document.querySelector("aside .grid.grid-cols-2.gap-2.min-h-\\[96px\\]") as HTMLElement | null;
+      const target = document.querySelector("aside [data-testid='share-actions']") as HTMLElement | null;
       return target ? Math.round(target.getBoundingClientRect().height) : null;
     });
-    expect(skeletonH).toBe(96);
+    expect(skeletonH).toBe(46);
 
     // 释放 share info
     relInfo!();
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(300);
 
     const readyH = await sidebarBtnArea(page);
-    expect(readyH).toBe(96);
+    expect(readyH).toBe(46);
   });
 
   // 防闪烁回归：单文件 share 已到、downloads 尚未就绪时，侧栏不应出现
@@ -882,18 +968,18 @@ test.describe("单/多文件按钮区布局回归", () => {
 
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=复制链接").first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
-    // dl=0 阶段：侧栏应有 2 个按钮（获取中…+ 复制链接）
-    const btnArea = page.locator("aside .grid.grid-cols-2.gap-2.min-h-\\[96px\\]");
+    // dl=0 阶段：侧栏主操作区只有 1 个按钮（获取中…），复制链接已移到当前文件信息区
+    const btnArea = page.locator("aside [data-testid='share-actions']");
     const btns = btnArea.locator("button, a");
     let count = await btns.count();
-    expect(count).toBe(2);
+    expect(count).toBe(1);
 
     // 有"获取中…"禁用态按钮
     await expect(btnArea.getByText("获取中…").first()).toBeVisible();
-    await expect(btnArea.getByText("复制链接").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "复制链接" }).first()).toBeVisible();
 
     // 记录"获取中…"按钮位置（用于后续对比）
     const y0 = await btnArea.getByText("获取中…").first().boundingBox();
@@ -902,9 +988,9 @@ test.describe("单/多文件按钮区布局回归", () => {
     relDl!();
     await page.waitForTimeout(800);
 
-    // dl>0 阶段：按钮区仍 2 个按钮（下载 + 复制链接），"获取中…"→"下载"未消失
+    // dl>0 阶段：按钮区仍 1 个按钮（下载），"获取中…"→"下载"未消失
     count = await btns.count();
-    expect(count).toBe(2);
+    expect(count).toBe(1);
     await expect(btnArea.getByText("下载此文件", { exact: true }).first()).toBeVisible();
 
     // 按钮 Y 位置不变（无跳变）
