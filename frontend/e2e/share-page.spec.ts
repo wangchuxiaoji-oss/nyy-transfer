@@ -261,6 +261,63 @@ async function mockReadyShare(page: import("@playwright/test").Page) {
   });
 }
 
+async function installMockNativeVideo(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    type MockVideo = HTMLMediaElement & {
+      __nyyPaused?: boolean;
+      __nyyCurrentTime?: number;
+    };
+
+    let fullscreenElement: Element | null = null;
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+      configurable: true,
+      get() { return (this as MockVideo).__nyyPaused ?? true; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "ended", {
+      configurable: true,
+      get() { return false; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get() { return 120; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+      configurable: true,
+      get() { return (this as MockVideo).__nyyCurrentTime ?? 0; },
+      set(value: number) { (this as MockVideo).__nyyCurrentTime = value; },
+    });
+    HTMLMediaElement.prototype.play = function () {
+      const video = this as MockVideo;
+      video.__nyyPaused = false;
+      video.dispatchEvent(new Event("loadedmetadata"));
+      video.dispatchEvent(new Event("durationchange"));
+      video.dispatchEvent(new Event("play"));
+      video.dispatchEvent(new Event("playing"));
+      return Promise.resolve();
+    };
+    HTMLMediaElement.prototype.pause = function () {
+      const video = this as MockVideo;
+      video.__nyyPaused = true;
+      video.dispatchEvent(new Event("pause"));
+    };
+    HTMLElement.prototype.requestFullscreen = function () {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      fullscreenElement = this;
+      document.dispatchEvent(new Event("fullscreenchange"));
+      return Promise.resolve();
+    };
+    document.exitFullscreen = () => {
+      fullscreenElement = null;
+      document.dispatchEvent(new Event("fullscreenchange"));
+      return Promise.resolve();
+    };
+  });
+}
+
 test.describe("移动端横向溢出回归", () => {
   const viewports = [
     { label: "iPhone SE", width: 375, height: 667 },
@@ -429,6 +486,64 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
   });
 
+  test("原生播放器皮肤播放态、控制栏和全屏自动隐藏符合视频心智", async ({ page }) => {
+    await installMockNativeVideo(page);
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_SHARE_INFO) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_DOWNLOAD) })
+    );
+    await page.route("https://example.com/v.mp4", async () => {
+      await new Promise(() => undefined);
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    const preview = page.getByTestId("native-video-preview").first();
+    const controls = page.getByTestId("native-video-controls");
+    const progress = page.getByTestId("native-video-progress");
+    await expect(preview).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible();
+    await expect(controls.getByText("原生预览")).toHaveCount(0);
+    await expect(controls.getByRole("button", { name: /下载/ })).toHaveCount(0);
+
+    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "0");
+    await preview.hover({ position: { x: 100, y: 100 } });
+    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "1");
+    await page.mouse.move(5, 5);
+    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "0");
+
+    await page.getByTestId("native-video-center-toggle").click();
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+    await preview.hover({ position: { x: 120, y: 120 } });
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+
+    await preview.click({ position: { x: 120, y: 120 } });
+    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 1000 });
+    await page.getByTestId("native-video-center-toggle").click();
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+
+    await preview.focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 1000 });
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "全屏" }).click();
+    await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
+    await expect(controls).not.toHaveClass(/opacity-0/);
+    await page.waitForTimeout(3200);
+    await expect(controls).toHaveClass(/opacity-0/);
+    await preview.hover({ position: { x: 300, y: 220 } });
+    await expect(controls).not.toHaveClass(/opacity-0/);
+
+    await page.keyboard.press("f");
+    await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
+    await preview.dblclick({ position: { x: 300, y: 220 } });
+    await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
+  });
+
   test("移动端 MKV 回退到 SDP 预览路径", async ({ page }) => {
     const mkvInfo = {
       ...MOCK_SHARE_INFO,
@@ -459,6 +574,39 @@ test.describe("移动端横向溢出回归", () => {
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.getByTestId("mobile-mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
+  });
+
+  test("桌面端 MKV 优先尝试原生 video 预览", async ({ page }) => {
+    const mkvInfo = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const mkvDownload = {
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/v.mkv", chunks: [], media_metadata: VIDEO_META },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
+    );
+    await page.route("https://example.com/v.mkv", async () => {
+      await new Promise(() => undefined);
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"] video').first()).toBeAttached();
+    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
   });
 });
 

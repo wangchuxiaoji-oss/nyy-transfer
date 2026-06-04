@@ -1,23 +1,48 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Download, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 
 interface NativeVideoPlayerProps {
   src: string;
   type: string;
-  fileName: string;
-  onError: () => void;
-  onDownload: () => void;
+  onError: (message: string) => void;
 }
 
 type WebkitVideoElement = HTMLVideoElement & {
   webkitEnterFullscreen?: () => void;
 };
 
-export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: NativeVideoPlayerProps) {
+type SliderStyle = CSSProperties & {
+  "--nyy-thumb-opacity": string;
+};
+
+const FULLSCREEN_IDLE_HIDE_MS = 3000;
+const SEEK_STEP_SECONDS = 5;
+const SINGLE_CLICK_DELAY_MS = 180;
+const DOUBLE_TAP_DELAY_MS = 280;
+const VOLUME_STORAGE_KEY = "nyy-native-video-volume";
+const MUTED_STORAGE_KEY = "nyy-native-video-muted";
+
+export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const progressRef = useRef<HTMLInputElement>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const clickTimerRef = useRef<number | null>(null);
+  const tapTimerRef = useRef<number | null>(null);
+  const lastTapRef = useRef<{ at: number; x: number } | null>(null);
+  const ignoreNextClickRef = useRef(false);
+  const isPlayingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -27,6 +52,27 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
   const [volume, setVolumeState] = useState(1);
   const [scrubValue, setScrubValue] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [isPointerInside, setIsPointerInside] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenChromeVisible, setFullscreenChromeVisible] = useState(true);
+  const [touchChromeVisible, setTouchChromeVisible] = useState(true);
+  const [progressHover, setProgressHover] = useState(false);
+  const [hoverTime, setHoverTime] = useState(0);
+  const [hoverPct, setHoverPct] = useState(0);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    try {
+      const savedVolume = Number(localStorage.getItem(VOLUME_STORAGE_KEY));
+      if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
+        setVolumeState(savedVolume);
+      }
+      setIsMuted(localStorage.getItem(MUTED_STORAGE_KEY) === "true");
+    } catch {}
+  }, []);
 
   useEffect(() => {
     setIsPlaying(false);
@@ -34,11 +80,70 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
     setCurrentTime(0);
     setDuration(0);
     setBufferedPct(0);
-    setIsMuted(false);
-    setVolumeState(1);
     setScrubValue(0);
     setIsScrubbing(false);
+    setProgressHover(false);
+    setHoverTime(0);
+    setHoverPct(0);
+    setTouchChromeVisible(true);
+    setFullscreenChromeVisible(true);
   }, [src]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = isMuted;
+  }, [src, volume, isMuted]);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      const root = rootRef.current;
+      const nextFullscreen = Boolean(root && document.fullscreenElement === root);
+      setIsFullscreen(nextFullscreen);
+      setFullscreenChromeVisible(true);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleFullscreenHide = useCallback(() => {
+    clearHideTimer();
+    if (!isFullscreen || !isPlayingRef.current || isScrubbing) return;
+    hideTimerRef.current = window.setTimeout(() => {
+      setFullscreenChromeVisible(false);
+    }, FULLSCREEN_IDLE_HIDE_MS);
+  }, [clearHideTimer, isFullscreen, isScrubbing]);
+
+  const revealFullscreenChrome = useCallback(() => {
+    setFullscreenChromeVisible(true);
+    scheduleFullscreenHide();
+  }, [scheduleFullscreenHide]);
+
+  useEffect(() => {
+    if (!isPlaying || isScrubbing) {
+      clearHideTimer();
+      setFullscreenChromeVisible(true);
+      setTouchChromeVisible(true);
+      return;
+    }
+    scheduleFullscreenHide();
+    return clearHideTimer;
+  }, [clearHideTimer, isPlaying, isScrubbing, scheduleFullscreenHide]);
+
+  const persistVolumeState = (nextVolume: number, nextMuted: boolean) => {
+    try {
+      localStorage.setItem(VOLUME_STORAGE_KEY, String(nextVolume));
+      localStorage.setItem(MUTED_STORAGE_KEY, String(nextMuted));
+    } catch {}
+  };
 
   const syncBuffered = () => {
     const video = videoRef.current;
@@ -60,7 +165,7 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
     syncBuffered();
   };
 
-  const togglePlay = async () => {
+  const togglePlay = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused || video.ended) {
@@ -68,7 +173,17 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
     } else {
       video.pause();
     }
-  };
+  }, []);
+
+  const seekBy = useCallback((deltaSeconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const safeDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : duration;
+    const nextTime = Math.max(0, Math.min(safeDuration || 0, (video.currentTime || 0) + deltaSeconds));
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+    setScrubValue(nextTime);
+  }, [duration]);
 
   const commitSeek = () => {
     const video = videoRef.current;
@@ -76,42 +191,181 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
     if (!video || !Number.isFinite(duration) || duration <= 0) return;
     video.currentTime = scrubValue;
     setCurrentTime(scrubValue);
+    revealFullscreenChrome();
   };
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = !video.muted;
-    setIsMuted(video.muted);
-  };
+    const nextMuted = !video.muted;
+    video.muted = nextMuted;
+    setIsMuted(nextMuted);
+    persistVolumeState(video.volume, nextMuted);
+    revealFullscreenChrome();
+  }, [revealFullscreenChrome]);
 
   const setVolume = (nextVolume: number) => {
     const video = videoRef.current;
     const safeVolume = Math.max(0, Math.min(1, nextVolume));
+    const nextMuted = safeVolume === 0;
     setVolumeState(safeVolume);
+    setIsMuted(nextMuted);
+    persistVolumeState(safeVolume, nextMuted);
+    revealFullscreenChrome();
     if (!video) return;
     video.volume = safeVolume;
-    video.muted = safeVolume === 0;
-    setIsMuted(video.muted);
+    video.muted = nextMuted;
   };
 
-  const enterFullscreen = async () => {
+  const toggleFullscreen = useCallback(async () => {
     const root = rootRef.current;
     const video = videoRef.current as WebkitVideoElement | null;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen?.().catch(() => undefined);
+      return;
+    }
     if (root?.requestFullscreen) {
       await root.requestFullscreen().catch(() => undefined);
+      root.focus({ preventScroll: true });
       return;
     }
     video?.webkitEnterFullscreen?.();
+  }, []);
+
+  const handleVideoError = () => {
+    onError(getVideoErrorMessage(videoRef.current?.error ?? null));
   };
+
+  const handleActivity = useCallback(() => {
+    if (isFullscreen) revealFullscreenChrome();
+  }, [isFullscreen, revealFullscreenChrome]);
+
+  const handleProgressPointer = (event: ReactPointerEvent<HTMLInputElement>) => {
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    setHoverPct(pct * 100);
+    setHoverTime(pct * duration);
+    handleActivity();
+  };
+
+  const handleKeyboardShortcut = useCallback((event: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
+    if (isInteractiveTarget(event.target)) return;
+    const key = event.key.toLowerCase();
+    if (key === " " || key === "spacebar") {
+      event.preventDefault();
+      void togglePlay();
+    } else if (key === "arrowleft") {
+      event.preventDefault();
+      seekBy(-SEEK_STEP_SECONDS);
+    } else if (key === "arrowright") {
+      event.preventDefault();
+      seekBy(SEEK_STEP_SECONDS);
+    } else if (key === "f") {
+      event.preventDefault();
+      void toggleFullscreen();
+    } else if (key === "m") {
+      event.preventDefault();
+      toggleMute();
+    } else {
+      return;
+    }
+    handleActivity();
+  }, [handleActivity, seekBy, toggleFullscreen, toggleMute, togglePlay]);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => handleKeyboardShortcut(event);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [handleKeyboardShortcut, isFullscreen]);
+
+  const handleStageClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (ignoreNextClickRef.current || isControlTarget(event.target) || event.detail > 1) return;
+    rootRef.current?.focus({ preventScroll: true });
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null;
+      void togglePlay();
+    }, SINGLE_CLICK_DELAY_MS);
+  };
+
+  const handleStageDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isControlTarget(event.target)) return;
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    void toggleFullscreen();
+  };
+
+  const handleStagePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch" || isControlTarget(event.target)) return;
+    ignoreNextClickRef.current = true;
+    window.setTimeout(() => { ignoreNextClickRef.current = false; }, 320);
+    rootRef.current?.focus({ preventScroll: true });
+    revealFullscreenChrome();
+    const now = Date.now();
+    const previous = lastTapRef.current;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const isDoubleTap = previous && now - previous.at <= DOUBLE_TAP_DELAY_MS && Math.abs(previous.x - event.clientX) < 80;
+    if (isDoubleTap) {
+      if (tapTimerRef.current !== null) {
+        window.clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
+      lastTapRef.current = null;
+      seekBy(event.clientX < rect.left + rect.width / 2 ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS);
+      setTouchChromeVisible(true);
+      return;
+    }
+
+    lastTapRef.current = { at: now, x: event.clientX };
+    if (tapTimerRef.current !== null) window.clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = window.setTimeout(() => {
+      tapTimerRef.current = null;
+      if (isPlayingRef.current) setTouchChromeVisible((visible) => !visible);
+      else setTouchChromeVisible(true);
+    }, DOUBLE_TAP_DELAY_MS);
+  };
+
+  useEffect(() => () => {
+    clearHideTimer();
+    if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    if (tapTimerRef.current !== null) window.clearTimeout(tapTimerRef.current);
+  }, [clearHideTimer]);
 
   const sliderTime = isScrubbing ? scrubValue : currentTime;
   const playable = duration > 0 && Number.isFinite(duration);
   const progressPct = playable ? Math.max(0, Math.min(100, (sliderTime / duration) * 100)) : 0;
-  const rangeBackground = `linear-gradient(90deg, #FF8A3D 0%, #FF8A3D ${progressPct}%, rgba(255,255,255,0.34) ${progressPct}%, rgba(255,255,255,0.34) ${Math.max(progressPct, bufferedPct)}%, rgba(255,255,255,0.14) ${Math.max(progressPct, bufferedPct)}%, rgba(255,255,255,0.14) 100%)`;
+  const bufferEndPct = Math.max(progressPct, bufferedPct);
+  const rangeBackground = `linear-gradient(90deg, #FF8A3D 0%, #FF8A3D ${progressPct}%, rgba(255,255,255,0.34) ${progressPct}%, rgba(255,255,255,0.34) ${bufferEndPct}%, rgba(255,255,255,0.14) ${bufferEndPct}%, rgba(255,255,255,0.14) 100%)`;
+  const fullscreenChromeHidden = isFullscreen && isPlaying && !fullscreenChromeVisible && !isScrubbing;
+  const touchChromeHidden = !isFullscreen && isPlaying && !touchChromeVisible && !isScrubbing;
+  const chromeHidden = fullscreenChromeHidden || touchChromeHidden;
+  const thumbVisible = isScrubbing || progressHover || (isPointerInside && !chromeHidden);
+  const bubbleVisible = playable && (progressHover || isScrubbing) && !chromeHidden;
+  const bubblePct = isScrubbing ? progressPct : hoverPct;
+  const bubbleTime = isScrubbing ? scrubValue : hoverTime;
+  const sliderStyle: SliderStyle = {
+    background: rangeBackground,
+    "--nyy-thumb-opacity": thumbVisible ? "1" : "0",
+  };
 
   return (
-    <div ref={rootRef} data-testid="native-video-preview" className="group absolute inset-0 overflow-hidden bg-black text-white">
+    <div
+      ref={rootRef}
+      data-testid="native-video-preview"
+      tabIndex={0}
+      onClick={handleStageClick}
+      onDoubleClick={handleStageDoubleClick}
+      onPointerUp={handleStagePointerUp}
+      onPointerMove={handleActivity}
+      onMouseEnter={() => { setIsPointerInside(true); handleActivity(); }}
+      onMouseLeave={() => { setIsPointerInside(false); setProgressHover(false); }}
+      onKeyDown={handleKeyboardShortcut}
+      className={`group absolute inset-0 overflow-hidden bg-black text-white outline-none ${fullscreenChromeHidden ? "cursor-none" : "cursor-default"}`}
+    >
       <video
         ref={videoRef}
         src={src}
@@ -125,9 +379,9 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
           setCurrentTime(video.currentTime || 0);
         }}
         onProgress={syncBuffered}
-        onPlay={() => { setIsPlaying(true); setIsWaiting(false); }}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
+        onPlay={() => { setIsPlaying(true); setIsWaiting(false); setTouchChromeVisible(true); }}
+        onPause={() => { setIsPlaying(false); setTouchChromeVisible(true); }}
+        onEnded={() => { setIsPlaying(false); setTouchChromeVisible(true); }}
         onWaiting={() => setIsWaiting(true)}
         onPlaying={() => { setIsWaiting(false); setIsPlaying(true); }}
         onCanPlay={() => setIsWaiting(false)}
@@ -136,54 +390,85 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
           if (!video) return;
           setIsMuted(video.muted);
           setVolumeState(video.volume);
+          persistVolumeState(video.volume, video.muted);
         }}
-        onError={onError}
+        onError={handleVideoError}
         className="absolute inset-0 h-full w-full bg-black object-contain"
       >
         <source src={src} type={type} />
       </video>
 
-      <button
-        type="button"
-        onClick={() => void togglePlay()}
-        aria-label={isPlaying ? "暂停" : "播放"}
-        className={`absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-200 ${isPlaying ? "opacity-0 group-hover:opacity-100" : "opacity-100"}`}
-      >
-        <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/35 bg-[#FF8A3D] text-white shadow-[0_0_34px_rgba(255,138,61,0.55),0_16px_44px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-transform hover:scale-105">
-          {isPlaying ? <Pause className="h-8 w-8 fill-current stroke-[1.5]" /> : <Play className="ml-1 h-8 w-8 fill-current stroke-[1.5]" />}
-        </span>
-      </button>
+      {!isPlaying && (
+        <button
+          type="button"
+          data-video-control
+          data-testid="native-video-center-toggle"
+          onClick={(event) => { event.stopPropagation(); void togglePlay(); }}
+          aria-label="播放"
+          className="absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-200"
+        >
+          <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/35 bg-[#FF8A3D] text-white shadow-[0_0_34px_rgba(255,138,61,0.55),0_16px_44px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-transform hover:scale-105">
+            <Play className="ml-1 h-8 w-8 fill-current stroke-[1.5]" />
+          </span>
+        </button>
+      )}
 
       {isWaiting && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/20 text-xs text-white/80">
-          <span className="rounded-full border border-white/15 bg-black/45 px-3 py-1.5 font-tech tracking-[0.12em] backdrop-blur-xl">缓冲中</span>
+        <div data-testid="native-video-buffering" className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#FF8A3D]/35 bg-black/35 backdrop-blur-xl">
+            <span className="absolute h-10 w-10 animate-ping rounded-full border border-[#FF8A3D]/35" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#FF8A3D] shadow-[0_0_18px_rgba(255,138,61,0.7)]" />
+          </span>
         </div>
       )}
 
-      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12 opacity-100 transition-opacity duration-200 sm:opacity-85 sm:group-hover:opacity-100">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="min-w-0 truncate font-tech text-[10px] tracking-[0.12em] text-white/65">原生预览 · {fileName}</p>
-          <button type="button" onClick={onDownload} className="hidden items-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-2.5 py-1 text-[10px] text-white/70 transition hover:border-[#FF8A3D]/80 hover:text-[#FF8A3D] sm:flex" aria-label="下载此文件">
-            <Download className="h-3.5 w-3.5" /> 下载
-          </button>
+      <div
+        data-video-control
+        data-testid="native-video-controls"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12 transition-opacity duration-300 ${chromeHidden ? "pointer-events-none opacity-0" : "opacity-100 sm:opacity-85 sm:group-hover:opacity-100"}`}
+      >
+        <div className="relative mb-2 pt-5">
+          {bubbleVisible && (
+            <span
+              aria-hidden="true"
+              data-testid="native-video-progress-bubble"
+              className="pointer-events-none absolute top-0 -translate-x-1/2 rounded-md border border-white/12 bg-black/80 px-2 py-1 font-tech text-[10px] tabular-nums text-white/86 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+              style={{ left: `${bubblePct}%` }}
+            >
+              {formatVideoTime(bubbleTime)}
+            </span>
+          )}
+          <input
+            ref={progressRef}
+            data-testid="native-video-progress"
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Number.isFinite(sliderTime) ? sliderTime : 0}
+            disabled={!playable}
+            aria-label="播放进度"
+            onPointerEnter={(event) => { setProgressHover(true); handleProgressPointer(event); }}
+            onPointerMove={handleProgressPointer}
+            onPointerLeave={() => setProgressHover(false)}
+            onMouseDown={() => { setIsScrubbing(true); setScrubValue(currentTime); setProgressHover(true); revealFullscreenChrome(); }}
+            onTouchStart={() => { setIsScrubbing(true); setScrubValue(currentTime); setProgressHover(true); revealFullscreenChrome(); }}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setScrubValue(next);
+              if (playable) {
+                setHoverPct((next / duration) * 100);
+                setHoverTime(next);
+              }
+            }}
+            onMouseUp={commitSeek}
+            onTouchEnd={commitSeek}
+            className="native-video-player__range h-1.5 w-full cursor-pointer appearance-none rounded-full accent-[#FF8A3D] disabled:cursor-not-allowed disabled:opacity-50"
+            style={sliderStyle}
+          />
         </div>
-
-        <input
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={0.1}
-          value={Number.isFinite(sliderTime) ? sliderTime : 0}
-          disabled={!playable}
-          aria-label="播放进度"
-          onMouseDown={() => { setIsScrubbing(true); setScrubValue(currentTime); }}
-          onTouchStart={() => { setIsScrubbing(true); setScrubValue(currentTime); }}
-          onChange={(event) => setScrubValue(Number(event.target.value))}
-          onMouseUp={commitSeek}
-          onTouchEnd={commitSeek}
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full accent-[#FF8A3D] disabled:cursor-not-allowed disabled:opacity-50 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_0_0_3px_rgba(255,138,61,0.35)]"
-          style={{ background: rangeBackground }}
-        />
 
         <div className="mt-2 flex items-center gap-2">
           <button type="button" onClick={() => void togglePlay()} className={controlButtonClass} aria-label={isPlaying ? "暂停" : "播放"}>
@@ -204,17 +489,65 @@ export function NativeVideoPlayer({ src, type, fileName, onError, onDownload }: 
               className="hidden h-1 w-16 cursor-pointer appearance-none rounded-full bg-white/18 accent-[#FF8A3D] sm:block"
               aria-label="音量"
             />
-            <button type="button" onClick={() => void enterFullscreen()} className={controlButtonClass} aria-label="全屏">
-              <Maximize2 className="h-4 w-4" />
+            <button type="button" onClick={() => void toggleFullscreen()} className={controlButtonClass} aria-label={isFullscreen ? "退出全屏" : "全屏"}>
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </button>
           </div>
         </div>
       </div>
+
+      <style>{`
+        .native-video-player__range::-webkit-slider-thumb {
+          height: 0.875rem;
+          width: 0.875rem;
+          appearance: none;
+          border-radius: 9999px;
+          background: #fff;
+          box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.35);
+          opacity: var(--nyy-thumb-opacity, 0);
+          transition: opacity 180ms ease;
+        }
+        .native-video-player__range::-moz-range-thumb {
+          height: 0.875rem;
+          width: 0.875rem;
+          border: 0;
+          border-radius: 9999px;
+          background: #fff;
+          box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.35);
+          opacity: var(--nyy-thumb-opacity, 0);
+          transition: opacity 180ms ease;
+        }
+      `}</style>
     </div>
   );
 }
 
 const controlButtonClass = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/8 text-white/86 backdrop-blur-xl transition hover:border-[#FF8A3D]/70 hover:bg-[#FF8A3D]/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF8A3D]";
+
+function isControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest("[data-video-control]"));
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest("button,input,textarea,select,a,[role='button'],[role='slider']"));
+}
+
+function getVideoErrorMessage(error: MediaError | null): string {
+  switch (error?.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "视频加载已取消，请重新播放。";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "视频网络加载失败，请刷新页面或重新获取下载链接。";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "浏览器解码失败，可能是不支持当前视频编码。";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "浏览器不支持此视频格式或下载链接不可用。";
+    default:
+      return "视频无法播放，请下载后本地查看。";
+  }
+}
 
 function formatVideoTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";

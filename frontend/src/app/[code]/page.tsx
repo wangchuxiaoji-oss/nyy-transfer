@@ -118,25 +118,30 @@ function isMkvFile(file: ShareFileDownload): boolean {
   return file.file_name.split(".").pop()?.toLowerCase() === "mkv";
 }
 
-function NativeVideoPreview({ file, onDownload, forceUnsupported = false }: { file: ShareFileDownload; onDownload: () => void; forceUnsupported?: boolean }) {
+function NativeVideoPreview({ file, onDownload }: { file: ShareFileDownload; onDownload: () => void }) {
   const [failed, setFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。");
   const mime = getNativeVideoMime(file);
   const safeUrl = isSafeUrl(file.download_url);
 
   useEffect(() => {
     setFailed(false);
-    if (forceUnsupported || !safeUrl || typeof document === "undefined") return;
+    setErrorMessage("可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。");
+    if (!safeUrl || typeof document === "undefined") return;
+    // Chrome 对 video/x-matroska 的 canPlayType 经常返回空字符串，
+    // 但实际仍可能播放成功；MKV 必须交给真实 video 加载结果判断。
+    if (mime === "video/x-matroska") return;
     const probe = document.createElement("video");
     if (mime && probe.canPlayType(mime) === "") setFailed(true);
-  }, [file.download_url, forceUnsupported, mime, safeUrl]);
+  }, [file.download_url, mime, safeUrl]);
 
-  if (forceUnsupported || !safeUrl || failed) {
+  if (!safeUrl || failed) {
     return (
       <div data-testid="native-video-preview" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
         <div className="w-16 h-16 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-2xl text-yc-accent">▶</div>
         <div>
           <p className={`font-tech text-sm font-bold tracking-widest ${s.tPrimary}`}>浏览器无法直接预览此视频</p>
-          <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。</p>
+          <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>{errorMessage}</p>
         </div>
         <button type="button" onClick={onDownload}
           className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
@@ -146,7 +151,7 @@ function NativeVideoPreview({ file, onDownload, forceUnsupported = false }: { fi
     );
   }
 
-  return <NativeVideoPlayer src={file.download_url} type={mime} fileName={file.file_name} onError={() => setFailed(true)} onDownload={onDownload} />;
+  return <NativeVideoPlayer src={file.download_url} type={mime} onError={(message) => { setErrorMessage(message); setFailed(true); }} />;
 }
 
 export default function SharePage() {
@@ -779,7 +784,7 @@ export default function SharePage() {
                           <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
                         </div>
                         <div className="hidden sm:block">
-                          <NativeVideoPreview file={selectedFile} forceUnsupported onDownload={() => { void downloadOneFile(selectedFile); }} />
+                          <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
                         </div>
                       </>
                     ) : (
