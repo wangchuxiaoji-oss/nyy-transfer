@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -249,16 +248,22 @@ export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps
     handleActivity();
   };
 
-  const handleKeyboardShortcut = useCallback((event: KeyboardEvent | ReactKeyboardEvent<HTMLDivElement>) => {
-    if (isInteractiveTarget(event.target)) return;
+  const handleKeyboardShortcut = useCallback((event: KeyboardEvent) => {
+    const target = event.target;
+    // 文本输入框内不抢按键
+    if (isTextInputTarget(target)) return;
+    const onSlider = isRangeTarget(target);
     const key = event.key.toLowerCase();
     if (key === " " || key === "spacebar") {
       event.preventDefault();
       void togglePlay();
     } else if (key === "arrowleft") {
+      // 焦点在滑块上时保留原生方向键行为（进度/音量微调）
+      if (onSlider) return;
       event.preventDefault();
       seekBy(-SEEK_STEP_SECONDS);
     } else if (key === "arrowright") {
+      if (onSlider) return;
       event.preventDefault();
       seekBy(SEEK_STEP_SECONDS);
     } else if (key === "f") {
@@ -274,11 +279,19 @@ export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps
   }, [handleActivity, seekBy, toggleFullscreen, toggleMute, togglePlay]);
 
   useEffect(() => {
-    if (!isFullscreen) return;
-    const onKeyDown = (event: KeyboardEvent) => handleKeyboardShortcut(event);
+    // 仅注册一个全局监听器，避免与 root 的 React onKeyDown 重复触发（重复会让空格 play→pause 互相抵消）
+    const onKeyDown = (event: KeyboardEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const active = document.activeElement;
+      const withinPlayer =
+        document.fullscreenElement === root || root === active || root.contains(active);
+      if (!withinPlayer) return;
+      handleKeyboardShortcut(event);
+    };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [handleKeyboardShortcut, isFullscreen]);
+  }, [handleKeyboardShortcut]);
 
   const handleStageClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (ignoreNextClickRef.current || isControlTarget(event.target) || event.detail > 1) return;
@@ -363,7 +376,6 @@ export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps
       onPointerMove={handleActivity}
       onMouseEnter={() => { setIsPointerInside(true); handleActivity(); }}
       onMouseLeave={() => { setIsPointerInside(false); setProgressHover(false); }}
-      onKeyDown={handleKeyboardShortcut}
       className={`group absolute inset-0 overflow-hidden bg-black text-white outline-none ${fullscreenChromeHidden ? "cursor-none" : "cursor-default"}`}
     >
       <video
@@ -415,9 +427,10 @@ export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps
 
       {isWaiting && (
         <div data-testid="native-video-buffering" className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-          <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#FF8A3D]/35 bg-black/35 backdrop-blur-xl">
-            <span className="absolute h-10 w-10 animate-ping rounded-full border border-[#FF8A3D]/35" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#FF8A3D] shadow-[0_0_18px_rgba(255,138,61,0.7)]" />
+          <span className="relative flex items-center justify-center">
+            <span className="absolute h-9 w-9 animate-ping rounded-full bg-[#FF8A3D]/45" />
+            <span className="absolute h-6 w-6 animate-ping rounded-full bg-[#FFB169]/55 [animation-delay:160ms]" />
+            <span className="h-3.5 w-3.5 animate-pulse rounded-full bg-[#FFA24D] shadow-[0_0_16px_rgba(255,138,61,0.95),0_0_36px_rgba(255,162,77,0.65)]" />
           </span>
         </div>
       )}
@@ -528,10 +541,17 @@ function isControlTarget(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest("[data-video-control]"));
 }
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
+function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
-  return Boolean(target.closest("button,input,textarea,select,a,[role='button'],[role='slider']"));
+  if (target instanceof HTMLInputElement) {
+    return target.type !== "range" && target.type !== "button";
+  }
+  return Boolean(target.closest("textarea,select,[contenteditable='true']"));
+}
+
+function isRangeTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement && target.type === "range";
 }
 
 function getVideoErrorMessage(error: MediaError | null): string {
