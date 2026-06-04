@@ -42,13 +42,12 @@ test.describe("主题切换", () => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    // 找到主题切换按钮（☀、◐、☾）
+    // 找到主题切换按钮（☀、☾）
     const lightBtn = page.locator("button:has-text('☀')");
     const darkBtn = page.locator("button:has-text('☾')");
-    const autoBtn = page.locator("button:has-text('◐')");
 
     // 至少有 1 个主题按钮可见
-    const anyThemeBtn = page.locator("button").filter({ hasText: /^[☀☾◐]$/ });
+    const anyThemeBtn = page.locator("button").filter({ hasText: /^[☀☾]$/ });
     await expect(anyThemeBtn.first()).toBeVisible({ timeout: 10000 });
 
     // 点击浅色主题
@@ -58,11 +57,6 @@ test.describe("主题切换", () => {
     // 点击深色主题
     await darkBtn.click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-
-    // 点击自动主题
-    await autoBtn.click();
-    const autoTheme = await page.locator("html").getAttribute("data-theme");
-    expect(["dark", "light"]).toContain(autoTheme);
   });
 
   test("主题持久化到 localStorage", async ({ page }) => {
@@ -187,7 +181,7 @@ test.describe("无障碍", () => {
     await page.waitForTimeout(3000);
 
     // 检查主题按钮存在
-    const buttons = page.locator("button").filter({ hasText: /^[☀☾◐]$/ });
+    const buttons = page.locator("button").filter({ hasText: /^[☀☾]$/ });
     const count = await buttons.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
@@ -379,8 +373,8 @@ test.describe("移动端横向溢出回归", () => {
     const before = await asideTop();
     expect(before).not.toBeNull();
 
-    // 等 download 返回、真实按钮渲染（“打包”出现）
-    await expect(page.locator("text=打包").first()).toBeVisible({ timeout: 5000 });
+    // 等 download 返回、真实按钮渲染（整体打包下载出现）
+    await expect(page.locator("aside button:has-text('整体打包下载')").first()).toBeVisible({ timeout: 5000 });
     await page.waitForTimeout(300);
 
     const after = await asideTop();
@@ -718,10 +712,10 @@ test.describe("单/多文件按钮区布局回归", () => {
     );
   }
 
-  // 辅助：定位侧栏按钮容器（flex-col gap-2 且包含 复制链接 按钮）
+  // 辅助：定位侧栏按钮容器（grid gap-2 且包含 复制链接 按钮）
   async function sidebarBtnArea(page: import("@playwright/test").Page) {
     return page.evaluate(() => {
-      const divs = Array.from(document.querySelectorAll("aside .flex.flex-col.gap-2"));
+      const divs = Array.from(document.querySelectorAll("aside .grid.grid-cols-2.gap-2"));
       const target = divs.find((d) => d.textContent?.includes("复制链接")) as HTMLElement | null;
       return target ? Math.round(target.getBoundingClientRect().height) : null;
     });
@@ -764,7 +758,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.unroute("https://example.com/**");
     await setup(page, 3);
     await page.goto(`/${C}`);
-    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     await expect(page.locator("aside").getByText("文件列表")).toBeVisible();
   });
@@ -789,7 +783,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
     const h = await sidebarBtnArea(page);
@@ -797,7 +791,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     expect(h).toBe(96);
   });
 
-  test("单文件舞台无任何按钮、侧栏有'下载'、无'打包下载'", async ({ page }) => {
+  test("单文件舞台无任何按钮、侧栏有'下载此文件'、无'整体打包下载'", async ({ page }) => {
     await setup(page, 1);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
@@ -808,26 +802,27 @@ test.describe("单/多文件按钮区布局回归", () => {
     const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
     await expect(stageBtns).toHaveCount(0);
 
-    // 侧栏应有"下载"按钮（单文件新下载入口）
-    await expect(page.locator("aside button:has-text('下载')")).toHaveCount(1);
+    // 侧栏应有"下载此文件"按钮（单文件新下载入口）
+    await expect(page.locator("aside button:has-text('下载此文件')")).toHaveCount(1);
 
-    // 侧栏不应有"打包下载"
-    await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(0);
+    // 侧栏不应有"整体打包下载"
+    await expect(page.locator("aside button:has-text('整体打包下载')")).toHaveCount(0);
   });
 
-  test("多文件舞台无操作按钮、列表有下载图标、侧栏有'打包下载'", async ({ page }) => {
+  test("多文件舞台无操作按钮、列表有下载图标、侧栏有'下载当前文件'和'整体打包下载'", async ({ page }) => {
     await setup(page, 3);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${C}`);
-    await page.locator("text=打包下载").first().waitFor({ timeout: 10000 });
+    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
 
     // 舞台操作栏不再承载任何下载/打包按钮
     const stageBtns = page.locator("main [class*='stagePlayer'] ~ div a, main [class*='stagePlayer'] ~ div button");
     await expect(stageBtns).toHaveCount(0);
 
-    // 侧栏应有"打包下载"
-    await expect(page.locator("aside button:has-text('打包下载')")).toHaveCount(1);
+    // 侧栏应有"下载当前文件"和"整体打包下载"
+    await expect(page.locator("aside button:has-text('下载当前文件')")).toHaveCount(1);
+    await expect(page.locator("aside button:has-text('整体打包下载')")).toHaveCount(1);
 
     // 文件列表每项应有下载图标（aria-label 含"下载"）
     const icons = page.locator("button[aria-label*='下载']");
@@ -857,7 +852,7 @@ test.describe("单/多文件按钮区布局回归", () => {
 
     // 骨架阶段侧栏按钮区高度
     const skeletonH = await page.evaluate(() => {
-      const target = document.querySelector("aside .min-h-\\[96px\\]") as HTMLElement | null;
+      const target = document.querySelector("aside .grid.grid-cols-2.gap-2.min-h-\\[96px\\]") as HTMLElement | null;
       return target ? Math.round(target.getBoundingClientRect().height) : null;
     });
     expect(skeletonH).toBe(96);
@@ -891,7 +886,7 @@ test.describe("单/多文件按钮区布局回归", () => {
     await page.waitForTimeout(500);
 
     // dl=0 阶段：侧栏应有 2 个按钮（获取中…+ 复制链接）
-    const btnArea = page.locator("aside .flex.flex-col.gap-2.min-h-\\[96px\\]");
+    const btnArea = page.locator("aside .grid.grid-cols-2.gap-2.min-h-\\[96px\\]");
     const btns = btnArea.locator("button, a");
     let count = await btns.count();
     expect(count).toBe(2);
@@ -910,10 +905,10 @@ test.describe("单/多文件按钮区布局回归", () => {
     // dl>0 阶段：按钮区仍 2 个按钮（下载 + 复制链接），"获取中…"→"下载"未消失
     count = await btns.count();
     expect(count).toBe(2);
-    await expect(btnArea.getByText("下载", { exact: true }).first()).toBeVisible();
+    await expect(btnArea.getByText("下载此文件", { exact: true }).first()).toBeVisible();
 
     // 按钮 Y 位置不变（无跳变）
-    const y1 = await btnArea.getByText("下载", { exact: true }).first().boundingBox();
+    const y1 = await btnArea.getByText("下载此文件", { exact: true }).first().boundingBox();
     if (y0 && y1) {
       expect(Math.abs(y0.y - y1.y)).toBeLessThanOrEqual(1);
     }

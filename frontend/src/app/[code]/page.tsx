@@ -20,6 +20,7 @@ import s from "./share-4c.module.css";
 
 type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "error";
 type FileType = "video" | "image" | "pdf" | "audio" | "text" | "other";
+type DownloadLinksState = "idle" | "loading" | "ready" | "error";
 
 // 分类文件类型（用于选择图标 + 预览策略）
 function classifyFile(name: string): FileType {
@@ -112,9 +113,10 @@ export default function SharePage() {
   const [reported, setReported] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
-  const [theme, setTheme] = useState<"dark" | "light" | "auto">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [listExpanded, setListExpanded] = useState(false);
+  const [downloadState, setDownloadState] = useState<DownloadLinksState>("idle");
 
   // 文件列表折叠阈值：超过 COLLAPSE_THRESHOLD 个文件时默认折叠，只显示 COLLAPSE_SHOW 条
   const COLLAPSE_THRESHOLD = 5;
@@ -127,10 +129,10 @@ export default function SharePage() {
   // 主题切换按钮：主布局内嵌到 Topbar，状态页通过 className 固定到右上角
   const ThemeToggle = ({ className = "" }: { className?: string }) => (
     <div className={`flex gap-1 bg-white/6 rounded-lg border border-white/10 backdrop-blur-xl p-1 ${className}`}>
-      {(["light", "auto", "dark"] as const).map((t) => (
-        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "浅色" : t === "dark" ? "深色" : "自动"}
-          className={`w-8 h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
-          {t === "light" ? "☀" : t === "dark" ? "☾" : "◐"}
+      {(["light", "dark"] as const).map((t) => (
+        <button key={t} onClick={() => setTheme(t)} title={t === "light" ? "白天" : "黑夜"}
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-md text-sm flex items-center justify-center transition-all ${theme === t ? "bg-nyy-500 text-white shadow-[0_0_14px_rgba(255,138,61,0.6)]" : `${s.tSecondary} hover:opacity-80`}`}>
+          {t === "light" ? "☀" : "☾"}
         </button>
       ))}
     </div>
@@ -144,12 +146,7 @@ export default function SharePage() {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "auto") {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      root.setAttribute("data-theme", prefersDark ? "dark" : "light");
-    } else {
-      root.setAttribute("data-theme", theme);
-    }
+    root.setAttribute("data-theme", theme);
     localStorage.setItem("nyy-theme-4c", theme);
   }, [theme]);
 
@@ -159,6 +156,7 @@ export default function SharePage() {
     getShareInfo(code)
       .then((data) => {
         setShare(data);
+        setDownloadState(data.has_password ? "idle" : "loading");
         setPageState(data.has_password ? "locked" : "ready");
         if (!data.has_password) void autoFetchDownloads();
       })
@@ -181,8 +179,10 @@ export default function SharePage() {
     try {
       const res = await downloadShare(code);
       setDownloads(res.files);
+      setDownloadState("ready");
     } catch {
       // 预览不可用，但不阻塞页面——用户仍可通过下载按钮获取
+      setDownloadState("error");
     }
   };
 
@@ -194,6 +194,7 @@ export default function SharePage() {
     try {
       const res = await verifyShare(code, pwInput);
       setDownloads(res.files);
+      setDownloadState("ready");
       setPageState("ready");
       appendDebugLog("page", "verify:ok", { files: res.files.length });
     } catch (err) {
@@ -207,14 +208,18 @@ export default function SharePage() {
   // ===== 获取下载 URL（密码已验证或无密码时） =====
   const fetchDownloadUrls = async (): Promise<{ files: ShareFileDownload[]; emptyDirs: string[] } | null> => {
     try {
+      setDownloadState("loading");
       if (share?.has_password) {
         const res = await verifyShare(code, pwInput);
+        setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else {
         const res = await downloadShare(code);
+        setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       }
     } catch (err) {
+      setDownloadState("error");
       setPwError(getErrorMessage(err, "获取下载链接失败"));
       return null;
     }
@@ -321,21 +326,17 @@ export default function SharePage() {
         <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
 
           {/* ── Topbar 骨架 ── */}
-          <div className={`${s.glass} px-6 py-4 mb-5`}>
-            <div className="flex items-center justify-between gap-4">
-              {/* 左：Logo 真实渲染 + 分享话术/摘要 shimmer（桌面同排） */}
-              <div className="flex min-w-0 items-center gap-4">
-                <BrandLogo className="w-28 h-auto" />
-                <div className="hidden min-w-0 flex-col gap-2 sm:flex">
-                  <div className={`${s.skel} h-5 w-44 max-w-[52vw]`} />
-                  <div className={`${s.skel} h-3.5 w-32 max-w-[42vw]`} />
+          <div className={`${s.glass} min-h-[80px] px-4 py-3 sm:min-h-0 sm:px-6 sm:py-4 mb-5`}>
+            <div className="flex items-start justify-between gap-3 sm:items-center sm:gap-4">
+              {/* 左：Logo 真实渲染 + 分享话术/摘要 shimmer（移动端也内联） */}
+              <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                <BrandLogo className="w-24 h-auto shrink-0 sm:w-28" />
+                <div className="min-w-0 flex-1">
+                  <div className={`${s.skel} h-4 w-36 max-w-[42vw] sm:h-5 sm:w-44 sm:max-w-[52vw]`} />
+                  <div className={`${s.skel} h-4 w-24 max-w-[32vw] mt-1 sm:w-32 sm:max-w-[42vw]`} />
                 </div>
               </div>
-              <ThemeToggle className="shrink-0" />
-            </div>
-            <div className="mt-4 flex flex-col gap-2 sm:hidden">
-              <div className={`${s.skel} h-5 w-44 max-w-[52vw]`} />
-              <div className={`${s.skel} h-3.5 w-32 max-w-[42vw]`} />
+              <ThemeToggle className="shrink-0 self-start sm:self-center" />
             </div>
           </div>
 
@@ -362,39 +363,39 @@ export default function SharePage() {
             {/* 右列：侧栏骨架 */}
             <aside className="flex flex-col gap-4">
 
-              {/* 主操作区骨架（永远 2 个按钮位） */}
-              <div className="flex flex-col gap-2 min-h-[96px]">
+              {/* 主操作区骨架（首行主按钮 + 次行复制链接） */}
+              <div className="grid grid-cols-2 gap-2 min-h-[96px]">
                 <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
-                <div className={`${s.skel} h-[42px] w-full rounded-lg`} />
+                <div className={`${s.skel} h-[46px] w-full rounded-lg`} />
+                <div className={`${s.skel} col-span-2 h-[42px] w-full rounded-lg`} />
               </div>
 
-              {/* 分享概览卡片骨架 */}
+              {/* 分享概览 + 扫码取件卡片骨架 */}
               <div className={`${s.glass} p-4`}>
-                <div className={`${s.skel} h-3.5 w-16 mb-3`} />
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <div className={`${s.skel} h-3 w-10`} />
-                    <div className={`${s.skel} h-4 w-28`} />
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className={`${s.skel} h-3.5 w-16 mb-3`} />
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <div className={`${s.skel} h-3 w-10`} />
+                        <div className={`${s.skel} h-4 w-28`} />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <div className={`${s.skel} h-3 w-10`} />
+                        <div className={`${s.skel} h-4 w-16`} />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <div className={`${s.skel} h-3 w-10`} />
+                        <div className={`${s.skel} h-4 w-12`} />
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <div className={`${s.skel} h-3 w-10`} />
-                    <div className={`${s.skel} h-4 w-16`} />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <div className={`${s.skel} h-3 w-10`} />
-                    <div className={`${s.skel} h-4 w-12`} />
-                  </div>
-                </div>
-              </div>
-
-              {/* QR 卡片骨架（仅桌面端，与真实 hidden lg:block 一致） */}
-              <div className={`${s.glass} p-4 hidden lg:block`}>
-                <div className={`${s.skel} h-3.5 w-16 mb-3`} />
-                <div className="flex items-center gap-3">
-                  <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} />
-                  <div className="flex flex-col gap-2">
-                    <div className={`${s.skel} h-3.5 w-16`} />
-                    <div className={`${s.skel} h-3.5 w-20`} />
+                  <div className="hidden lg:flex items-center gap-3 border-l border-white/10 pl-4">
+                    <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} />
+                    <div className="flex flex-col gap-2">
+                      <div className={`${s.skel} h-3.5 w-16`} />
+                      <div className={`${s.skel} h-3.5 w-20`} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -519,25 +520,25 @@ export default function SharePage() {
   const contentSummary = getShareContentSummary(share);
   const expiryLabel = getExpiryLabel(share);
   const downloadLabel = getDownloadLabel(share);
+  const showMultiDownloadActions = !isSingle && !hasOnlyEmptyDirs && downloadState === "ready" && !!selectedFile;
+  const showLinkFetchButton =
+    (isSingle && downloadState === "error") ||
+    (!isSingle && !hasOnlyEmptyDirs && !showMultiDownloadActions);
 
   return (
     <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
       <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
         {/* Topbar */}
-        <div className={`${s.glass} px-6 py-4 mb-5`}>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-4">
-              <BrandLogo className="w-28 h-auto" />
-              <div className="hidden min-w-0 sm:block">
-                <p className={`font-tech text-sm font-bold tracking-[0.08em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
-                <p className={`mt-1 text-xs ${s.tMuted}`}>{contentSummary}</p>
+        <div className={`${s.glass} min-h-[80px] px-4 py-3 sm:min-h-0 sm:px-6 sm:py-4 mb-5`}>
+          <div className="flex items-start justify-between gap-3 sm:items-center sm:gap-4">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+              <BrandLogo className="w-24 h-auto shrink-0 sm:w-28" />
+              <div className="min-w-0">
+                <p className={`font-tech text-[13px] font-bold leading-4 tracking-[0.06em] sm:text-sm sm:tracking-[0.08em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
+                <p className={`mt-1 truncate text-[11px] sm:text-xs ${s.tMuted}`}>{contentSummary}</p>
               </div>
             </div>
-            <ThemeToggle className="shrink-0" />
-          </div>
-          <div className="mt-4 sm:hidden">
-            <p className={`font-tech text-sm font-bold tracking-[0.08em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
-            <p className={`mt-1 text-xs ${s.tMuted}`}>{contentSummary}</p>
+            <ThemeToggle className="shrink-0 self-start sm:self-center" />
           </div>
         </div>
 
@@ -620,38 +621,52 @@ export default function SharePage() {
 
           {/* 右:侧栏 */}
           <aside className="flex flex-col gap-4">
-            {/* 主操作区：单文件下载/复制，多文件打包/复制 */}
-            <div className="flex flex-col gap-2 min-h-[96px]">
-              {downloads.length > 0 && !isSingle && (
+            {/* 主操作区：单文件保留直下，多文件拆成“当前文件 / 整体打包” */}
+            <div className="grid grid-cols-2 gap-2 min-h-[96px]">
+              {hasOnlyEmptyDirs && (
                 <button onClick={handleDownloadAll} disabled={downloading}
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Package className="w-4 h-4" />
-                  {downloading ? "打包中…" : `打包下载 ${formatSize(share.total_bytes)}`}
+                  {downloading ? "打包中…" : "整体打包下载"}
                 </button>
               )}
-              {downloads.length > 0 && isSingle && (
+              {isSingle && downloadState === "ready" && downloads[0] && (
                 <button onClick={() => { if (downloads[0]) void downloadOneFile(downloads[0]); }} disabled={downloading || !downloads[0]}
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Download className="w-4 h-4" />
-                  {downloading ? "下载中…" : "下载"}
+                  {downloading ? "下载中…" : "下载此文件"}
                 </button>
               )}
-              {downloads.length === 0 && !isSingle && (
-                <button onClick={handleDownloadSingle} disabled={downloading}
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
-                  <Download className="w-4 h-4" />
-                  {downloading ? "获取中…" : hasOnlyEmptyDirs ? "下载文件夹" : "获取下载链接"}
-                </button>
-              )}
-              {downloads.length === 0 && isSingle && (
+              {isSingle && downloadState === "loading" && (
                 <button disabled
-                  className={`${s.glowBtn} w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2 opacity-50 cursor-not-allowed`}>
+                  className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2 opacity-50 cursor-not-allowed`}>
                   <Download className="w-4 h-4" />
                   获取中…
                 </button>
               )}
+              {showMultiDownloadActions && (
+                <>
+                  <button onClick={() => { if (selectedFile) void downloadOneFile(selectedFile); }} disabled={downloading || !selectedFile}
+                    className={`${s.glowBtn} min-w-0 w-full py-3.5 font-tech text-[11px] tracking-[0.08em] sm:text-xs sm:tracking-widest flex items-center justify-center gap-2`}>
+                    <Download className="w-4 h-4 shrink-0" />
+                    <span className="truncate">下载当前文件</span>
+                  </button>
+                  <button onClick={handleDownloadAll} disabled={downloading}
+                    className={`${s.glowBtn} min-w-0 w-full py-3.5 font-tech text-[11px] tracking-[0.08em] sm:text-xs sm:tracking-widest flex items-center justify-center gap-2`}>
+                    <Package className="w-4 h-4 shrink-0" />
+                    <span className="truncate">整体打包下载</span>
+                  </button>
+                </>
+              )}
+              {showLinkFetchButton && (
+                <button onClick={handleDownloadSingle} disabled={downloading || downloadState === "loading"}
+                  className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  <Download className="w-4 h-4" />
+                  {downloading || downloadState === "loading" ? "获取中…" : "获取下载链接"}
+                </button>
+              )}
               <button onClick={handleCopyLink}
-                className={`${s.ghostBtn} w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                className={`${s.ghostBtn} col-span-2 w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                 <Copy className="w-4 h-4" /> 复制链接
               </button>
             </div>
@@ -772,27 +787,28 @@ export default function SharePage() {
               )}
             </div>}
 
-            {/* 分享概览 */}
+            {/* 分享概览 + 扫码取件 */}
             <div className={`${s.glass} p-4`}>
-              <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>分享概览</p>
-              <div className="flex flex-col gap-3 text-xs">
-                <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>内容</span><span className="font-tech font-bold">{contentSummary}</span></div>
-                <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>到期</span><span className="font-tech font-bold">{expiryLabel}</span></div>
-                <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>下载</span><span className="font-tech font-bold">{downloadLabel}</span></div>
-              </div>
-            </div>
-
-            {/* 二维码（移动端隐藏；qr 未就绪时 shimmer 占位撑住高度，避免卡片出现时推动下方按钮） */}
-            <div className={`${s.glass} p-4 hidden lg:block`}>
-              <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>扫码取件</p>
-              <div className="flex items-center gap-3">
-                {qr ? (
-                  <Image src={qr} alt="二维码" width={92} height={92} unoptimized className="rounded-lg" />
-                ) : (
-                  <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} aria-hidden="true" />
-                )}
-                <div className={`text-xs ${s.tMuted}`}>
-                  <p>手机扫码</p><p>随时随地取件</p>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-3`}>分享概览</p>
+                  <div className="flex flex-col gap-3 text-xs">
+                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>内容</span><span className="font-tech font-bold">{contentSummary}</span></div>
+                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>到期</span><span className="font-tech font-bold">{expiryLabel}</span></div>
+                    <div><span className={`block font-tech text-[10px] ${s.tMuted}`}>下载</span><span className="font-tech font-bold">{downloadLabel}</span></div>
+                  </div>
+                </div>
+                <div className="hidden lg:flex shrink-0 items-center gap-3 border-l border-white/10 pl-4">
+                  {qr ? (
+                    <Image src={qr} alt="二维码" width={92} height={92} unoptimized className="rounded-lg" />
+                  ) : (
+                    <div className={`${s.skel} w-[92px] h-[92px] rounded-lg shrink-0`} aria-hidden="true" />
+                  )}
+                  <div className={`text-xs ${s.tMuted}`}>
+                    <p className="font-tech text-[10px] tracking-[0.1em] mb-1">扫码取件</p>
+                    <p>手机扫码</p>
+                    <p>随时随地取件</p>
+                  </div>
                 </div>
               </div>
             </div>
