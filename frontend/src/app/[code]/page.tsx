@@ -123,15 +123,13 @@ const NATIVE_UNSUPPORTED_AUDIO_RE = /^(ac-3|ec-3|dts[a-z]?)$/;
 
 /**
  * 判断 mp4/mov 视频是否需要走 SDP 播放器（不含 MKV，MKV 有独立逻辑）。
- * 满足任一条件即 true：
- * 1. moov 不在头部（is_faststart=false）：原生 <video> 需先 seek 尾部 moov，CDN 冷区慢
- * 2. 音频编码浏览器不支持（AC-3/EC-3/DTS）：原生只能解视频轨，管线被音频卡住
+ * 仅音频编码浏览器不支持时才强制 SDP。H.264 + AAC 即使 moov 在尾部，
+ * 原生播放器的缓冲、硬解和 Range 调度仍明显优于当前 JS SDP 管线。
  */
 function needsSdpPlayer(file: ShareFileDownload): boolean {
   if (isMkvFile(file)) return false; // MKV 走独立分支
   const meta = file.media_metadata;
   if (!meta || meta.probe_status !== "ok") return false; // 无元数据时走原生兜底
-  if (meta.is_faststart === false) return true;
   const hasUnsupportedAudio = (meta.audio_tracks || []).some((t) => {
     const codec = (t.codec_tag || t.codec || "").toLowerCase();
     return NATIVE_UNSUPPORTED_AUDIO_RE.test(codec);
