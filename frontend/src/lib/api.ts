@@ -56,6 +56,26 @@ export interface MediaTrackMetadata {
   channel_count?: number;
 }
 
+export interface PlaybackAsset {
+  kind: string;
+  version?: number;
+  size?: number;
+  content_type?: string;
+  sha256?: string;
+  virtual_size?: number;
+  sidecar_size?: number;
+  source_media_start?: number;
+  source_media_end?: number;
+  offset_delta?: number;
+  crc32?: string;
+  download_url?: string;
+}
+
+export interface PlaybackHints {
+  needs_virtual_faststart?: boolean;
+  [key: string]: unknown;
+}
+
 export interface MediaMetadata {
   probe_version: number;
   probe_status: "ok" | "failed" | "skipped";
@@ -71,6 +91,8 @@ export interface MediaMetadata {
   brands?: string[];
   video_tracks?: MediaTrackMetadata[];
   audio_tracks?: MediaTrackMetadata[];
+  playback_assets?: PlaybackAsset[];
+  playback_hints?: PlaybackHints;
   [key: string]: unknown;
 }
 

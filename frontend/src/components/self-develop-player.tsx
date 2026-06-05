@@ -41,24 +41,29 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
   const capabilities = useMemo(() => collectCapabilities(), []);
   const mediaType = getSelfDevelopMediaType(file.file_name);
   const hasProbeAudioTrack = (probe?.audio_tracks?.length ?? 0) > 0;
-  // For MP4, the upload probe already filled media_metadata with audio track info.
-  const hasMetadataAudioTrack = ext === "mp4" && (file.media_metadata?.audio_tracks?.length ?? 0) > 0;
+  // 上传探针已给 MP4/MKV 填充音视频轨信息时，不需要再发远端 Range 探测。
+  const hasMetadataAudioTrack = (file.media_metadata?.audio_tracks?.length ?? 0) > 0;
+  const hasMetadataVideoTrack = (file.media_metadata?.video_tracks?.length ?? 0) > 0;
+  const hasUsableMkvMetadata = ext === "mkv"
+    && file.media_metadata?.probe_status === "ok"
+    && hasMetadataAudioTrack
+    && hasMetadataVideoTrack;
 
-  const probeRemoteContainer = useCallback(async (signal: AbortSignal): Promise<UnsupportedMediaProbe | null> => {
+  const probeRemoteContainer = useCallback(async (isCancelled: () => boolean): Promise<UnsupportedMediaProbe | null> => {
     const firstProbeBytes = ext === "mkv" ? MKV_FAST_PROBE_BYTES : PROBE_BYTES;
     const fileName = file.file_name;
     const fileSize = file.file_size;
     debugLog?.("sdp", "probe:start", { fileName, fileSize, ext, probeBytes: firstProbeBytes, message: `SDP ${ext.toUpperCase()} 路径：读取头部 ${formatSize(Math.min(firstProbeBytes, fileSize))} 做容器探测` });
 
     const reader = new RangeFileReader(file);
-    let buffer = await reader.readFirstBytes(firstProbeBytes, signal);
-    if (signal.aborted) return null;
+    let buffer = await reader.readFirstBytes(firstProbeBytes);
+    if (isCancelled()) return null;
 
     let nextProbe = probeUnsupportedMediaBuffer(buffer, fileName, fileSize);
     if (ext === "mkv" && nextProbe.probe_status !== "ok" && firstProbeBytes < PROBE_BYTES) {
       debugLog?.("sdp", "probe:retry", { fileName, previousStatus: nextProbe.probe_status, previousError: nextProbe.probe_error || null, probeBytes: PROBE_BYTES, message: `SDP MKV 快速探测不足，扩大到 ${formatSize(Math.min(PROBE_BYTES, fileSize))}` });
-      buffer = await reader.readFirstBytes(PROBE_BYTES, signal);
-      if (signal.aborted) return null;
+      buffer = await reader.readFirstBytes(PROBE_BYTES);
+      if (isCancelled()) return null;
       nextProbe = probeUnsupportedMediaBuffer(buffer, fileName, fileSize);
     }
     const decoderTarget = getDecoderTarget(ext, nextProbe);
@@ -81,7 +86,7 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
   }, [debugLog, ext, file.file_name, file.file_size]);
 
   useEffect(() => {
-    const abort = new AbortController();
+    let cancelled = false;
     setProbe(null);
 
     debugLog?.("sdp", "init", {
@@ -94,7 +99,7 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
 
     if (!mediaType) {
       debugLog?.("sdp", "unsupported:ext", { ext, reason: "mediaType=null", error: "SDP 初版只接受 mp4 / mkv / wmv" });
-      return () => abort.abort();
+      return () => { cancelled = true; };
     }
 
     // MP4: upload probe already has track info in media_metadata,
@@ -106,7 +111,12 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
       } else {
         debugLog?.("sdp", "render:sdp-player", { ext, branch: "mp4-metadata" });
       }
-      return () => abort.abort();
+      return () => { cancelled = true; };
+    }
+
+    if (hasUsableMkvMetadata) {
+      debugLog?.("sdp", "render:sdp-player", { ext, branch: "mkv-metadata" });
+      return () => { cancelled = true; };
     }
 
     if (ext === "mkv") {
@@ -116,9 +126,9 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
       debugLog?.("sdp", "wmv:hint", { note: "WMV 已按你的要求挪到最后：当前只做 ASF/WMV 探测，暂不启动 WASM 解码链" });
     }
 
-    probeRemoteContainer(abort.signal)
+    probeRemoteContainer(() => cancelled)
       .then((result) => {
-        if (abort.signal.aborted || !result) return;
+        if (cancelled || !result) return;
         setProbe(result);
         if (ext === "mkv" && result.probe_status === "ok") {
           const probeHasAudio = (result.audio_tracks?.length ?? 0) > 0;
@@ -130,17 +140,17 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
         }
       })
       .catch((err) => {
-        if (abort.signal.aborted) return;
+        if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
         debugLog?.("sdp", "error", { error: message, message: "SDP 初始化失败" });
       });
 
-    return () => abort.abort();
-  }, [capabilities, debugLog, ext, file.file_name, file.file_size, hasMetadataAudioTrack, mediaType, probeRemoteContainer]);
+    return () => { cancelled = true; };
+  }, [capabilities, debugLog, ext, file.file_name, file.file_size, hasMetadataAudioTrack, hasUsableMkvMetadata, mediaType, probeRemoteContainer]);
 
   return (
     <div className={className}>
-      {(ext === "mkv" && probe?.probe_status === "ok" && hasProbeAudioTrack) && (
+      {(ext === "mkv" && (hasUsableMkvMetadata || (probe?.probe_status === "ok" && hasProbeAudioTrack))) && (
         <SdpPlayer file={file} debugLog={debugLog} />
       )}
       {(ext === "mp4" && hasMetadataAudioTrack) && (

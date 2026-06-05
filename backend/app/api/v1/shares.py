@@ -8,7 +8,9 @@ GET  /api/v1/shares/:code/download — 获取下载 URL（计数 +1）
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -34,6 +36,46 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/shares", tags=["shares"])
 _EMPTY_URI_PREFIX = "nyy-empty://"
 _EMPTY_FILE_DATA_URL = "data:application/octet-stream;base64,"
+
+
+def _public_media_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    """返回公开详情可暴露的媒体元数据，隐藏内部 TOS 对象引用。"""
+    if not metadata:
+        return metadata
+    result = deepcopy(metadata)
+    assets = result.get("playback_assets")
+    if isinstance(assets, list):
+        public_assets: list[dict[str, Any]] = []
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            public_asset = {k: v for k, v in asset.items() if k not in {"store_uri", "download_url"}}
+            public_assets.append(public_asset)
+        result["playback_assets"] = public_assets
+    return result
+
+
+async def _metadata_with_signed_assets(metadata: dict[str, Any] | None, client) -> dict[str, Any] | None:
+    """为下载响应里的播放 sidecar 签发临时 URL。"""
+    if not metadata:
+        return metadata
+    result = deepcopy(metadata)
+    assets = result.get("playback_assets")
+    if not isinstance(assets, list):
+        return result
+
+    signed_assets: list[dict[str, Any]] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        signed = deepcopy(asset)
+        store_uri = signed.get("store_uri")
+        if isinstance(store_uri, str) and store_uri:
+            signed["download_url"] = await client.get_download_url(store_uri, expire_seconds=86400)
+            signed.pop("store_uri", None)
+        signed_assets.append(signed)
+    result["playback_assets"] = signed_assets
+    return result
 
 
 class ShareReportRequest(BaseModel):
@@ -94,6 +136,7 @@ async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[Shar
             except DoubaoClientError as e:
                 log.error("get_download_url failed for %s: %s", chunk.tos_uri, e)
                 raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
+            media_metadata = await _metadata_with_signed_assets(logical_file.media_metadata, client)
             results.append(ShareFileDownload(
                 file_name=logical_file.original_name,
                 file_size=logical_file.size,
@@ -101,7 +144,7 @@ async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[Shar
                 is_chunked=False,
                 download_url=url,
                 chunks=[],
-                media_metadata=logical_file.media_metadata,
+                media_metadata=media_metadata,
             ))
             continue
 
@@ -127,7 +170,7 @@ async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[Shar
             is_chunked=True,
             download_url="",
             chunks=chunk_downloads,
-            media_metadata=logical_file.media_metadata,
+            media_metadata=await _metadata_with_signed_assets(logical_file.media_metadata, client),
         ))
 
     return results
@@ -145,7 +188,7 @@ def _aggregate_file_info(logical_files: list[ShareLogicalFile]) -> list[ShareFil
             index=idx,
             is_chunked=logical_file.chunk_total > 1,
             chunk_count=logical_file.chunk_total,
-            media_metadata=logical_file.media_metadata,
+            media_metadata=_public_media_metadata(logical_file.media_metadata),
         ))
 
     return results

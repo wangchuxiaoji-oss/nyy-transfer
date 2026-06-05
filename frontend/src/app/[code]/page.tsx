@@ -8,6 +8,7 @@ import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder, Play } fr
 import { BrandLogo } from "@/components/brand-logo";
 import { SelfDevelopPlayer } from "@/components/self-develop-player";
 import { NativeVideoPlayer } from "@/components/native-video-player";
+import { Ac3VideoPreview } from "@/components/ac3-video-preview";
 import { PdfPreview } from "@/components/pdf-preview";
 import {
   getShareInfo, verifyShare, downloadShare, reportShare,
@@ -17,6 +18,7 @@ import { supportsChunkedDownload, chunkedDownload, type ChunkedDownloadProgress 
 import { getErrorMessage, isHttpStatusError } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
 import type { DebugLogFn } from "@/lib/debug";
+import { needsVideoOnlyVirtualMp4, needsVirtualFaststart, prepareVirtualMediaTransport, registerVirtualMediaFile } from "@/lib/virtual-media";
 import s from "./share-4c.module.css";
 
 type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "error";
@@ -121,13 +123,34 @@ function isMkvFile(file: ShareFileDownload): boolean {
 /** 浏览器原生不支持的音频编码 fourcc / codec tag */
 const NATIVE_UNSUPPORTED_AUDIO_RE = /^(ac-3|ec-3|dts[a-z]?)$/;
 
+function hasAudioCodec(file: ShareFileDownload, codecs: Set<string>): boolean {
+  const tracks = file.media_metadata?.audio_tracks;
+  if (!Array.isArray(tracks)) return false;
+  return tracks.some((track) => {
+    const values = [track.codec_tag, track.codec]
+      .map((value) => `${value || ""}`.toLowerCase())
+      .filter(Boolean);
+    return values.some((value) => codecs.has(value));
+  });
+}
+
+function hasAc3Audio(file: ShareFileDownload): boolean {
+  return hasAudioCodec(file, new Set(["ac-3", "ac3"]));
+}
+
+function hasEac3Audio(file: ShareFileDownload): boolean {
+  return hasAudioCodec(file, new Set(["ec-3", "eac3"]));
+}
+
 /**
  * 判断 mp4/mov 视频是否需要走 SDP 播放器（不含 MKV，MKV 有独立逻辑）。
- * 仅音频编码浏览器不支持时才强制 SDP。H.264 + AAC 即使 moov 在尾部，
- * 原生播放器的缓冲、硬解和 Range 调度仍明显优于当前 JS SDP 管线。
+ * 当前 SDP 对常规 MP4 的 Range 调度、seek 恢复和 AC-3 音频主时钟仍不如原生
+ * video 稳定，因此只默认接管 E-AC-3 MP4；其余 MP4 保留 ?sdp=1 调试入口。
  */
 function needsSdpPlayer(file: ShareFileDownload): boolean {
   if (isMkvFile(file)) return false; // MKV 走独立分支
+  if (isEac3Mp4(file)) return true;
+  if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("sdp") !== "1") return false;
   const meta = file.media_metadata;
   if (!meta || meta.probe_status !== "ok") return false; // 无元数据时走原生兜底
   const hasUnsupportedAudio = (meta.audio_tracks || []).some((t) => {
@@ -137,11 +160,103 @@ function needsSdpPlayer(file: ShareFileDownload): boolean {
   return hasUnsupportedAudio;
 }
 
-function NativeVideoPreview({ file, onDownload }: { file: ShareFileDownload; onDownload: () => void }) {
+function isAc3Mp4(file: ShareFileDownload): boolean {
+  if (isMkvFile(file)) return false;
+  const meta = file.media_metadata;
+  if (!meta || meta.probe_status !== "ok") return false;
+  return hasAc3Audio(file);
+}
+
+function isEac3Mp4(file: ShareFileDownload): boolean {
+  if (isMkvFile(file)) return false;
+  const meta = file.media_metadata;
+  if (!meta || meta.probe_status !== "ok") return false;
+  return hasEac3Audio(file);
+}
+
+function UnsupportedVideoPreview({ message, onDownload }: { message: string; onDownload: () => void }) {
+  return (
+    <div data-testid="unsupported-video-preview" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="w-16 h-16 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-2xl text-yc-accent">▶</div>
+      <div>
+        <p className={`font-tech text-sm font-bold tracking-widest ${s.tPrimary}`}>浏览器无法直接预览此视频</p>
+        <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>{message}</p>
+      </div>
+      <button type="button" onClick={onDownload}
+        className={`${s.glowBtn} px-4 py-2.5 font-tech text-xs tracking-widest flex items-center gap-2`}>
+        <Download className="w-4 h-4" /> 下载此文件
+      </button>
+    </div>
+  );
+}
+
+const MKV_NATIVE_METADATA_TIMEOUT_MS = 20_000;
+
+function NativeVideoPreview({
+  file,
+  onDownload,
+  onPlaybackFailure,
+  metadataTimeoutMs,
+}: {
+  file: ShareFileDownload;
+  onDownload: () => void;
+  onPlaybackFailure?: (message: string) => void;
+  metadataTimeoutMs?: number;
+}) {
   const [failed, setFailed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。");
+  const [playbackUrl, setPlaybackUrl] = useState(file.download_url);
+  const [transportPreparing, setTransportPreparing] = useState(false);
+  const [metadataReady, setMetadataReady] = useState(false);
   const mime = getNativeVideoMime(file);
-  const safeUrl = isSafeUrl(file.download_url);
+  const useVirtualFaststart = needsVirtualFaststart(file) || needsVideoOnlyVirtualMp4(file);
+  const awaitingVirtualTransport = useVirtualFaststart && playbackUrl === file.download_url && !failed;
+  const preparingVirtualTransport = transportPreparing || awaitingVirtualTransport;
+  const safeUrl = isSafeUrl(playbackUrl) || playbackUrl.startsWith("/__nyy_virtual_media__/");
+
+  const handlePlaybackFailure = useCallback((message: string) => {
+    if (onPlaybackFailure) {
+      onPlaybackFailure(message);
+      return;
+    }
+    setErrorMessage(message);
+    setFailed(true);
+  }, [onPlaybackFailure]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPlaybackUrl(file.download_url);
+    setTransportPreparing(false);
+    setMetadataReady(false);
+
+    if (!useVirtualFaststart) return;
+
+    setTransportPreparing(true);
+    prepareVirtualMediaTransport()
+      .then(() => registerVirtualMediaFile(file, "share-video"))
+      .then((url) => {
+        if (!cancelled) setPlaybackUrl(url);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        handlePlaybackFailure(getErrorMessage(err, "虚拟快启播放通道初始化失败，请刷新页面后重试。"));
+      })
+      .finally(() => {
+        if (!cancelled) setTransportPreparing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, handlePlaybackFailure, useVirtualFaststart]);
+
+  useEffect(() => {
+    if (!metadataTimeoutMs || metadataReady || preparingVirtualTransport || failed || !safeUrl) return;
+    const timer = window.setTimeout(() => {
+      handlePlaybackFailure("原生视频元数据加载超时，已切换到客户端播放兜底。");
+    }, metadataTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [failed, handlePlaybackFailure, metadataReady, metadataTimeoutMs, playbackUrl, preparingVirtualTransport, safeUrl]);
 
   useEffect(() => {
     setFailed(false);
@@ -152,7 +267,15 @@ function NativeVideoPreview({ file, onDownload }: { file: ShareFileDownload; onD
     if (mime === "video/x-matroska") return;
     const probe = document.createElement("video");
     if (mime && probe.canPlayType(mime) === "") setFailed(true);
-  }, [file.download_url, mime, safeUrl]);
+  }, [playbackUrl, mime, safeUrl]);
+
+  if (preparingVirtualTransport) {
+    return (
+      <div data-testid="native-video-preview" className="absolute inset-0 flex items-center justify-center bg-black text-xs text-white/60">
+        正在准备视频快启通道…
+      </div>
+    );
+  }
 
   if (!safeUrl || failed) {
     return (
@@ -170,7 +293,53 @@ function NativeVideoPreview({ file, onDownload }: { file: ShareFileDownload; onD
     );
   }
 
-  return <NativeVideoPlayer src={file.download_url} type={mime} onError={(message) => { setErrorMessage(message); setFailed(true); }} />;
+  return <NativeVideoPlayer src={playbackUrl} type={mime} onError={handlePlaybackFailure} onLoadedMetadata={() => setMetadataReady(true)} />;
+}
+
+function MkvVideoPreview({ file, onDownload, debugLog }: { file: ShareFileDownload; onDownload: () => void; debugLog: DebugLogFn }) {
+  const [mode, setMode] = useState<"checking" | "native" | "sdp">("checking");
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("sdp") === "1") {
+      setMode("sdp");
+      return;
+    }
+    if (hasAc3Audio(file) || hasEac3Audio(file)) {
+      setMode("sdp");
+      return;
+    }
+    const probe = document.createElement("video");
+    const nativeSupport = [getNativeVideoMime(file), "video/x-matroska", "video/matroska"]
+      .some((type) => Boolean(type && probe.canPlayType(type)));
+    setMode(nativeSupport ? "native" : "sdp");
+  }, [file]);
+
+  if (mode === "checking") {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-black text-xs text-white/60">
+        正在检测 MKV 播放能力…
+      </div>
+    );
+  }
+
+  if (mode === "sdp") {
+    return (
+      <div data-testid="mkv-sdp-preview" className="absolute inset-0">
+        <SelfDevelopPlayer file={file} className={s.sdpFill} debugLog={debugLog} />
+      </div>
+    );
+  }
+
+  return (
+    <NativeVideoPreview
+      file={file}
+      onDownload={onDownload}
+      metadataTimeoutMs={MKV_NATIVE_METADATA_TIMEOUT_MS}
+      onPlaybackFailure={() => setMode("sdp")}
+    />
+  );
 }
 
 export default function SharePage() {
@@ -798,16 +967,16 @@ export default function SharePage() {
                   {/* 视频路由：MKV / 需要SDP的mp4 / 正常mp4 */}
                   {selectedType === "video" && (
                     isMkvFile(selectedFile) ? (
-                      <>
-                        <div data-testid="mobile-mkv-sdp-preview" className="absolute inset-0 sm:hidden">
-                          <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
-                        </div>
-                        <div className="hidden sm:block">
-                          <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
-                        </div>
-                      </>
+                      <MkvVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} debugLog={appendDebugLog} />
                     ) : needsSdpPlayer(selectedFile) ? (
                       <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
+                    ) : isAc3Mp4(selectedFile) ? (
+                      <Ac3VideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
+                    ) : isEac3Mp4(selectedFile) ? (
+                      <UnsupportedVideoPreview
+                        message="当前客户端解码器尚不支持 E-AC-3 音频；为避免误播无声视频，请先下载后使用本地播放器查看。"
+                        onDownload={() => { void downloadOneFile(selectedFile); }}
+                      />
                     ) : (
                       <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
                     )

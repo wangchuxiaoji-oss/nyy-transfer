@@ -58,18 +58,31 @@ self.addEventListener("fetch", (event) => {
 function normalizeFile(file, id) {
   const chunks = [...(file.chunks || [])].sort((a, b) => a.index - b.index);
   let offset = 0;
-  const fileSize = Number(file.fileSize || 0);
+  const physicalFileSize = Number(file.fileSize || 0);
+  const sidecar = file.sidecar && file.sidecar.downloadUrl ? {
+    url: file.sidecar.downloadUrl,
+    size: Number(file.sidecar.size || 0),
+    sourceMediaStart: Number(file.sidecar.sourceMediaStart || 0),
+    sourceMediaEnd: Number(file.sidecar.sourceMediaEnd || physicalFileSize),
+  } : null;
+  const fileSize = Number(file.virtualFileSize || physicalFileSize);
+  const mediaStart = sidecar ? sidecar.size : 0;
+  const normalizedChunks = chunks.length > 0
+    ? chunks
+    : (file.downloadUrl ? [{ index: 0, size: sidecar ? sidecar.sourceMediaEnd - sidecar.sourceMediaStart : physicalFileSize, downloadUrl: file.downloadUrl }] : []);
   return {
     fileName: file.fileName || "media.mp4",
     contentType: file.contentType || "video/mp4",
     fileSize,
-    cacheKey: `${id}:${fileSize}:${chunks.map((chunk) => `${chunk.index}:${chunk.size}`).join(",")}`,
-    chunks: chunks.map((chunk) => {
+    physicalFileSize,
+    sidecar,
+    cacheKey: `${id}:${fileSize}:${sidecar ? `${sidecar.size}:${sidecar.sourceMediaStart}:${sidecar.sourceMediaEnd}` : "no-sidecar"}:${normalizedChunks.map((chunk) => `${chunk.index}:${chunk.size}`).join(",")}`,
+    chunks: normalizedChunks.map((chunk) => {
       const size = Number(chunk.size || 0);
       const item = {
         url: chunk.downloadUrl,
-        start: offset,
-        end: offset + size - 1,
+        start: mediaStart + offset,
+        end: mediaStart + offset + size - 1,
         size,
       };
       offset += size;
@@ -329,6 +342,63 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
     if (streamClosed) return null;
     if (cursor > end) return null;
     if (signal && signal.aborted) return null;
+
+    if (file.sidecar && cursor < file.sidecar.size) {
+      const globalStart = cursor;
+      const globalEnd = Math.min(end, file.sidecar.size - 1, cursor + FETCH_SLICE_SIZE - 1);
+      const startedAt = performance.now();
+      const plannedBytes = globalEnd - globalStart + 1;
+      const currentSliceIndex = sliceIndex++;
+      cursor = globalEnd + 1;
+      const abortController = new AbortController();
+      abortControllers.add(abortController);
+      const abortFromRequest = () => abortController.abort();
+      if (signal) {
+        if (signal.aborted) abortController.abort();
+        else signal.addEventListener("abort", abortFromRequest, { once: true });
+      }
+      const cleanup = () => {
+        abortControllers.delete(abortController);
+        if (signal) signal.removeEventListener("abort", abortFromRequest);
+      };
+      debug("sidecar:start", {
+        sliceIndex: currentSliceIndex,
+        cursorStart: globalStart,
+        cursorEnd: globalEnd,
+        plannedBytes,
+      });
+      return fetch(file.sidecar.url, {
+        headers: { Range: `bytes=${globalStart}-${globalEnd}` },
+        mode: "cors",
+        signal: abortController.signal,
+      }).then((resp) => {
+        if (!resp.ok && resp.status !== 206) {
+          debug("sidecar:response-error", { sliceIndex: currentSliceIndex, status: resp.status });
+          cleanup();
+          return { error: new Error(`Sidecar fetch failed: HTTP ${resp.status}`) };
+        }
+        if (!resp.body) {
+          debug("sidecar:response-error", { sliceIndex: currentSliceIndex, reason: "no-body" });
+          cleanup();
+          return { error: new Error("Sidecar fetch has no body") };
+        }
+        return {
+          reader: resp.body.getReader(),
+          startedAt,
+          plannedBytes,
+          sliceIndex: currentSliceIndex,
+          cursorStart: globalStart,
+          cursorEnd: globalEnd,
+          cached: false,
+          cleanup,
+        };
+      }).catch((err) => {
+        cleanup();
+        if (isAbortError(err)) return { done: true };
+        return { error: err };
+      });
+    }
+
     const cached = getRangeCacheEntry(file.cacheKey, cursor, end, true, targetClientId);
     if (cached) {
       const currentSliceIndex = sliceIndex++;
@@ -351,8 +421,9 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
     }
     const sliceSize = cursor === start ? FIRST_FETCH_SLICE_SIZE : FETCH_SLICE_SIZE;
     const globalEnd = Math.min(end, chunk.end, cursor + sliceSize - 1);
-    const localStart = cursor - chunk.start;
-    const localEnd = globalEnd - chunk.start;
+    const baseOffset = file.sidecar ? file.sidecar.sourceMediaStart : 0;
+    const localStart = cursor - chunk.start + baseOffset;
+    const localEnd = globalEnd - chunk.start + baseOffset;
     const globalStart = cursor;
     const startedAt = performance.now();
     const plannedBytes = globalEnd - cursor + 1;

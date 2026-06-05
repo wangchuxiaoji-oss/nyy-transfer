@@ -33,6 +33,7 @@ from app.services.doubao_client import (
     get_doubao_client,
 )
 from app.services.app_config import get_quota_config
+from app.services.playback_assets import attach_playback_assets_for_single_object
 from app.utils.short_code import gen_short_code
 
 log = logging.getLogger(__name__)
@@ -761,16 +762,30 @@ async def upload_commit(
             declared_size = getattr(declared, "file_size", logical_size)
             if declared_size != logical_size:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件大小与上传分片不匹配")
+            media_metadata = _sanitize_media_metadata(getattr(declared, "media_metadata", None))
+            original_name = getattr(declared, "file_name", first["file_name"])
+            if len(group) == 1 and media_metadata and not first.get("is_empty"):
+                try:
+                    media_metadata = await attach_playback_assets_for_single_object(
+                        metadata=media_metadata,
+                        original_name=original_name,
+                        size=logical_size,
+                        tos_uri=first["store_uri"],
+                        client=client,
+                    )
+                    media_metadata = _sanitize_media_metadata(media_metadata)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("playback sidecar auto-generation skipped for %s: %s", original_name, exc)
 
             logical_file = ShareLogicalFile(
                 id=uuid.UUID(logical_id),
                 share=share,
                 sort_index=sort_index,
-                original_name=getattr(declared, "file_name", first["file_name"]),
+                original_name=original_name,
                 size=logical_size,
                 content_type=(getattr(declared, "content_type", "") or first.get("content_type") or None),
                 chunk_total=chunk_total,
-                media_metadata=_sanitize_media_metadata(getattr(declared, "media_metadata", None)),
+                media_metadata=media_metadata,
             )
             db.add(logical_file)
             for info in group:

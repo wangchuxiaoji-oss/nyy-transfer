@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.main import create_app
+from app.models.share import Share, ShareLogicalFile
 from app.services.doubao_client import CommitResult, UploadInitResult
 
 
@@ -170,6 +173,97 @@ async def test_upload_commit_success(client, redis, _raise_share_limit):
     # 配额应已扣减
     used = int(await redis.get("nyy:quota:ip:127.0.0.1:bytes") or 0)
     assert used == 512
+
+
+@pytest.mark.asyncio
+async def test_upload_commit_attaches_playback_assets(client, redis, _raise_share_limit):
+    """commit 时为单对象 MP4 写入自动生成的 playback_assets。"""
+    logical_file_id = str(uuid.uuid4())
+    token = "video-commit-token-abc"
+    token_data = {
+        "ip": "127.0.0.1",
+        "file_name": "movie.mp4",
+        "file_size": 1024,
+        "file_ext": "mp4",
+        "content_type": "video/mp4",
+        "store_uri": "tos-cn-i-test/movie.mp4",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }
+    metadata = {
+        "probe_status": "ok",
+        "container": "mp4",
+        "is_faststart": False,
+        "moov_offset": 4096,
+        "moov_size": 2048,
+        "audio_tracks": [{"codec": "mp4a.40.2", "codec_tag": "mp4a"}],
+    }
+    enriched_metadata = {
+        **metadata,
+        "playback_hints": {"needs_virtual_faststart": True},
+        "playback_assets": [{
+            "kind": "mp4_faststart_init",
+            "store_uri": "tos-cn-i-test/movie-init.mp4",
+            "sidecar_size": 2048,
+            "virtual_size": 1024,
+            "source_media_start": 32,
+            "source_media_end": 4096,
+        }],
+    }
+    await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
+
+    with patch(
+        "app.api.v1.uploads.get_doubao_client",
+        new_callable=AsyncMock,
+    ) as mock_get, patch(
+        "app.api.v1.uploads.attach_playback_assets_for_single_object",
+        new_callable=AsyncMock,
+        return_value=enriched_metadata,
+    ) as mock_attach:
+        mock_client = AsyncMock()
+        mock_client.commit_upload.return_value = CommitResult(
+            store_uri="tos-cn-i-test/movie.mp4", success=True
+        )
+        mock_get.return_value = mock_client
+
+        resp = await client.post("/api/v1/uploads/commit", json={
+            "files": [{
+                "commit_token": token,
+                "store_uri": "tos-cn-i-test/movie.mp4",
+                "logical_file_id": logical_file_id,
+            }],
+            "logical_files": [{
+                "logical_file_id": logical_file_id,
+                "file_name": "movie.mp4",
+                "file_size": 1024,
+                "content_type": "video/mp4",
+                "chunk_total": 1,
+                "media_metadata": metadata,
+            }],
+        })
+
+    assert resp.status_code == 201
+    mock_attach.assert_awaited_once()
+    attach_kwargs = mock_attach.await_args.kwargs
+    assert attach_kwargs["metadata"] == metadata
+    assert attach_kwargs["original_name"] == "movie.mp4"
+    assert attach_kwargs["size"] == 1024
+    assert attach_kwargs["tos_uri"] == "tos-cn-i-test/movie.mp4"
+
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        logical_file = await db.scalar(
+            select(ShareLogicalFile)
+            .join(Share, Share.id == ShareLogicalFile.share_id)
+            .where(Share.code == resp.json()["share_code"])
+        )
+    assert logical_file is not None
+    assert logical_file.media_metadata["playback_hints"]["needs_virtual_faststart"] is True
+    assert logical_file.media_metadata["playback_assets"][0]["kind"] == "mp4_faststart_init"
 
 
 @pytest.mark.asyncio

@@ -941,47 +941,59 @@ export class PlayerEngine {
       }
 
       let currentSample: MbDecodedSample | null = null;
+      const sampleIterator = sink.samples(startSec)[Symbol.asyncIterator]();
       let sampleCount = 0;
       let lastScheduledAtMs = performance.now();
-      for await (currentSample of sink.samples(startSec)) {
-        if (this.disposed || epoch !== this.playbackEpoch) break;
+      try {
+        while (!this.disposed && epoch === this.playbackEpoch) {
+          const result = await sampleIterator.next();
+          if (result.done) break;
+          currentSample = result.value;
+          if (this.disposed || epoch !== this.playbackEpoch) break;
 
-        const sampleTimeSec = currentSample.timestamp / 1_000_000;
-        const nowMs = performance.now();
-        const wallGapMs = Math.round(nowMs - lastScheduledAtMs);
-        lastScheduledAtMs = nowMs;
+          const sampleTimeSec = currentSample.timestamp / 1_000_000;
+          const nowMs = performance.now();
+          const wallGapMs = Math.round(nowMs - lastScheduledAtMs);
+          lastScheduledAtMs = nowMs;
 
-        sampleCount++;
-        // 回压：如果已排程音频超过高水位，必须等 AudioContext 消耗回高水位以下。
-        // 只睡一次会让缓冲继续线性增长，拖动时需要停止成千上万个 SourceNode。
-        if (sampleCount % 50 === 0) {
-          while (!this.disposed && epoch === this.playbackEpoch) {
-            const snapshot = this.audioRenderer?.getClockSnapshot();
-            const bufferedSec = snapshot?.bufferedAheadSec ?? 0;
-            if (bufferedSec <= AC3_AUDIO_MAX_BUFFERED_AHEAD_SEC) break;
-            await sleep(200);
+          sampleCount++;
+          // 回压：如果已排程音频超过高水位，必须等 AudioContext 消耗回高水位以下。
+          // 只睡一次会让缓冲继续线性增长，拖动时需要停止成千上万个 SourceNode。
+          if (sampleCount % 50 === 0) {
+            while (!this.disposed && epoch === this.playbackEpoch) {
+              const snapshot = this.audioRenderer?.getClockSnapshot();
+              const bufferedSec = snapshot?.bufferedAheadSec ?? 0;
+              if (bufferedSec <= AC3_AUDIO_MAX_BUFFERED_AHEAD_SEC) break;
+              await sleep(200);
+            }
+          }
+          if (sampleCount <= 10 || sampleCount % 100 === 0 || wallGapMs > 500) {
+            const audioClock = this.audioRenderer?.getClockSnapshot();
+            this.debugLog?.("sdp-v2", "audio:ac3:schedule", {
+              sampleTime: +sampleTimeSec.toFixed(6),
+              clockSec: +this.clock.getCurrentTimeSec().toFixed(3),
+              audioClockSec: audioClock ? +audioClock.currentTimeSec.toFixed(3) : null,
+              bufferedAhead: audioClock ? +audioClock.bufferedAheadSec.toFixed(3) : null,
+              audioClockClamped: audioClock?.clamped ?? null,
+              count: sampleCount,
+              wallGapMs,
+            });
+          }
+          if (this.disposed || epoch !== this.playbackEpoch) break;
+
+          try {
+            this.audioRenderer!.scheduleDecodedSample(currentSample);
+          } finally {
+            try { currentSample.close(); } catch {}
+            currentSample = null;
           }
         }
-        if (sampleCount <= 10 || sampleCount % 100 === 0 || wallGapMs > 500) {
-          const audioClock = this.audioRenderer?.getClockSnapshot();
-          this.debugLog?.("sdp-v2", "audio:ac3:schedule", {
-            sampleTime: +sampleTimeSec.toFixed(6),
-            clockSec: +this.clock.getCurrentTimeSec().toFixed(3),
-            audioClockSec: audioClock ? +audioClock.currentTimeSec.toFixed(3) : null,
-            bufferedAhead: audioClock ? +audioClock.bufferedAheadSec.toFixed(3) : null,
-            audioClockClamped: audioClock?.clamped ?? null,
-            count: sampleCount,
-            wallGapMs,
-          });
+      } finally {
+        if (currentSample) {
+          try { currentSample.close(); } catch {}
+          currentSample = null;
         }
-        if (this.disposed || epoch !== this.playbackEpoch) break;
-
-        this.audioRenderer!.scheduleDecodedSample(currentSample);
-        currentSample = null;
-      }
-      // If the loop exited with an unconsumed sample, close it.
-      if (currentSample) {
-        try { currentSample.close(); } catch {}
+        await sampleIterator.return?.();
       }
     } catch (err) {
       // 新 seek 中断旧音频读取是预期取消；不要升级成页面级错误。

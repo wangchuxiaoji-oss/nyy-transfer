@@ -14,6 +14,13 @@ interface SdpPlayerProps {
 
 type SdpDebugWindow = Window & {
   __nyySdpSeek?: (seconds: number) => boolean;
+  __nyySdpDebug?: {
+    fileName: string;
+    state: PlayerState;
+    currentTime: number;
+    duration: number;
+    error: string;
+  };
 };
 
 export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
@@ -28,6 +35,17 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   const [buffering, setBuffering] = useState<BufferingState | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as SdpDebugWindow).__nyySdpDebug = {
+      fileName: file.file_name,
+      state,
+      currentTime,
+      duration,
+      error,
+    };
+  }, [currentTime, duration, error, file.file_name, state]);
+
   const reportRuntimeError = useCallback((reason: unknown) => {
     if (isIgnorablePlayerAbort(reason)) return;
     const message = reason instanceof Error ? reason.message : String(reason ?? "播放器发生未知错误");
@@ -114,6 +132,9 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       if (debugEnabled && (window as SdpDebugWindow).__nyySdpSeek) {
         delete (window as SdpDebugWindow).__nyySdpSeek;
       }
+      if ((window as SdpDebugWindow).__nyySdpDebug?.fileName === file.file_name) {
+        delete (window as SdpDebugWindow).__nyySdpDebug;
+      }
     };
   }, [file, debugLog, reportRuntimeError]);
 
@@ -153,8 +174,9 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
   };
 
   return (
-    <div className="w-full min-w-0 space-y-2">
+    <div data-testid="sdp-player" className="h-full w-full min-w-0 space-y-2">
       <PlayerChrome
+        className="min-h-0"
         view={viewState}
         actions={{
           play: handlePlay,
@@ -180,8 +202,7 @@ export function SdpPlayer({ file, debugLog }: SdpPlayerProps) {
       >
         <canvas
           ref={canvasRef}
-          className="block w-full min-w-0 max-w-full bg-black object-contain"
-          style={{ aspectRatio: "16/9" }}
+          className="absolute inset-0 h-full w-full min-w-0 max-w-full bg-black object-contain"
         />
       </PlayerChrome>
 

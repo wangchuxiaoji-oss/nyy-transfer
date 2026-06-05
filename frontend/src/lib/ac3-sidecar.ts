@@ -261,6 +261,7 @@ export async function decodeAc3Window(file: ShareFileDownload, targetSec: number
     libavInstance = await window.LibAV.LibAV({ noworker: true }) as Record<string, (...args: unknown[]) => Promise<unknown>>;
   }
   const api = libavInstance;
+  await api.av_log_set_level?.(-8);
   await api.writeFile?.("sample.ac3", payload);
   const [fmtCtx, streams] = await api.ff_init_demuxer_file("sample.ac3") as [number, Array<Record<string, unknown>>];
   const stream = streams[0];

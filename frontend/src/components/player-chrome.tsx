@@ -85,8 +85,8 @@ export function PlayerChrome({ view, actions, children, className = "" }: Player
   };
 
   return (
-    <div className={`relative w-full min-w-0 overflow-hidden bg-black text-white ${className}`}>
-      <div className="relative bg-black">
+    <div data-testid="player-chrome" className={`relative h-full w-full min-w-0 overflow-hidden bg-black text-white ${className}`}>
+      <div className="relative h-full bg-black">
         {children}
         {view.state !== "playing" && view.state !== "error" && (
           <div className="absolute inset-0 flex items-center justify-center">

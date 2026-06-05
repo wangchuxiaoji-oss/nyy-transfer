@@ -16,7 +16,11 @@
     "test:seek-patient": "node scripts/seek-stress-test.mjs --mode=patient",
     "test:seek-rapid": "node scripts/seek-stress-test.mjs --mode=rapid",
     "bench:buffer": "node scripts/buffer-benchmark.mjs",
-    "test:e2e": "npx playwright test"
+    "test:e2e": "npx playwright test",
+    "smoke:share-faststart": "node scripts/share-virtual-faststart-smoke.mjs",
+    "smoke:share-ac3": "node scripts/share-ac3-smoke.mjs",
+    "smoke:share-mkv-native": "node scripts/share-mkv-native-smoke.mjs",
+    "smoke:share-codec-matrix": "node scripts/share-codec-matrix-smoke.mjs"
   },
   "dependencies": {
     "@mediabunny/ac3": "^1.45.4",

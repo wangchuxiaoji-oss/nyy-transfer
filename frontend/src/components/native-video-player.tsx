@@ -15,6 +15,7 @@ interface NativeVideoPlayerProps {
   src: string;
   type: string;
   onError: (message: string) => void;
+  onLoadedMetadata?: () => void;
 }
 
 type WebkitVideoElement = HTMLVideoElement & {
@@ -32,7 +33,7 @@ const DOUBLE_TAP_DELAY_MS = 280;
 const VOLUME_STORAGE_KEY = "nyy-native-video-volume";
 const MUTED_STORAGE_KEY = "nyy-native-video-muted";
 
-export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps) {
+export function NativeVideoPlayer({ src, type, onError, onLoadedMetadata }: NativeVideoPlayerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLInputElement>(null);
@@ -162,6 +163,7 @@ export function NativeVideoPlayer({ src, type, onError }: NativeVideoPlayerProps
     setIsMuted(video.muted);
     setVolumeState(video.volume);
     syncBuffered();
+    onLoadedMetadata?.();
   };
 
   const togglePlay = useCallback(async () => {

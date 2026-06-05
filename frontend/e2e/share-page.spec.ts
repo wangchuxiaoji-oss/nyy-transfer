@@ -544,7 +544,7 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
   });
 
-  test("AC-3 MP4 自动走 SDP 播放路径", async ({ page }) => {
+  test("AC-3 MP4 默认走客户端 AC-3 播放路径", async ({ page }) => {
     const ac3Meta = {
       ...VIDEO_META,
       audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
@@ -576,8 +576,83 @@ test.describe("移动端横向溢出回归", () => {
 
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("ac3-video-preview").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
+    await expect(page.locator("canvas")).toHaveCount(0);
+  });
+
+  test("AC-3 MP4 可通过 sdp=1 显式进入 SDP 调试路径", async ({ page }) => {
+    const ac3Meta = {
+      ...VIDEO_META,
+      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/ac3.mp4", chunks: [], media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+    await page.route("https://example.com/ac3.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", body: "" })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}?sdp=1`);
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
+  });
+
+  test("E-AC-3 MP4 默认走 SDP 播放路径", async ({ page }) => {
+    const eac3Meta = {
+      ...VIDEO_META,
+      audio_tracks: [{ codec: "eac3", codec_tag: "ec-3" }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: eac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/eac3.mp4", chunks: [], media_metadata: eac3Meta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+    await page.route("https://example.com/eac3.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", body: "" })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
+    await expect(page.getByTestId("ac3-video-preview")).toHaveCount(0);
+    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
   });
 
   test("AAC MP4 即使 moov 在尾部仍使用原生播放器", async ({ page }) => {
@@ -619,7 +694,65 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.locator("canvas")).toHaveCount(0);
   });
 
-  test("移动端 MKV 回退到 SDP 预览路径", async ({ page }) => {
+  test("tail-moov AAC MP4 在有 faststart sidecar 时走虚拟快启 URL", async ({ page }) => {
+    const tailAacMeta = {
+      ...VIDEO_META,
+      is_faststart: false,
+      moov_offset: 9000000,
+      moov_size: 4096,
+      playback_hints: { needs_virtual_faststart: true },
+      playback_assets: [{
+        kind: "mp4_faststart_init",
+        sidecar_size: 8192,
+        virtual_size: 12345678,
+        source_media_start: 32,
+        source_media_end: 12337486,
+        download_url: "https://example.com/tail-aac-init.mp4",
+      }],
+      audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/tail-aac.mp4", chunks: [], media_metadata: tailAacMeta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+    await page.route("https://example.com/tail-aac-init.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/8192", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
+    );
+    await page.route("https://example.com/tail-aac.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-524287/12345678", "Accept-Ranges": "bytes" }, body: "x".repeat(1024) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"] video').first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+  });
+
+  test("MKV 在浏览器声明不支持时走 SDP 预览路径", async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("matroska")) return "";
+        return original.call(this, type);
+      };
+    });
     const mkvInfo = {
       ...MOCK_SHARE_INFO,
       files: [
@@ -645,13 +778,20 @@ test.describe("移动端横向溢出回归", () => {
       route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
     );
 
-    await page.setViewportSize({ width: 375, height: 667 });
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("mobile-mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
   });
 
-  test("桌面端 MKV 优先尝试原生 video 预览", async ({ page }) => {
+  test("MKV 在浏览器声明可能支持时优先原生 video 预览", async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("matroska")) return "maybe";
+        return original.call(this, type);
+      };
+    });
     const mkvInfo = {
       ...MOCK_SHARE_INFO,
       files: [
@@ -681,6 +821,51 @@ test.describe("移动端横向溢出回归", () => {
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="native-video-preview"] video').first()).toBeAttached();
+    await expect(page.getByTestId("mkv-sdp-preview")).toHaveCount(0);
+    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
+  });
+
+  test("MKV 内含 E-AC-3 时即使原生声明支持也走 SDP", async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("matroska")) return "maybe";
+        return original.call(this, type);
+      };
+    });
+    const eac3Meta = {
+      ...VIDEO_META,
+      audio_tracks: [{ codec: "eac3", codec_tag: "ec-3" }],
+    };
+    const mkvInfo = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: eac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const mkvDownload = {
+      files: [
+        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/eac3.mkv", chunks: [], media_metadata: eac3Meta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
+    );
+    await page.route("https://example.com/eac3.mkv", (route) =>
+      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
     await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
   });
 });
