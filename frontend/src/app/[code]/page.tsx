@@ -118,6 +118,27 @@ function isMkvFile(file: ShareFileDownload): boolean {
   return file.file_name.split(".").pop()?.toLowerCase() === "mkv";
 }
 
+/** 浏览器原生不支持的音频编码 fourcc / codec tag */
+const NATIVE_UNSUPPORTED_AUDIO_RE = /^(ac-3|ec-3|dts[a-z]?)$/;
+
+/**
+ * 判断 mp4/mov 视频是否需要走 SDP 播放器（不含 MKV，MKV 有独立逻辑）。
+ * 满足任一条件即 true：
+ * 1. moov 不在头部（is_faststart=false）：原生 <video> 需先 seek 尾部 moov，CDN 冷区慢
+ * 2. 音频编码浏览器不支持（AC-3/EC-3/DTS）：原生只能解视频轨，管线被音频卡住
+ */
+function needsSdpPlayer(file: ShareFileDownload): boolean {
+  if (isMkvFile(file)) return false; // MKV 走独立分支
+  const meta = file.media_metadata;
+  if (!meta || meta.probe_status !== "ok") return false; // 无元数据时走原生兜底
+  if (meta.is_faststart === false) return true;
+  const hasUnsupportedAudio = (meta.audio_tracks || []).some((t) => {
+    const codec = (t.codec_tag || t.codec || "").toLowerCase();
+    return NATIVE_UNSUPPORTED_AUDIO_RE.test(codec);
+  });
+  return hasUnsupportedAudio;
+}
+
 function NativeVideoPreview({ file, onDownload }: { file: ShareFileDownload; onDownload: () => void }) {
   const [failed, setFailed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("可以先下载文件后本地查看；SDP 自研播放器仍保留，后续继续优化。");
@@ -776,7 +797,7 @@ export default function SharePage() {
             <div className={s.stagePlayer}>
               {downloads.length > 0 && selectedFile ? (
                 <div key={`${selectedType}-${selectedIdx}`} className={s.stageContent}>
-                  {/* 视频：分享页默认使用浏览器原生播放器；SDP 代码保留但不作为默认路径 */}
+                  {/* 视频路由：MKV / 需要SDP的mp4 / 正常mp4 */}
                   {selectedType === "video" && (
                     isMkvFile(selectedFile) ? (
                       <>
@@ -787,6 +808,8 @@ export default function SharePage() {
                           <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
                         </div>
                       </>
+                    ) : needsSdpPlayer(selectedFile) ? (
+                      <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
                     ) : (
                       <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
                     )
