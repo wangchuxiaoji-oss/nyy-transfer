@@ -14,28 +14,60 @@ function workerMatchesCurrentMode(worker: ServiceWorker): boolean {
   return new URL(worker.scriptURL).pathname === getSwUrl();
 }
 
+function hasExpectedController(): boolean {
+  return !!navigator.serviceWorker.controller && workerMatchesCurrentMode(navigator.serviceWorker.controller);
+}
+
+async function waitForExpectedController(timeoutMs: number): Promise<void> {
+  if (hasExpectedController()) return;
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      navigator.serviceWorker.removeEventListener("controllerchange", onChange);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, timeoutMs);
+    const onChange = () => {
+      if (!hasExpectedController()) return;
+      finish();
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", onChange);
+  });
+}
+
+async function requestWorkerClaim(worker: ServiceWorker | null | undefined): Promise<void> {
+  if (!worker || !workerMatchesCurrentMode(worker)) return;
+  const channel = new MessageChannel();
+  const ack = new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("Service Worker 接管页面超时")), 3000);
+    channel.port1.onmessage = (event) => {
+      window.clearTimeout(timer);
+      if (event.data?.ok) resolve();
+      else reject(new Error(event.data?.error || "Service Worker 接管页面失败"));
+    };
+  });
+  worker.postMessage({ type: "NYY_CLAIM_CLIENTS" }, [channel.port2]);
+  await ack;
+}
+
 async function ensureVirtualMediaServiceWorker(): Promise<ServiceWorkerRegistration> {
   if (!("serviceWorker" in navigator)) throw new Error("当前浏览器不支持 Service Worker");
   const swUrl = getSwUrl();
   const registration = await navigator.serviceWorker.register(swUrl, { scope: "/" });
+  await registration.update().catch(() => {});
   await navigator.serviceWorker.ready;
 
-  const hasExpectedController = () => (
-    !!navigator.serviceWorker.controller && workerMatchesCurrentMode(navigator.serviceWorker.controller)
-  );
-
   if (!hasExpectedController()) {
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => resolve(), 3000);
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        clearTimeout(timer);
-        resolve();
-      }, { once: true });
-    });
+    await requestWorkerClaim(registration.active).catch(() => {});
+    await requestWorkerClaim(registration.waiting).catch(() => {});
+    await waitForExpectedController(8000);
   }
 
   if (!hasExpectedController()) {
-    throw new Error("Service Worker 已安装但尚未接管页面，请刷新后再试");
+    throw new Error("Service Worker 已安装但尚未接管页面，已尝试自动接管失败，请刷新后再试");
   }
   return registration;
 }

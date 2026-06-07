@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.main import create_app
-from app.models.share import Share, ShareLogicalFile
+from app.models.share import DownloadLog, Share, ShareLogicalFile
+from app.models.system import FileRequest, FileRequestFile
+from app.models.user import User
 from app.services.doubao_client import CommitResult, UploadInitResult
 
 
@@ -30,12 +34,29 @@ def app(redis):
 
 @pytest.fixture
 def _raise_share_limit():
-    """Temporarily raise guest_max_active_shares so commit tests pass."""
+    """固定成功路径配额，避免依赖测试库历史数据。"""
     from app.core.config import get_settings
     settings = get_settings()
     original = settings.guest_max_active_shares
     settings.guest_max_active_shares = 9999
-    yield
+    fixed_quota = {
+        "guest_max_file_bytes": 1024 * 1024 * 1024,
+        "guest_max_active_shares": 9999,
+        "guest_ttl_hours": 24,
+        "user_max_file_bytes": 1024 * 1024 * 1024,
+        "user_max_active_shares": 9999,
+        "user_ttl_hours": 720,
+    }
+    with patch(
+        "app.api.v1.uploads.get_quota_config",
+        new_callable=AsyncMock,
+        return_value=fixed_quota,
+    ), patch(
+        "app.api.v1.uploads._count_active_shares",
+        new_callable=AsyncMock,
+        return_value=0,
+    ):
+        yield
     settings.guest_max_active_shares = original
 
 
@@ -61,7 +82,7 @@ def _mock_init_result() -> UploadInitResult:
 
 
 @pytest.mark.asyncio
-async def test_upload_init_success(client, redis):
+async def test_upload_init_success(client, redis, _raise_share_limit):
     """init 正常流程：返回 upload_url + commit_token。"""
     mock_result = _mock_init_result()
     with patch(
@@ -108,8 +129,8 @@ async def test_upload_init_quota_exceeded(client, redis):
         "user_max_active_shares": 9999,
         "user_ttl_hours": 720,
     }
-    # 预设已用 199 MB
-    await redis.set("nyy:quota:ip:127.0.0.1:bytes", str(199 * 1024 * 1024))
+    # 预设当前浏览器游客已用 199 MB
+    await redis.set("nyy:quota:guest:guest-quota-full:bytes", str(199 * 1024 * 1024))
 
     with patch(
         "app.api.v1.uploads.get_quota_config",
@@ -124,8 +145,89 @@ async def test_upload_init_quota_exceeded(client, redis):
             "file_name": "big.bin",
             "file_size": 2 * 1024 * 1024,  # 2 MB，超过剩余 1 MB
             "file_ext": "bin",
-        })
+        }, headers={"x-nyy-guest-id": "guest-quota-full"})
     assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_guest_quota_isolated_by_guest_id(client, redis):
+    """同一 IP 下不同浏览器游客不共享上传额度。"""
+    fixed_quota = {
+        "guest_max_file_bytes": 200 * 1024 * 1024,
+        "guest_max_active_shares": 9999,
+        "guest_ttl_hours": 24,
+        "user_max_file_bytes": 1024 * 1024 * 1024,
+        "user_max_active_shares": 9999,
+        "user_ttl_hours": 720,
+    }
+    await redis.set("nyy:quota:guest:guest-phone-device:bytes", str(199 * 1024 * 1024))
+
+    with patch(
+        "app.api.v1.uploads.get_quota_config",
+        new_callable=AsyncMock,
+        return_value=fixed_quota,
+    ):
+        phone_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-phone-device"})
+        laptop_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-laptop-device"})
+
+    assert phone_resp.status_code == 200
+    assert laptop_resp.status_code == 200
+    assert phone_resp.json()["used_bytes"] == 199 * 1024 * 1024
+    assert laptop_resp.json()["used_bytes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_guest_active_share_limit_isolated_by_guest_id(client, redis):
+    """同一 IP 下不同浏览器游客不共享活跃分享数量。"""
+    phone_guest_id = f"guest-phone-{uuid.uuid4().hex[:8]}"
+    laptop_guest_id = f"guest-laptop-{uuid.uuid4().hex[:8]}"
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        db.add(Share(
+            code=f"as{uuid.uuid4().hex[:6]}",
+            owner_id=None,
+            guest_id=phone_guest_id,
+            ip_created_from="127.0.0.1",
+            total_bytes=128,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            revoke_token="token-active-limit",
+        ))
+        await db.commit()
+
+    fixed_quota = {
+        "guest_max_file_bytes": 200 * 1024 * 1024,
+        "guest_max_active_shares": 1,
+        "guest_ttl_hours": 24,
+        "user_max_file_bytes": 1024 * 1024 * 1024,
+        "user_max_active_shares": 9999,
+        "user_ttl_hours": 720,
+    }
+
+    with patch(
+        "app.api.v1.uploads.get_quota_config",
+        new_callable=AsyncMock,
+        return_value=fixed_quota,
+    ), patch(
+        "app.api.v1.uploads.get_doubao_client",
+        new_callable=AsyncMock,
+    ) as mock_get:
+        mock_client = AsyncMock()
+        mock_client.init_upload.return_value = _mock_init_result()
+        mock_get.return_value = mock_client
+        phone_resp = await client.post("/api/v1/uploads/init", json={
+            "file_name": "phone.txt",
+            "file_size": 16,
+            "file_ext": "txt",
+        }, headers={"x-nyy-guest-id": phone_guest_id})
+        laptop_resp = await client.post("/api/v1/uploads/init", json={
+            "file_name": "laptop.txt",
+            "file_size": 16,
+            "file_ext": "txt",
+        }, headers={"x-nyy-guest-id": laptop_guest_id})
+
+    assert phone_resp.status_code == 429
+    assert laptop_resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -135,6 +237,7 @@ async def test_upload_commit_success(client, redis, _raise_share_limit):
     token = "test-commit-token-abc"
     token_data = {
         "ip": "127.0.0.1",
+        "guest_id": "guest-commit-device",
         "file_name": "hello.txt",
         "file_size": 512,
         "file_ext": "txt",
@@ -171,8 +274,316 @@ async def test_upload_commit_success(client, redis, _raise_share_limit):
     assert await redis.get(f"nyy:commit:{token}") is None
 
     # 配额应已扣减
-    used = int(await redis.get("nyy:quota:ip:127.0.0.1:bytes") or 0)
+    used = int(await redis.get("nyy:quota:guest:guest-commit-device:bytes") or 0)
     assert used == 512
+
+
+@pytest.mark.asyncio
+async def test_upload_commit_rejects_legacy_download_limit(client):
+    """创建分享时下载次数必须使用固定选项。"""
+    resp = await client.post("/api/v1/uploads/commit", json={
+        "files": [{"commit_token": "unused", "store_uri": "tos-cn-i-test/hello.txt"}],
+        "max_downloads": 5,
+    })
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "下载次数上限不合法"
+
+
+@pytest.mark.asyncio
+async def test_share_download_writes_download_log(client, redis, _raise_share_limit):
+    """发放下载链接时同步写入最近取链日志。"""
+    token = "download-log-token"
+    token_data = {
+        "ip": "127.0.0.1",
+        "file_name": "hello.txt",
+        "file_size": 512,
+        "file_ext": "txt",
+        "store_uri": "tos-cn-i-test/hello.txt",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }
+    await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
+
+    with patch("app.api.v1.uploads.get_doubao_client", new_callable=AsyncMock) as mock_get:
+        mock_client = AsyncMock()
+        mock_client.commit_upload.return_value = CommitResult(
+            store_uri="tos-cn-i-test/hello.txt", success=True
+        )
+        mock_get.return_value = mock_client
+        commit_resp = await client.post("/api/v1/uploads/commit", json={
+            "files": [{"commit_token": token, "store_uri": "tos-cn-i-test/hello.txt"}],
+        })
+
+    assert commit_resp.status_code == 201
+    code = commit_resp.json()["share_code"]
+
+    with patch("app.api.v1.shares.get_doubao_client", new_callable=AsyncMock) as mock_get:
+        mock_client = AsyncMock()
+        mock_client.get_download_url.return_value = "https://download.test/hello.txt"
+        mock_get.return_value = mock_client
+        download_resp = await client.get(f"/api/v1/shares/{code}/download")
+
+    assert download_resp.status_code == 200
+
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        share = await db.scalar(select(Share).where(Share.code == code))
+        assert share is not None
+        assert share.download_count == 1
+        log = await db.scalar(select(DownloadLog).where(DownloadLog.share_id == share.id))
+        assert log is not None
+        assert log.ua is not None
+
+
+@pytest.mark.asyncio
+async def test_share_download_limit_is_reserved_atomically(client, redis, _raise_share_limit):
+    """并发取链时，max_downloads=1 只能成功发放一次。"""
+    token = "download-limit-token"
+    token_data = {
+        "ip": "127.0.0.1",
+        "file_name": "hello.txt",
+        "file_size": 512,
+        "file_ext": "txt",
+        "store_uri": "tos-cn-i-test/hello.txt",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }
+    await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
+
+    with patch("app.api.v1.uploads.get_doubao_client", new_callable=AsyncMock) as mock_get:
+        mock_client = AsyncMock()
+        mock_client.commit_upload.return_value = CommitResult(
+            store_uri="tos-cn-i-test/hello.txt", success=True
+        )
+        mock_get.return_value = mock_client
+        commit_resp = await client.post("/api/v1/uploads/commit", json={
+            "files": [{"commit_token": token, "store_uri": "tos-cn-i-test/hello.txt"}],
+            "max_downloads": 1,
+        })
+    assert commit_resp.status_code == 201
+    code = commit_resp.json()["share_code"]
+
+    async def slow_download_urls(_logical_files):
+        await asyncio.sleep(0.05)
+        return []
+
+    with patch("app.api.v1.shares._get_download_urls", side_effect=slow_download_urls):
+        first, second = await asyncio.gather(
+            client.get(f"/api/v1/shares/{code}/download"),
+            client.get(f"/api/v1/shares/{code}/download"),
+        )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 410]
+
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        share = await db.scalar(select(Share).where(Share.code == code))
+        assert share is not None
+        assert share.download_count == 1
+        log_count = await db.scalar(select(func.count()).select_from(DownloadLog).where(DownloadLog.share_id == share.id))
+        assert log_count == 1
+
+
+@pytest.mark.asyncio
+async def test_guest_mine_requires_local_revoke_tokens(client):
+    """游客列表只能返回本机持有撤销令牌的分享。"""
+    suffix = uuid.uuid4().hex[:6]
+    code_a = f"ga{suffix}"
+    code_b = f"gb{suffix}"
+
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        share_a = Share(
+            code=code_a,
+            owner_id=None,
+            ip_created_from="127.0.0.1",
+            total_bytes=128,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            revoke_token="token-a",
+        )
+        share_a.logical_files = [ShareLogicalFile(
+            original_name="guest-a.txt",
+            size=128,
+            content_type="text/plain",
+            sort_index=0,
+            chunk_total=1,
+        )]
+        db.add_all([
+            share_a,
+            Share(
+                code=code_b,
+                owner_id=None,
+                ip_created_from="127.0.0.1",
+                total_bytes=256,
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                revoke_token="token-b",
+            ),
+        ])
+        await db.commit()
+
+    legacy_resp = await client.get("/api/v1/shares/guest-mine")
+    assert legacy_resp.status_code in {404, 405}
+
+    resp = await client.post("/api/v1/shares/guest-mine", json={
+        "shares": [
+            {"code": code_a, "revoke_token": "token-a"},
+            {"code": code_b, "revoke_token": "wrong-token"},
+        ],
+    })
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [item["code"] for item in body] == [code_a]
+    assert body[0]["preview_files"] == ["guest-a.txt"]
+    assert body[0]["file_count"] == 1
+    assert body[0]["empty_dir_count"] == 0
+    assert body[0]["has_password"] is False
+    assert body[0]["status"] in {"active", "expiring"}
+
+
+@pytest.mark.asyncio
+async def test_guest_revoke_uses_revoke_token(client):
+    """游客持有撤销令牌时可以撤销自己的分享。"""
+    code = f"gr{uuid.uuid4().hex[:6]}"
+
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        db.add(Share(
+            code=code,
+            owner_id=None,
+            ip_created_from="127.0.0.1",
+            total_bytes=128,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            revoke_token="token-revoke",
+        ))
+        await db.commit()
+
+    bad_resp = await client.request(
+        "DELETE",
+        f"/api/v1/shares/{code}/guest-revoke",
+        json={"revoke_token": "wrong-token"},
+    )
+    assert bad_resp.status_code == 404
+
+    resp = await client.request(
+        "DELETE",
+        f"/api/v1/shares/{code}/guest-revoke",
+        json={"revoke_token": "token-revoke"},
+    )
+    assert resp.status_code == 200
+
+    info_resp = await client.get(f"/api/v1/shares/{code}")
+    assert info_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_file_request_commit_rejects_token_for_other_request(client, redis):
+    """收件提交不能复用其它收件链接初始化得到的 token。"""
+    token = "request-token"
+    token_data = {
+        "ip": "127.0.0.1",
+        "request_code": "right-code",
+        "file_name": "hello.txt",
+        "file_size": 512,
+        "file_ext": "txt",
+        "store_uri": "tos-cn-i-test/hello.txt",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }
+    await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
+
+    resp = await client.post("/api/v1/file-requests/wrong-code/commit", json={
+        "files": [{"commit_token": token, "store_uri": "tos-cn-i-test/hello.txt"}],
+    })
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "上传文件不属于当前请求链接"
+
+
+@pytest.mark.asyncio
+async def test_file_request_commit_limit_is_checked_under_commit_lock(client, redis):
+    """并发提交收件文件时，文件数量限制只能被消费一次。"""
+    request_code = f"req-{uuid.uuid4().hex[:8]}"
+    from app.db.session import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        user = User(email=f"request-owner-{uuid.uuid4().hex}@example.com", password_hash="hash")
+        db.add(user)
+        await db.flush()
+        db.add(FileRequest(
+            code=request_code,
+            owner_id=user.id,
+            title="并发收件测试",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            max_files=1,
+            max_bytes=10_000,
+        ))
+        await db.commit()
+
+    for idx in range(2):
+        token = f"request-lock-token-{idx}"
+        await redis.setex(f"nyy:commit:{token}", 1800, json.dumps({
+            "ip": "127.0.0.1",
+            "request_code": request_code,
+            "file_name": f"hello-{idx}.txt",
+            "file_size": 512,
+            "file_ext": "txt",
+            "store_uri": f"tos-cn-i-test/hello-{idx}.txt",
+            "session_key": "sk",
+            "service_id": "svc",
+            "access_key": "ak",
+            "secret_key": "sk",
+            "session_token": "st",
+        }))
+
+    async def slow_commit_upload(**_kwargs):
+        await asyncio.sleep(0.05)
+        return CommitResult(store_uri="tos-cn-i-test/unused.txt", success=True)
+
+    fixed_quota = {
+        "guest_max_file_bytes": 1024 * 1024 * 1024,
+        "guest_max_active_shares": 9999,
+        "guest_ttl_hours": 24,
+        "user_max_file_bytes": 1024 * 1024 * 1024,
+        "user_max_active_shares": 9999,
+        "user_ttl_hours": 720,
+    }
+    with patch("app.api.v1.file_requests.get_quota_config", new_callable=AsyncMock, return_value=fixed_quota), patch(
+        "app.api.v1.file_requests.get_doubao_client", new_callable=AsyncMock
+    ) as mock_get:
+        mock_client = AsyncMock()
+        mock_client.commit_upload.side_effect = slow_commit_upload
+        mock_get.return_value = mock_client
+        first, second = await asyncio.gather(
+            client.post(f"/api/v1/file-requests/{request_code}/commit", json={
+                "files": [{"commit_token": "request-lock-token-0", "store_uri": "tos-cn-i-test/hello-0.txt"}],
+            }),
+            client.post(f"/api/v1/file-requests/{request_code}/commit", json={
+                "files": [{"commit_token": "request-lock-token-1", "store_uri": "tos-cn-i-test/hello-1.txt"}],
+            }),
+        )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 429]
+    async with factory() as db:
+        count = await db.scalar(
+            select(func.count())
+            .select_from(FileRequestFile)
+            .join(FileRequest, FileRequest.id == FileRequestFile.request_id)
+            .where(FileRequest.code == request_code)
+        )
+        assert count == 1
 
 
 @pytest.mark.asyncio

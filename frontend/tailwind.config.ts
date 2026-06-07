@@ -58,7 +58,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-geist-mono)", "monospace"],
-        tech: ["Orbitron", "var(--font-geist-sans)", "system-ui", "sans-serif"],
+        tech: ["var(--font-geist-mono)", "var(--font-geist-sans)", "system-ui", "sans-serif"],
       },
       borderRadius: {
         "2xl": "1rem",

@@ -1,17 +1,18 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Copy, Trash2, Pencil, X, Check, Download, ExternalLink, Search } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clock, Copy, Download, ExternalLink, FileText, Inbox, Lock, MoreHorizontal, Package, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import {
-  isLoggedIn,
-  getMyFileRequests,
-  getMyRequestFiles,
-  getRequestFileDownload,
-  getMyShares,
-  revokeShare,
+  editFileRequest,
   editShare,
-  type MyFileRequestItem,
+  getMyInbox,
+  getMyShares,
+  getRequestFileDownload,
+  getMe,
+  revokeFileRequest,
+  revokeShare,
+  type MyInboxGroup,
   type MyRequestFileItem,
   type MyShareItem,
 } from "@/lib/auth";
@@ -23,8 +24,24 @@ import { ListSkeleton } from "@/components/skeleton";
 import { Pagination } from "@/components/pagination";
 import { formatSize } from "@/lib/utils";
 
-type Tab = "shares" | "requests" | "received";
+type Tab = "shares" | "inbox";
+type StatusFilter = "all" | "active" | "expired" | "revoked";
+type SizeUnit = "MB" | "GB";
+
 const PAGE_SIZE = 10;
+const DOWNLOAD_OPTIONS = [1, 10, 50, 100, 200, 0];
+const ONE_MB = 1024 * 1024;
+const ONE_GB = 1024 * ONE_MB;
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "全部状态" },
+  { value: "active", label: "有效" },
+  { value: "expired", label: "已过期" },
+  { value: "revoked", label: "已撤销" },
+];
+
+function isStatusFilter(value: string | null): value is StatusFilter {
+  return value === "all" || value === "active" || value === "expired" || value === "revoked";
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("zh-CN", {
@@ -35,8 +52,52 @@ function formatDate(iso: string): string {
   });
 }
 
+function sizeToDraft(bytes: number): { value: string; unit: SizeUnit } {
+  if (bytes >= ONE_GB && bytes % ONE_GB === 0) {
+    return { value: String(bytes / ONE_GB), unit: "GB" };
+  }
+  return { value: String(Math.max(1, Math.ceil(bytes / ONE_MB))), unit: "MB" };
+}
+
+function sizeDraftToBytes(value: string, unit: SizeUnit): number {
+  return Math.round(Number(value) * (unit === "GB" ? ONE_GB : ONE_MB));
+}
+
+function getShareStatus(share: MyShareItem): "active" | "expired" | "revoked" {
+  if (share.revoked) return "revoked";
+  if (share.expires_at && new Date(share.expires_at) < new Date()) return "expired";
+  return "active";
+}
+
+function getInboxStatus(group: MyInboxGroup): "active" | "expired" | "revoked" {
+  if (group.revoked) return "revoked";
+  if (group.expires_at && new Date(group.expires_at) < new Date()) return "expired";
+  return "active";
+}
+
+function StatusBadge({ status }: { status: "active" | "expired" | "revoked" }) {
+  const label = status === "active" ? "有效" : status === "expired" ? "已过期" : "已撤销";
+  const cls = status === "active"
+    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    : status === "expired"
+      ? "bg-warm-100 text-warm-600 dark:bg-gray-800 dark:text-gray-400"
+      : "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400";
+  return <span className={`type-caption rounded-full px-2 py-0.5 font-medium ${cls}`}>{label}</span>;
+}
+
+function downloadLabel(count: number, max: number): string {
+  if (max <= 0) return `${count} 次下载 · 不限`;
+  return `${count} / ${max} 次下载 · 剩余 ${Math.max(0, max - count)} 次`;
+}
+
+function downloadClass(count: number, max: number): string {
+  if (max > 0 && count >= max) return "border-red-500/30 bg-red-500/10 text-red-500";
+  if (max > 0 && max - count <= 5) return "border-amber-500/30 bg-amber-500/10 text-amber-500";
+  return "border-nyy-500/25 bg-nyy-500/10 text-nyy-500";
+}
+
 export default function MyPage() {
-  return <Suspense fallback={<div className="type-body min-h-screen bg-warm-50 dark:bg-background flex items-center justify-center text-warm-600 dark:text-gray-400">加载中...</div>}><MyWorkbenchPage /></Suspense>;
+  return <Suspense fallback={<div className="nyy-product-shell type-body flex items-center justify-center retro-text">加载中...</div>}><MyWorkbenchPage /></Suspense>;
 }
 
 function MyWorkbenchPage() {
@@ -44,93 +105,144 @@ function MyWorkbenchPage() {
   const searchParams = useSearchParams();
   const { showToast } = useToast();
 
-  // URL-derived state
   const tabParam = searchParams.get("tab") as Tab | null;
-  const activeTab: Tab = tabParam === "requests" || tabParam === "received" ? tabParam : "shares";
+  const activeTab: Tab = tabParam === "inbox" ? "inbox" : "shares";
   const q = searchParams.get("q") || "";
-  const status = searchParams.get("status") || "all";
+  const rawStatus = searchParams.get("status");
+  const status: StatusFilter = isStatusFilter(rawStatus) ? rawStatus : "all";
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
 
-  // Data state
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const [shares, setShares] = useState<MyShareItem[]>([]);
-  const [sharesTot, setSharesTot] = useState(0);
-  const [requests, setRequests] = useState<MyFileRequestItem[]>([]);
-  const [requestsTot, setRequestsTot] = useState(0);
-  const [received, setReceived] = useState<MyRequestFileItem[]>([]);
-  const [receivedTot, setReceivedTot] = useState(0);
-
-  // UI state
+  const [sharesTotal, setSharesTotal] = useState(0);
+  const [inboxGroups, setInboxGroups] = useState<MyInboxGroup[]>([]);
+  const [inboxTotal, setInboxTotal] = useState(0);
   const [searchDraft, setSearchDraft] = useState(q);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPassword, setEditPassword] = useState("");
-  const [editExpires, setEditExpires] = useState("0");
+  const [editClearPassword, setEditClearPassword] = useState(false);
+  const [editExpires, setEditExpires] = useState("keep");
+  const [editMaxDownloads, setEditMaxDownloads] = useState("0");
+  const [editingInboxCode, setEditingInboxCode] = useState<string | null>(null);
+  const [requestEditTitle, setRequestEditTitle] = useState("");
+  const [requestEditPassword, setRequestEditPassword] = useState("");
+  const [requestEditClearPassword, setRequestEditClearPassword] = useState(false);
+  const [requestEditExtendHours, setRequestEditExtendHours] = useState("keep");
+  const [requestEditMaxFiles, setRequestEditMaxFiles] = useState("20");
+  const [requestEditMaxBytesValue, setRequestEditMaxBytesValue] = useState("1024");
+  const [requestEditMaxBytesUnit, setRequestEditMaxBytesUnit] = useState<SizeUnit>("MB");
+  const [requestEditMaxBytesDirty, setRequestEditMaxBytesDirty] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{ type: "share" | "inbox"; code: string } | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [downloadingGroup, setDownloadingGroup] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
 
-  // Auth guard
   useEffect(() => {
-    if (!isLoggedIn()) router.replace("/");
+    let cancelled = false;
+    getMe()
+      .then(() => {
+        if (!cancelled) setAuthReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace("/");
+      });
+    return () => { cancelled = true; };
   }, [router]);
 
-  // URL update helper
   const setQuery = useCallback(
     (patch: Record<string, string | number | null>) => {
       const params = new URLSearchParams(searchParams.toString());
-      for (const [k, v] of Object.entries(patch)) {
-        if (v === null || v === "" || v === "all") params.delete(k);
-        else params.set(k, String(v));
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null || value === "" || value === "all") params.delete(key);
+        else params.set(key, String(value));
       }
-      router.replace(`/my?${params.toString()}`, { scroll: false });
+      const query = params.toString();
+      router.replace(query ? `/my?${query}` : "/my", { scroll: false });
     },
     [router, searchParams]
   );
 
-  // Data fetching
   useEffect(() => {
-    if (!isLoggedIn()) return;
-    let cancelled = false;
-    setLoading(true);
+    setSearchDraft(q);
+  }, [q]);
 
-    const fetchData = async () => {
+  const refreshShares = useCallback(async (shouldApply: () => boolean = () => true) => {
+    const res = await getMyShares(page, PAGE_SIZE, {
+      q: q || undefined,
+      status: status !== "all" ? status : undefined,
+    });
+    if (!shouldApply()) return;
+    setShares(res.shares);
+    setSharesTotal(res.total);
+  }, [page, q, status]);
+
+  const refreshInbox = useCallback(async (shouldApply: () => boolean = () => true) => {
+    const res = await getMyInbox({
+      page,
+      pageSize: PAGE_SIZE,
+      q: q || undefined,
+      status: status !== "all" ? status : undefined,
+    });
+    if (!shouldApply()) return;
+    setInboxGroups(res.groups);
+    setInboxTotal(res.total);
+    setExpandedGroups((current) => {
+      const visibleCodes = new Set(res.groups.map((group) => group.code));
+      const next = new Set(Array.from(current).filter((code) => visibleCodes.has(code)));
+      if (next.size > 0 || res.groups.length === 0) return next;
+      return new Set([res.groups[0].code]);
+    });
+  }, [page, q, status]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    const loadSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = loadSeq;
+    const shouldApply = () => !cancelled && loadSeq === loadSeqRef.current;
+    setLoading(true);
+    const load = async () => {
       try {
-        if (activeTab === "shares") {
-          const res = await getMyShares(page, PAGE_SIZE, {
-            q: q || undefined,
-            status: status !== "all" ? (status as "active" | "revoked" | "expired") : undefined,
-          });
-          if (!cancelled) { setShares(res.shares); setSharesTot(res.total); }
-        } else if (activeTab === "requests") {
-          const res = await getMyFileRequests({
-            sort: "created_desc",
-            page,
-            pageSize: PAGE_SIZE,
-          });
-          if (!cancelled) { setRequests(res.requests); setRequestsTot(res.total ?? 0); }
-        } else {
-          const res = await getMyRequestFiles({ page, pageSize: PAGE_SIZE });
-          if (!cancelled) { setReceived(res.files); setReceivedTot(res.total ?? 0); }
-        }
-      } catch (e) {
-        if (!cancelled) showToast({ title: getErrorMessage(e), type: "error" });
+        if (activeTab === "shares") await refreshShares(shouldApply);
+        else await refreshInbox(shouldApply);
+      } catch (error) {
+        if (shouldApply()) showToast({ title: getErrorMessage(error), type: "error" });
       } finally {
-        if (!cancelled) setLoading(false);
+        if (shouldApply()) setLoading(false);
       }
     };
-    fetchData();
+    void load();
     return () => { cancelled = true; };
-  }, [activeTab, q, status, page, showToast]);
+  }, [activeTab, authReady, refreshInbox, refreshShares, showToast]);
 
-  // Actions
+  const handleSearch = (event: FormEvent) => {
+    event.preventDefault();
+    setQuery({ q: searchDraft || null, page: null });
+  };
+
+  const handleCopy = (path: string) => {
+    void navigator.clipboard.writeText(`${window.location.origin}${path}`);
+    showToast({ title: "链接已复制", type: "success" });
+  };
+
   const handleRevoke = async () => {
     if (!confirmTarget) return;
     try {
-      await revokeShare(confirmTarget);
-      showToast({ title: "分享已撤销", type: "success" });
-      setShares((prev) => prev.filter((s) => s.code !== confirmTarget));
-      setSharesTot((t) => t - 1);
-    } catch (e) {
-      showToast({ title: getErrorMessage(e), type: "error" });
+      if (confirmTarget.type === "share") {
+        await revokeShare(confirmTarget.code);
+        showToast({ title: "分享已撤销", type: "success" });
+        setShares((prev) => prev.filter((share) => share.code !== confirmTarget.code));
+        setSharesTotal((total) => Math.max(0, total - 1));
+      } else {
+        await revokeFileRequest(confirmTarget.code);
+        showToast({ title: "收件链接已撤销", type: "success" });
+        setEditingInboxCode(null);
+        await refreshInbox();
+      }
+    } catch (error) {
+      showToast({ title: getErrorMessage(error), type: "error" });
     } finally {
       setConfirmOpen(false);
       setConfirmTarget(null);
@@ -138,162 +250,293 @@ function MyWorkbenchPage() {
   };
 
   const handleEdit = async (code: string) => {
+    if (!editMaxDownloads) {
+      showToast({ title: "请选择新的下载次数上限", type: "warning" });
+      return;
+    }
     try {
       await editShare(code, {
-        password: editPassword || undefined,
-        expires_hours: editExpires ? Number(editExpires) : undefined,
+        password: editClearPassword ? "" : editPassword || undefined,
+        expires_hours: editExpires === "keep" ? undefined : Number(editExpires),
+        max_downloads: Number(editMaxDownloads),
       });
       showToast({ title: "已保存", type: "success" });
       setEditingId(null);
-      // Refresh
-      const res = await getMyShares(page, PAGE_SIZE, { q: q || undefined, status: status !== "all" ? (status as "active" | "revoked" | "expired") : undefined });
-      setShares(res.shares);
-      setSharesTot(res.total);
-    } catch (e) {
-      showToast({ title: getErrorMessage(e), type: "error" });
+      await refreshShares();
+    } catch (error) {
+      showToast({ title: getErrorMessage(error), type: "error" });
     }
   };
 
-  const handleCopy = (code: string) => {
-    navigator.clipboard.writeText(`${window.location.origin}/${code}`);
-    showToast({ title: "链接已复制", type: "success" });
+  const handleEditInbox = async (group: MyInboxGroup) => {
+    const title = requestEditTitle.trim();
+    const maxFiles = Number(requestEditMaxFiles);
+    const maxBytes = sizeDraftToBytes(requestEditMaxBytesValue, requestEditMaxBytesUnit);
+
+    if (!title) {
+      showToast({ title: "请输入收件标题", type: "warning" });
+      return;
+    }
+    if (requestEditPassword && requestEditPassword.length !== 4) {
+      showToast({ title: "访问码需要 4 位数字", type: "warning" });
+      return;
+    }
+    if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > 100) {
+      showToast({ title: "最大文件数需要在 1 到 100 之间", type: "warning" });
+      return;
+    }
+    if (maxFiles < group.file_count) {
+      showToast({ title: "文件数上限不能低于已收到文件数", type: "warning" });
+      return;
+    }
+    if (requestEditMaxBytesDirty) {
+      const maxBytesValue = Number(requestEditMaxBytesValue);
+      if (!Number.isFinite(maxBytesValue) || maxBytesValue <= 0 || maxBytes > ONE_GB) {
+        showToast({ title: "容量上限需要在 1MB 到 1GB 之间", type: "warning" });
+        return;
+      }
+      if (maxBytes < group.total_bytes) {
+        showToast({ title: "容量上限不能低于已收到容量", type: "warning" });
+        return;
+      }
+    }
+
+    const payload: { title?: string; password?: string; extend_hours?: number; max_files?: number; max_bytes?: number } = {};
+    if (title !== group.title) payload.title = title;
+    if (requestEditClearPassword) payload.password = "";
+    else if (requestEditPassword) payload.password = requestEditPassword;
+    if (requestEditExtendHours !== "keep") payload.extend_hours = Number(requestEditExtendHours);
+    if (maxFiles !== group.max_files) payload.max_files = maxFiles;
+    if (requestEditMaxBytesDirty) payload.max_bytes = maxBytes;
+
+    if (Object.keys(payload).length === 0) {
+      showToast({ title: "没有需要保存的改动", type: "info" });
+      return;
+    }
+
+    try {
+      await editFileRequest(group.code, payload);
+      showToast({ title: "收件链接已保存", type: "success" });
+      setEditingInboxCode(null);
+      await refreshInbox();
+    } catch (error) {
+      showToast({ title: getErrorMessage(error), type: "error" });
+    }
   };
 
-  const handleDownloadReceived = async (fileId: string) => {
+  const handleDownloadReceived = async (file: MyRequestFileItem) => {
     try {
-      const { download_url } = await getRequestFileDownload(fileId);
-      window.open(download_url, "_blank");
-    } catch (e) {
-      showToast({ title: getErrorMessage(e), type: "error" });
+      const { download_url } = await getRequestFileDownload(file.id);
+      const link = document.createElement("a");
+      link.href = download_url;
+      link.download = file.file_name;
+      link.rel = "noopener";
+      link.click();
+    } catch (error) {
+      showToast({ title: getErrorMessage(error), type: "error" });
+    }
+  };
+
+  const handleDownloadGroup = async (group: MyInboxGroup) => {
+    if (group.files.length === 0) {
+      showToast({ title: "这个收件链接还没有文件", type: "info" });
+      return;
+    }
+    setDownloadingGroup(group.code);
+    try {
+      const { downloadZip } = await import("client-zip");
+      const entries = await Promise.all(group.files.map(async (file) => {
+        const { download_url } = await getRequestFileDownload(file.id);
+        const response = await fetch(download_url);
+        if (!response.ok) throw new Error(`${file.file_name} 下载失败（${response.status}）`);
+        return { name: file.file_name, input: response };
+      }));
+      const blob = await downloadZip(entries).blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${group.code}-收件箱.zip`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      showToast({ title: getErrorMessage(error, "打包下载失败"), type: "error" });
+    } finally {
+      setDownloadingGroup(null);
     }
   };
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "shares", label: "我的分享" },
-    { key: "requests", label: "文件请求" },
-    { key: "received", label: "收到的文件" },
+    { key: "inbox", label: "收件箱" },
   ];
-
-  const totalForTab = activeTab === "shares" ? sharesTot : activeTab === "requests" ? requestsTot : receivedTot;
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setQuery({ q: searchDraft || null, page: null });
-  };
+  const totalForTab = activeTab === "shares" ? sharesTotal : inboxTotal;
 
   return (
-    <main className="min-h-screen bg-warm-50 dark:bg-background px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-3">
-          <button onClick={() => router.push("/")} className="rounded-full p-2 text-warm-600 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 transition" aria-label="返回首页">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="type-title text-warm-900 dark:text-gray-100">我的工作台</h1>
+    <main className="nyy-product-shell px-4 py-6 sm:px-6 lg:px-8">
+      <div className="nyy-product-content mx-auto max-w-5xl">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => router.push("/")} className="retro-btn-secondary min-h-0 rounded-full p-2" aria-label="返回首页">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div>
+              <p className="retro-kicker">nyy workbench</p>
+              <h1 className="retro-title text-2xl">我的工作台</h1>
+            </div>
+          </div>
+          {activeTab === "inbox" && (
+            <button onClick={() => router.push("/?mode=receive")} className="btn-primary min-h-[40px] px-4">
+              <Plus className="h-4 w-4" /> 新建收件链接
+            </button>
+          )}
         </div>
 
-        {/* Tabs */}
-        <div className="mb-4 flex gap-1 rounded-2xl bg-warm-100 dark:bg-white/5 p-1">
-          {tabs.map((t) => (
+        <div className="retro-tabbar mb-4 grid grid-cols-2 gap-1">
+          {tabs.map((tab) => (
             <button
-              key={t.key}
-              onClick={() => setQuery({ tab: t.key === "shares" ? null : t.key, q: null, status: null, page: null })}
-              className={`type-action flex-1 rounded-xl px-3 py-2 transition ${
-                activeTab === t.key ? "bg-white dark:bg-white/10 text-warm-900 dark:text-gray-100 shadow-sm" : "text-warm-600 dark:text-gray-400 hover:text-warm-800 dark:hover:text-gray-200"
-              }`}
+              key={tab.key}
+              onClick={() => setQuery({ tab: tab.key === "shares" ? null : tab.key, q: null, status: null, page: null })}
+              className={`type-action rounded-xl px-3 py-2.5 transition ${activeTab === tab.key ? "retro-tab-active" : "retro-muted hover:text-nyy-500"}`}
             >
-              {t.label}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        {/* Search & Filter */}
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <form onSubmit={handleSearch} className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-warm-400" />
+        <div className="mb-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_11rem]">
+          <form onSubmit={handleSearch} className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 retro-muted" />
             <input
               type="text"
               value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder={activeTab === "shares" ? "搜索分享码或标题…" : activeTab === "requests" ? "搜索请求标题…" : "搜索文件名…"}
-              className="type-body-sm w-full rounded-xl border border-warm-200 dark:border-gray-700 bg-white dark:bg-card py-2 pl-9 pr-3 text-warm-800 dark:text-gray-200 placeholder:text-warm-400 dark:placeholder:text-gray-500 focus:border-nyy focus:outline-none focus:ring-1 focus:ring-nyy/30"
+              onChange={(event) => setSearchDraft(event.target.value)}
+              placeholder={activeTab === "shares" ? "搜索分享码或文件名..." : "搜索收件标题、请求码或文件名..."}
+              className="retro-input type-body-sm w-full py-2 pl-9 pr-3"
             />
           </form>
-          {activeTab === "shares" && (
-            <select
-              value={status}
-              onChange={(e) => setQuery({ status: e.target.value, page: null })}
-              className="type-body-sm rounded-xl border border-warm-200 dark:border-gray-700 bg-white dark:bg-card px-3 py-2 text-warm-700 dark:text-gray-300 focus:border-nyy focus:outline-none"
-            >
-              <option value="all">全部状态</option>
-              <option value="active">有效</option>
-              <option value="expired">已过期</option>
-              <option value="revoked">已撤销</option>
-            </select>
-          )}
+          <StatusMenu value={status} onChange={(nextStatus) => setQuery({ status: nextStatus, page: null })} />
         </div>
 
-        {/* Content */}
         {loading ? (
           <ListSkeleton rows={4} />
         ) : totalForTab === 0 ? (
           <EmptyState
-            title={activeTab === "shares" ? "还没有分享" : activeTab === "requests" ? "还没有文件请求" : "还没有收到文件"}
-            description={activeTab === "shares" ? "上传文件后即可创建分享链接" : activeTab === "requests" ? "创建文件请求让他人向你发送文件" : "创建文件请求后，他人提交的文件会出现在这里"}
-            action={activeTab !== "received" ? (
-              <button onClick={() => router.push("/")} className="btn-primary">
-                {activeTab === "shares" ? "去上传" : "创建请求"}
+            title={activeTab === "shares" ? "还没有分享" : "还没有收件链接"}
+            description={activeTab === "shares" ? "上传文件后即可创建分享链接，工作台会自动显示内容摘要。" : "创建收件链接后，对方提交的文件会按链接分组出现在这里。"}
+            action={(
+              <button onClick={() => router.push(activeTab === "shares" ? "/" : "/?mode=receive")} className="btn-primary">
+                {activeTab === "shares" ? "去上传" : "新建收件链接"}
               </button>
-            ) : undefined}
+            )}
           />
-        ) : (
-          <div className="space-y-3">
-            {activeTab === "shares" && shares.map((s) => (
+        ) : activeTab === "shares" ? (
+          <div className="grid gap-3">
+            {shares.map((share) => (
               <ShareCard
-                key={s.code}
-                share={s}
-                isEditing={editingId === s.code}
+                key={share.code}
+                share={share}
+                isEditing={editingId === share.code}
                 editPassword={editPassword}
+                editClearPassword={editClearPassword}
                 editExpires={editExpires}
-                onEditStart={() => { setEditingId(s.code); setEditPassword(""); setEditExpires("0"); }}
+                editMaxDownloads={editMaxDownloads}
+                onEditStart={() => {
+                  setEditingInboxCode(null);
+                  setEditingId(share.code);
+                  setEditPassword("");
+                  setEditClearPassword(false);
+                  setEditExpires("keep");
+                  setEditMaxDownloads(DOWNLOAD_OPTIONS.includes(share.max_downloads) ? String(share.max_downloads) : "");
+                }}
                 onEditCancel={() => setEditingId(null)}
-                onEditSave={() => handleEdit(s.code)}
+                onEditSave={() => handleEdit(share.code)}
                 onEditPasswordChange={setEditPassword}
+                onEditClearPasswordChange={setEditClearPassword}
                 onEditExpiresChange={setEditExpires}
-                onCopy={() => handleCopy(s.code)}
-                onRevoke={() => { setConfirmTarget(s.code); setConfirmOpen(true); }}
+                onEditMaxDownloadsChange={setEditMaxDownloads}
+                onCopy={() => handleCopy(`/${share.code}`)}
+                onRevoke={() => { setConfirmTarget({ type: "share", code: share.code }); setConfirmOpen(true); }}
               />
             ))}
-
-            {activeTab === "requests" && requests.map((r) => (
-              <RequestCard key={r.code} request={r} onCopy={() => handleCopy(r.code)} />
-            ))}
-
-            {activeTab === "received" && received.map((f) => (
-              <ReceivedCard key={f.id} file={f} onDownload={() => handleDownloadReceived(f.id)} />
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {inboxGroups.map((group) => (
+              <InboxGroupCard
+                key={group.code}
+                group={group}
+                expanded={expandedGroups.has(group.code)}
+                downloading={downloadingGroup === group.code}
+                isEditing={editingInboxCode === group.code}
+                editTitle={requestEditTitle}
+                editPassword={requestEditPassword}
+                editClearPassword={requestEditClearPassword}
+                editExtendHours={requestEditExtendHours}
+                editMaxFiles={requestEditMaxFiles}
+                editMaxBytesValue={requestEditMaxBytesValue}
+                editMaxBytesUnit={requestEditMaxBytesUnit}
+                onToggle={() => setExpandedGroups((current) => {
+                  const next = new Set(current);
+                  if (next.has(group.code)) next.delete(group.code);
+                  else next.add(group.code);
+                  return next;
+                })}
+                onCopy={() => handleCopy(`/r/${group.code}`)}
+                onEditStart={() => {
+                  const sizeDraft = sizeToDraft(group.max_bytes);
+                  setEditingId(null);
+                  setEditingInboxCode(group.code);
+                  setRequestEditTitle(group.title);
+                  setRequestEditPassword("");
+                  setRequestEditClearPassword(false);
+                  setRequestEditExtendHours("keep");
+                  setRequestEditMaxFiles(String(group.max_files));
+                  setRequestEditMaxBytesValue(sizeDraft.value);
+                  setRequestEditMaxBytesUnit(sizeDraft.unit);
+                  setRequestEditMaxBytesDirty(false);
+                }}
+                onEditCancel={() => setEditingInboxCode(null)}
+                onEditSave={() => void handleEditInbox(group)}
+                onEditTitleChange={setRequestEditTitle}
+                onEditPasswordChange={setRequestEditPassword}
+                onEditClearPasswordChange={setRequestEditClearPassword}
+                onEditExtendHoursChange={setRequestEditExtendHours}
+                onEditMaxFilesChange={setRequestEditMaxFiles}
+                onEditMaxBytesValueChange={(value) => {
+                  setRequestEditMaxBytesValue(value);
+                  setRequestEditMaxBytesDirty(true);
+                }}
+                onEditMaxBytesUnitChange={(unit) => {
+                  const currentBytes = sizeDraftToBytes(requestEditMaxBytesValue, requestEditMaxBytesUnit);
+                  setRequestEditMaxBytesUnit(unit);
+                  setRequestEditMaxBytesValue(String(Math.max(1, Math.ceil(currentBytes / (unit === "GB" ? ONE_GB : ONE_MB)))));
+                  setRequestEditMaxBytesDirty(true);
+                }}
+                onRevoke={() => { setConfirmTarget({ type: "inbox", code: group.code }); setConfirmOpen(true); }}
+                onDownloadGroup={() => void handleDownloadGroup(group)}
+                onDownloadFile={(file) => void handleDownloadReceived(file)}
+              />
             ))}
           </div>
         )}
 
-        {/* Pagination */}
         {totalForTab > PAGE_SIZE && (
           <div className="mt-6">
             <Pagination
               page={page}
               total={totalForTab}
               pageSize={PAGE_SIZE}
-              onPageChange={(p) => setQuery({ page: p <= 1 ? null : p })}
+              onPageChange={(nextPage) => setQuery({ page: nextPage <= 1 ? null : nextPage })}
             />
           </div>
         )}
       </div>
 
-      {/* Confirm Dialog */}
       <ConfirmDialog
         open={confirmOpen}
-        title="撤销分享"
-        description="撤销后链接将永久失效，无法恢复。确定要撤销吗？"
-        confirmText="确定撤销"
+        title={confirmTarget?.type === "inbox" ? "撤销收件链接" : "撤销分享"}
+        description={confirmTarget?.type === "inbox" ? "撤销后收件链接将失效，已收到文件会从收件箱移除且不能继续下载。确定要撤销吗？" : "撤销后链接将永久失效，无法恢复。确定要撤销吗？"}
+        confirmText={confirmTarget?.type === "inbox" ? "撤销并移除文件" : "确定撤销"}
         danger
         onConfirm={handleRevoke}
         onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); }}
@@ -302,127 +545,470 @@ function MyWorkbenchPage() {
   );
 }
 
-/* ─── Share Card ─── */
 interface ShareCardProps {
   share: MyShareItem;
   isEditing: boolean;
   editPassword: string;
+  editClearPassword: boolean;
   editExpires: string;
+  editMaxDownloads: string;
   onEditStart: () => void;
   onEditCancel: () => void;
   onEditSave: () => void;
-  onEditPasswordChange: (v: string) => void;
-  onEditExpiresChange: (v: string) => void;
+  onEditPasswordChange: (value: string) => void;
+  onEditClearPasswordChange: (value: boolean) => void;
+  onEditExpiresChange: (value: string) => void;
+  onEditMaxDownloadsChange: (value: string) => void;
   onCopy: () => void;
   onRevoke: () => void;
 }
 
-function ShareCard({ share, isEditing, editPassword, editExpires, onEditStart, onEditCancel, onEditSave, onEditPasswordChange, onEditExpiresChange, onCopy, onRevoke }: ShareCardProps) {
-  const derivedStatus = share.revoked ? "revoked" : (share.expires_at && new Date(share.expires_at) < new Date()) ? "expired" : "active";
-  const isActive = derivedStatus === "active";
-  const statusLabel = derivedStatus === "active" ? "有效" : derivedStatus === "expired" ? "已过期" : "已撤销";
-  const statusColor = derivedStatus === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : derivedStatus === "expired" ? "bg-warm-100 text-warm-600 dark:bg-gray-800 dark:text-gray-400" : "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400";
+function useDropdownDismiss<T extends HTMLElement>(open: boolean, ref: RefObject<T>, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && ref.current && !ref.current.contains(target)) onClose();
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open, onClose, ref]);
+}
+
+function StatusMenu({ value, onChange }: { value: StatusFilter; onChange: (value: StatusFilter) => void }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selected = STATUS_OPTIONS.find((option) => option.value === value) || STATUS_OPTIONS[0];
+  useDropdownDismiss(open, menuRef, () => setOpen(false));
 
   return (
-    <div className="rounded-2xl border border-warm-100 dark:border-gray-700 bg-white dark:bg-card p-4 shadow-sm dark:shadow-none">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="type-body-sm font-mono font-semibold text-nyy dark:text-nyy-400">{share.code}</span>
-            <span className={`type-caption rounded-full px-2 py-0.5 font-medium ${statusColor}`}>{statusLabel}</span>
-          </div>
-          {share.title && <p className="type-body mt-0.5 truncate text-warm-700 dark:text-gray-300">{share.title}</p>}
-          <p className="type-body-sm mt-1 text-warm-500 dark:text-gray-500">
-            {share.file_count} 个文件 · {formatSize(share.total_bytes)} · {formatDate(share.created_at)}
-            {share.download_count > 0 && ` · ${share.download_count} 次下载`}
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-1">
-          <button onClick={onCopy} className="rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 hover:text-nyy dark:hover:text-nyy-400 transition" title="复制链接"><Copy className="h-4 w-4" /></button>
-          {isActive && <button onClick={onEditStart} className="rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 hover:text-nyy dark:hover:text-nyy-400 transition" title="编辑"><Pencil className="h-4 w-4" /></button>}
-          {isActive && <button onClick={onRevoke} className="rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition" title="撤销"><Trash2 className="h-4 w-4" /></button>}
-        </div>
-      </div>
-
-      {/* Inline Edit Form */}
-      {isEditing && (
-        <div className="mt-3 space-y-2 border-t border-warm-100 dark:border-gray-700 pt-3">
-          <input
-            type="text"
-            value={editPassword}
-            onChange={(e) => onEditPasswordChange(e.target.value)}
-            placeholder="新提取码（留空不修改）"
-            className="type-body-sm w-full rounded-lg border border-warm-200 dark:border-gray-700 bg-white dark:bg-background px-3 py-1.5 dark:text-gray-200 focus:border-nyy focus:outline-none"
-          />
-          <select
-            value={editExpires}
-            onChange={(e) => onEditExpiresChange(e.target.value)}
-            className="type-body-sm w-full rounded-lg border border-warm-200 dark:border-gray-700 bg-white dark:bg-background px-3 py-1.5 dark:text-gray-200 focus:border-nyy focus:outline-none"
-          >
-            <option value="0">永不过期</option>
-            <option value="1">1 小时</option>
-            <option value="24">1 天</option>
-            <option value="168">7 天</option>
-            <option value="720">30 天</option>
-          </select>
-          <div className="flex gap-2">
-            <button onClick={onEditSave} className="btn-primary flex items-center gap-1 px-3 py-1.5">
-              <Check className="h-3.5 w-3.5" /> 保存
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="retro-input type-body-sm flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+      >
+        <span>{selected.label}</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div role="menu" className="retro-menu absolute right-0 top-full z-30 mt-2 w-full min-w-44 rounded-2xl p-1">
+          {STATUS_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={value === option.value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className="retro-menu-item type-action justify-between"
+            >
+              <span>{option.label}</span>
+              {value === option.value && <Check className="h-4 w-4 text-nyy-500" />}
             </button>
-            <button onClick={onEditCancel} className="type-action flex items-center gap-1 rounded-lg border border-warm-200 dark:border-gray-700 px-3 py-1.5 text-warm-600 dark:text-gray-400 hover:bg-warm-50 dark:hover:bg-white/5 transition">
-              <X className="h-3.5 w-3.5" /> 取消
-            </button>
-          </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-/* ─── Request Card ─── */
-function RequestCard({ request, onCopy }: { request: MyFileRequestItem; onCopy: () => void }) {
-  const isActive = request.expires_at ? new Date(request.expires_at) > new Date() : true;
-  const isRevoked = request.revoked;
+interface WorkbenchAction {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  href?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}
+
+function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(open, menuRef, () => setOpen(false));
+
   return (
-    <div className="rounded-2xl border border-warm-100 dark:border-gray-700 bg-white dark:bg-card p-4 shadow-sm dark:shadow-none">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="type-body-sm font-mono font-semibold text-nyy dark:text-nyy-400">{request.code}</span>
-            <span className={`type-caption rounded-full px-2 py-0.5 font-medium ${isRevoked ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-warm-100 text-warm-600 dark:bg-gray-800 dark:text-gray-400"}`}>
-              {isRevoked ? "已撤销" : isActive ? "收集中" : "已过期"}
-            </span>
-          </div>
-          {request.title && <p className="type-body mt-0.5 truncate text-warm-700 dark:text-gray-300">{request.title}</p>}
-          <p className="type-body-sm mt-1 text-warm-500 dark:text-gray-500">
-            已收到 {request.file_count} 个文件 · {formatSize(request.total_bytes)} · {formatDate(request.created_at)}
-          </p>
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="retro-btn-secondary min-h-[38px] w-full px-3"
+      >
+        <MoreHorizontal className="h-4 w-4" />操作
+      </button>
+      {open && (
+        <div role="menu" className="retro-menu absolute right-0 top-full z-30 mt-2 w-44 rounded-2xl p-1">
+          {actions.map((action) => {
+            const itemClass = `retro-menu-item type-action ${action.danger ? "retro-menu-item-danger" : ""}`;
+            if (action.href && !action.disabled) {
+              return (
+                <a key={action.key} href={action.href} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setOpen(false)} className={itemClass}>
+                  {action.icon}{action.label}
+                </a>
+              );
+            }
+            return (
+              <button
+                key={action.key}
+                type="button"
+                role="menuitem"
+                disabled={action.disabled}
+                onClick={() => {
+                  action.onClick?.();
+                  setOpen(false);
+                }}
+                className={itemClass}
+              >
+                {action.icon}{action.label}
+              </button>
+            );
+          })}
         </div>
-        <div className="flex shrink-0 gap-1">
-          <button onClick={onCopy} className="rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 hover:text-nyy dark:hover:text-nyy-400 transition" title="复制链接"><Copy className="h-4 w-4" /></button>
-          <a href={`/r/${request.code}`} className="rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 hover:text-nyy dark:hover:text-nyy-400 transition" title="打开"><ExternalLink className="h-4 w-4" /></a>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-/* ─── Received File Card ─── */
-function ReceivedCard({ file, onDownload }: { file: MyRequestFileItem; onDownload: () => void }) {
+function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpires, editMaxDownloads, onEditStart, onEditCancel, onEditSave, onEditPasswordChange, onEditClearPasswordChange, onEditExpiresChange, onEditMaxDownloadsChange, onCopy, onRevoke }: ShareCardProps) {
+  const status = getShareStatus(share);
+  const isActive = status === "active";
+  const previewFiles = share.preview_files || [];
+  const hiddenFileCount = Math.max(0, share.file_count - previewFiles.length);
+  const actions: WorkbenchAction[] = [
+    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy },
+    { key: "open", label: "打开分享", icon: <ExternalLink className="h-4 w-4" />, href: `/${share.code}` },
+  ];
+  if (isActive) {
+    actions.push(
+      { key: "edit", label: "编辑设置", icon: <Pencil className="h-4 w-4" />, onClick: onEditStart },
+      { key: "revoke", label: "撤销分享", icon: <Trash2 className="h-4 w-4" />, onClick: onRevoke, danger: true }
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-warm-100 dark:border-gray-700 bg-white dark:bg-card p-4 shadow-sm dark:shadow-none">
-      <div className="flex items-center justify-between gap-2">
+    <article className="retro-card p-4 sm:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
-          <p className="type-file-name truncate font-medium text-warm-800 dark:text-gray-200">{file.file_name}</p>
-          <p className="type-file-meta mt-0.5 text-warm-500 dark:text-gray-500">
-            {formatSize(file.file_size)} · {formatDate(file.created_at)}
-            {file.request_code && ` · 来自 ${file.request_code}`}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-lg font-bold text-nyy-500">/{share.code}</span>
+            <StatusBadge status={status} />
+            {share.has_password && <span className="retro-chip"><Lock className="mr-1 h-3 w-3" /> 提取码</span>}
+          </div>
+          <div className="mt-3 grid gap-2">
+            <p className="type-body-sm retro-text">
+              {share.file_count > 0 ? `包含 ${share.file_count} 个文件` : "没有文件"}
+              {share.empty_dir_count > 0 && ` · ${share.empty_dir_count} 个空文件夹`}
+            </p>
+            {previewFiles.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {previewFiles.map((name) => (
+                  <span key={name} className="max-w-full truncate rounded-lg border border-white/10 bg-white/5 px-2 py-1 type-caption retro-text sm:max-w-[14rem]">
+                    {name}
+                  </span>
+                ))}
+                {hiddenFileCount > 0 && <span className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 type-caption retro-muted">等 {hiddenFileCount} 个</span>}
+              </div>
+            ) : (
+              <p className="type-caption retro-muted">打开分享页可查看完整文件列表</p>
+            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 type-caption retro-muted">
+              <span>{formatSize(share.total_bytes)}</span>
+              <span>创建 {formatDate(share.created_at)}</span>
+              <span>{share.expires_at ? `到期 ${formatDate(share.expires_at)}` : "永不过期"}</span>
+              <span>{share.last_downloaded_at ? `最近下载 ${formatDate(share.last_downloaded_at)}` : "暂无下载"}</span>
+              <span className={`inline-flex rounded-full border px-2 py-0.5 ${downloadClass(share.download_count, share.max_downloads)}`}>{downloadLabel(share.download_count, share.max_downloads)}</span>
+            </div>
+          </div>
         </div>
-        <button onClick={onDownload} className="shrink-0 rounded-lg p-1.5 text-warm-500 dark:text-gray-400 hover:bg-warm-100 dark:hover:bg-white/10 hover:text-nyy dark:hover:text-nyy-400 transition" title="下载">
-          <Download className="h-4 w-4" />
-        </button>
+        <div className="sm:hidden">
+          <ActionMenu actions={actions} />
+        </div>
+        <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
+          <button onClick={onCopy} className="retro-btn-secondary min-h-[38px] px-3" title="复制链接"><Copy className="h-4 w-4" />复制</button>
+          <a href={`/${share.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3" title="打开分享"><ExternalLink className="h-4 w-4" />打开</a>
+          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3" title="编辑"><Pencil className="h-4 w-4" />编辑</button>}
+          {isActive && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500" title="撤销"><Trash2 className="h-4 w-4" />撤销</button>}
+        </div>
       </div>
-    </div>
+
+      {isEditing && (
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="block">
+              <span className="type-label retro-text">提取码</span>
+              <input
+                type="text"
+                value={editPassword}
+                onChange={(event) => onEditPasswordChange(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder={editClearPassword ? "将清除提取码" : "留空不修改"}
+                disabled={editClearPassword}
+                className="retro-input type-body-sm mt-1.5 w-full px-3"
+              />
+              {share.has_password && (
+                <label className="mt-2 flex items-center gap-2 type-caption retro-muted">
+                  <input
+                    type="checkbox"
+                    checked={editClearPassword}
+                    onChange={(event) => onEditClearPasswordChange(event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 accent-nyy-500"
+                  />
+                  清除当前提取码
+                </label>
+              )}
+            </label>
+            <label className="block">
+              <span className="type-label retro-text">有效期</span>
+              <select value={editExpires} onChange={(event) => onEditExpiresChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
+                <option value="keep">保持不变</option>
+                <option value="0">永不过期</option>
+                <option value="1">1 小时</option>
+                <option value="24">1 天</option>
+                <option value="168">7 天</option>
+                <option value="720">30 天</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="type-label retro-text">下载次数</span>
+              <select value={editMaxDownloads} onChange={(event) => onEditMaxDownloadsChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
+                {!editMaxDownloads && <option value="" disabled>选择新的下载次数</option>}
+                {DOWNLOAD_OPTIONS.map((value) => <option key={value} value={value}>{value === 0 ? "不限" : `${value} 次`}</option>)}
+              </select>
+              {!editMaxDownloads && <p className="type-caption mt-1.5 text-amber-500">当前上限是旧规则，请选择新的下载次数。</p>}
+            </label>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={onEditSave} className="btn-primary min-h-[40px] px-4"><Check className="h-4 w-4" />保存</button>
+            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[40px] px-4"><X className="h-4 w-4" />取消</button>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+interface InboxGroupCardProps {
+  group: MyInboxGroup;
+  expanded: boolean;
+  downloading: boolean;
+  isEditing: boolean;
+  editTitle: string;
+  editPassword: string;
+  editClearPassword: boolean;
+  editExtendHours: string;
+  editMaxFiles: string;
+  editMaxBytesValue: string;
+  editMaxBytesUnit: SizeUnit;
+  onToggle: () => void;
+  onCopy: () => void;
+  onEditStart: () => void;
+  onEditCancel: () => void;
+  onEditSave: () => void;
+  onEditTitleChange: (value: string) => void;
+  onEditPasswordChange: (value: string) => void;
+  onEditClearPasswordChange: (value: boolean) => void;
+  onEditExtendHoursChange: (value: string) => void;
+  onEditMaxFilesChange: (value: string) => void;
+  onEditMaxBytesValueChange: (value: string) => void;
+  onEditMaxBytesUnitChange: (value: SizeUnit) => void;
+  onRevoke: () => void;
+  onDownloadGroup: () => void;
+  onDownloadFile: (file: MyRequestFileItem) => void;
+}
+
+function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, editPassword, editClearPassword, editExtendHours, editMaxFiles, editMaxBytesValue, editMaxBytesUnit, onToggle, onCopy, onEditStart, onEditCancel, onEditSave, onEditTitleChange, onEditPasswordChange, onEditClearPasswordChange, onEditExtendHoursChange, onEditMaxFilesChange, onEditMaxBytesValueChange, onEditMaxBytesUnitChange, onRevoke, onDownloadGroup, onDownloadFile }: InboxGroupCardProps) {
+  const status = getInboxStatus(group);
+  const isActive = status === "active";
+  const isRevoked = status === "revoked";
+  const fileProgress = group.max_files > 0 ? Math.min(100, (group.file_count / group.max_files) * 100) : 0;
+  const bytesProgress = group.max_bytes > 0 ? Math.min(100, (group.total_bytes / group.max_bytes) * 100) : 0;
+  const actions: WorkbenchAction[] = [
+    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy },
+    { key: "open", label: "打开收件", icon: <ExternalLink className="h-4 w-4" />, href: `/r/${group.code}` },
+  ];
+  if (isActive) actions.push({ key: "edit", label: "编辑设置", icon: <Pencil className="h-4 w-4" />, onClick: onEditStart });
+  if (!isRevoked) actions.push({ key: "revoke", label: "撤销收件", icon: <Trash2 className="h-4 w-4" />, onClick: onRevoke, danger: true });
+  actions.push(
+    { key: "pack", label: downloading ? "打包中" : "打包下载", icon: <Package className="h-4 w-4" />, onClick: onDownloadGroup, disabled: downloading || group.files.length === 0 },
+    { key: "toggle", label: expanded ? "收起文件" : "展开文件", icon: <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />, onClick: onToggle }
+  );
+
+  return (
+    <article className="retro-card p-4 sm:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="retro-title text-lg">{group.title}</span>
+            <span className="font-mono type-body-sm text-nyy-500">/r/{group.code}</span>
+            <StatusBadge status={status} />
+            {group.has_password && <span className="retro-chip"><Lock className="mr-1 h-3 w-3" /> 访问码</span>}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 type-caption retro-muted">
+            <span className="inline-flex items-center gap-1"><Inbox className="h-3.5 w-3.5" /> 已收 {group.file_count} / {group.max_files} 个文件</span>
+            <span>{formatSize(group.total_bytes)} / {formatSize(group.max_bytes)}</span>
+            <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {group.expires_at ? `到期 ${formatDate(group.expires_at)}` : "永不过期"}</span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div>
+              <div className="mb-1 flex justify-between gap-2 type-caption retro-muted">
+                <span>文件名额</span><span>剩余 {Math.max(0, group.max_files - group.file_count)} 个</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                <span className="block h-full rounded-full bg-nyy-500" style={{ width: `${fileProgress}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex justify-between gap-2 type-caption retro-muted">
+                <span>容量额度</span><span>剩余 {formatSize(Math.max(0, group.max_bytes - group.total_bytes))}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                <span className="block h-full rounded-full bg-nyy-500" style={{ width: `${bytesProgress}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="sm:hidden">
+          <ActionMenu actions={actions} />
+        </div>
+        <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
+          <button onClick={onCopy} className="retro-btn-secondary min-h-[38px] px-3"><Copy className="h-4 w-4" />复制</button>
+          <a href={`/r/${group.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3"><ExternalLink className="h-4 w-4" />打开</a>
+          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3"><Pencil className="h-4 w-4" />编辑</button>}
+          {!isRevoked && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500"><Trash2 className="h-4 w-4" />撤销</button>}
+          <button onClick={onDownloadGroup} disabled={downloading || group.files.length === 0} className="retro-btn-secondary min-h-[38px] px-3"><Package className="h-4 w-4" />{downloading ? "打包中" : "打包"}</button>
+          <button onClick={onToggle} className="retro-btn-secondary min-h-[38px] px-3"><ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />{expanded ? "收起" : "展开"}</button>
+        </div>
+      </div>
+
+      {isEditing && (
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="type-label retro-text">收件标题</span>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(event) => onEditTitleChange(event.target.value)}
+                className="retro-input type-body-sm mt-1.5 w-full px-3"
+              />
+            </label>
+            <label className="block">
+              <span className="type-label retro-text">访问码</span>
+              <input
+                type="text"
+                value={editPassword}
+                onChange={(event) => onEditPasswordChange(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder={editClearPassword ? "将清除访问码" : "留空不修改"}
+                disabled={editClearPassword}
+                inputMode="numeric"
+                className="retro-input type-body-sm mt-1.5 w-full px-3"
+              />
+              {group.has_password && (
+                <label className="mt-2 flex items-center gap-2 type-caption retro-muted">
+                  <input
+                    type="checkbox"
+                    checked={editClearPassword}
+                    onChange={(event) => onEditClearPasswordChange(event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 accent-nyy-500"
+                  />
+                  清除当前访问码
+                </label>
+              )}
+            </label>
+            <label className="block">
+              <span className="type-label retro-text">有效期</span>
+              <select value={editExtendHours} onChange={(event) => onEditExtendHoursChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
+                <option value="keep">保持不变</option>
+                <option value="24">延长 1 天</option>
+                <option value="168">延长 7 天</option>
+                <option value="720">延长 30 天</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="type-label retro-text">最大文件数</span>
+              <input
+                type="number"
+                min={Math.max(1, group.file_count)}
+                max={100}
+                value={editMaxFiles}
+                onChange={(event) => onEditMaxFilesChange(event.target.value)}
+                className="retro-input type-body-sm mt-1.5 w-full px-3"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="type-label retro-text">容量上限</span>
+              <div className="retro-input mt-1.5 flex overflow-hidden p-0 focus-within:border-nyy-600">
+                <input
+                  type="number"
+                  min={1}
+                  max={editMaxBytesUnit === "GB" ? 1 : 1024}
+                  value={editMaxBytesValue}
+                  onChange={(event) => onEditMaxBytesValueChange(event.target.value)}
+                  className="type-body-sm min-h-[42px] min-w-0 flex-1 bg-transparent px-3 outline-none"
+                />
+                <select
+                  value={editMaxBytesUnit}
+                  onChange={(event) => onEditMaxBytesUnitChange(event.target.value as SizeUnit)}
+                  className="type-caption border-l border-white/10 bg-transparent px-3 retro-text outline-none"
+                >
+                  <option value="MB">MB</option>
+                  <option value="GB">GB</option>
+                </select>
+              </div>
+              <p className="type-caption mt-1.5 retro-muted">可降低，但不能低于当前已收到容量。</p>
+            </label>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={onEditSave} className="btn-primary min-h-[40px] px-4"><Check className="h-4 w-4" />保存</button>
+            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[40px] px-4"><X className="h-4 w-4" />取消</button>
+          </div>
+        </div>
+      )}
+
+      {expanded && (
+        <div className="mt-4 border-t border-white/10 pt-4">
+          {group.files.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/15 px-4 py-6 text-center">
+              <p className="type-body-sm retro-text">暂未收到文件</p>
+              <p className="type-caption mt-1 retro-muted">复制收件链接发给对方，对方上传后会显示在这里。</p>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {group.files.map((file) => (
+                <div key={file.id} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-nyy-500/10 text-nyy-500">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="type-file-name truncate font-medium retro-text">{file.file_name}</p>
+                      <p className="type-caption retro-muted">{formatSize(file.file_size)} · {formatDate(file.created_at)}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => onDownloadFile(file)} className="retro-btn-secondary min-h-[38px] px-3 sm:shrink-0">
+                    <Download className="h-4 w-4" />下载
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </article>
   );
 }

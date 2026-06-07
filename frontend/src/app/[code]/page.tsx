@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
 import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder, Play } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { SelfDevelopPlayer } from "@/components/self-develop-player";
-import { NativeVideoPlayer } from "@/components/native-video-player";
+import { NativeVideoPlayer, type NativeVideoErrorInfo, type NativeVideoResumeRequest } from "@/components/native-video-player";
 import { Ac3VideoPreview } from "@/components/ac3-video-preview";
 import { PdfPreview } from "@/components/pdf-preview";
 import {
@@ -17,8 +17,9 @@ import {
 import { supportsChunkedDownload, chunkedDownload, type ChunkedDownloadProgress } from "@/lib/chunked-download";
 import { getErrorMessage, isHttpStatusError } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { DebugLogFn } from "@/lib/debug";
-import { needsVideoOnlyVirtualMp4, needsVirtualFaststart, prepareVirtualMediaTransport, registerVirtualMediaFile } from "@/lib/virtual-media";
+import { createVirtualMediaFileId, needsVideoOnlyVirtualMp4, needsVirtualFaststart, prepareVirtualMediaTransport, registerVirtualMediaFile } from "@/lib/virtual-media";
 import s from "./share-4c.module.css";
 
 type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "error";
@@ -142,6 +143,39 @@ function hasEac3Audio(file: ShareFileDownload): boolean {
   return hasAudioCodec(file, new Set(["ec-3", "eac3"]));
 }
 
+function getPlaybackAssetSessionKey(file: ShareFileDownload): string {
+  const chunksKey = file.chunks.map((chunk) => `${chunk.index}:${chunk.size}`).join(",");
+  const assetsKey = (file.media_metadata?.playback_assets || [])
+    .map((asset) => [
+      asset.kind,
+      asset.version || "",
+      asset.virtual_size || "",
+      asset.sidecar_size || "",
+      asset.source_media_start || "",
+      asset.source_media_end || "",
+    ].join(":"))
+    .sort()
+    .join("|");
+  const audioKey = (file.media_metadata?.audio_tracks || [])
+    .map((track) => `${track.codec || ""}:${track.codec_tag || ""}`)
+    .sort()
+    .join("|");
+  const hints = file.media_metadata?.playback_hints;
+  return [
+    file.file_name,
+    file.file_size,
+    file.content_type || "",
+    file.is_chunked ? "chunked" : "single",
+    chunksKey,
+    file.media_metadata?.probe_status || "",
+    file.media_metadata?.container || "",
+    hints?.needs_virtual_faststart === true ? "faststart" : "",
+    hints?.has_video_only_virtual === true ? "video-only" : "",
+    assetsKey,
+    audioKey,
+  ].join("#");
+}
+
 /**
  * 判断 mp4/mov 视频是否需要走 SDP 播放器（不含 MKV，MKV 有独立逻辑）。
  * 当前 SDP 对常规 MP4 的 Range 调度、seek 恢复和 AC-3 音频主时钟仍不如原生
@@ -208,11 +242,26 @@ function NativeVideoPreview({
   const [playbackUrl, setPlaybackUrl] = useState(file.download_url);
   const [transportPreparing, setTransportPreparing] = useState(false);
   const [metadataReady, setMetadataReady] = useState(false);
+  const [virtualReloadKey, setVirtualReloadKey] = useState(0);
+  const [resumeRequest, setResumeRequest] = useState<NativeVideoResumeRequest | null>(null);
+  const virtualMediaIdRef = useRef<string | null>(null);
+  const fileRef = useRef(file);
+  const virtualRecoveryInFlightRef = useRef(false);
+  const virtualRecoveryCountRef = useRef(0);
+  const virtualRecoverySerialRef = useRef(0);
+  if (!virtualMediaIdRef.current) virtualMediaIdRef.current = createVirtualMediaFileId("share-video");
   const mime = getNativeVideoMime(file);
   const useVirtualFaststart = needsVirtualFaststart(file) || needsVideoOnlyVirtualMp4(file);
+  const structuralSessionKey = getPlaybackAssetSessionKey(file);
+  const playbackSessionKey = useVirtualFaststart ? structuralSessionKey : `${structuralSessionKey}#${file.download_url}`;
   const awaitingVirtualTransport = useVirtualFaststart && playbackUrl === file.download_url && !failed;
   const preparingVirtualTransport = transportPreparing || awaitingVirtualTransport;
   const safeUrl = isSafeUrl(playbackUrl) || playbackUrl.startsWith("/__nyy_virtual_media__/");
+  const isVirtualPlaybackUrl = playbackUrl.startsWith("/__nyy_virtual_media__/");
+
+  useEffect(() => {
+    fileRef.current = file;
+  }, [file]);
 
   const handlePlaybackFailure = useCallback((message: string) => {
     if (onPlaybackFailure) {
@@ -223,17 +272,71 @@ function NativeVideoPreview({
     setFailed(true);
   }, [onPlaybackFailure]);
 
+  const registerVirtualPlaybackUrl = useCallback(async () => {
+    const currentFile = fileRef.current;
+    await prepareVirtualMediaTransport();
+    return registerVirtualMediaFile(currentFile, "share-video", undefined, virtualMediaIdRef.current || undefined);
+  }, [playbackSessionKey]);
+
+  const recoverVirtualTransport = useCallback(async (message: string, info?: NativeVideoErrorInfo) => {
+    if (virtualRecoveryInFlightRef.current) return;
+    if (virtualRecoveryCountRef.current >= 1) {
+      handlePlaybackFailure(message);
+      return;
+    }
+    virtualRecoveryInFlightRef.current = true;
+    virtualRecoveryCountRef.current += 1;
+    setTransportPreparing(true);
+    setFailed(false);
+    setErrorMessage("正在恢复视频快启通道…");
+    try {
+      const url = await registerVirtualPlaybackUrl();
+      virtualRecoverySerialRef.current += 1;
+      setPlaybackUrl(url);
+      setMetadataReady(false);
+      setResumeRequest({
+        key: virtualRecoverySerialRef.current,
+        time: Math.max(0, info?.currentTime || 0),
+        play: Boolean(info?.playRequested),
+      });
+      setVirtualReloadKey((key) => key + 1);
+    } catch (err) {
+      handlePlaybackFailure(getErrorMessage(err, "虚拟快启播放通道恢复失败，请刷新页面后重试。"));
+    } finally {
+      virtualRecoveryInFlightRef.current = false;
+      setTransportPreparing(false);
+    }
+  }, [handlePlaybackFailure, registerVirtualPlaybackUrl]);
+
+  const handleNativePlaybackFailure = useCallback((message: string, info: NativeVideoErrorInfo) => {
+    if (useVirtualFaststart && isVirtualPlaybackUrl) {
+      void recoverVirtualTransport(message, info);
+      return;
+    }
+    handlePlaybackFailure(message);
+  }, [handlePlaybackFailure, isVirtualPlaybackUrl, recoverVirtualTransport, useVirtualFaststart]);
+
+  const handleNativeLoadedMetadata = useCallback(() => {
+    setMetadataReady(true);
+    virtualRecoveryCountRef.current = 0;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    setPlaybackUrl(file.download_url);
     setTransportPreparing(false);
     setMetadataReady(false);
+    setFailed(false);
+    setResumeRequest(null);
+    setVirtualReloadKey((key) => key + 1);
+    virtualRecoveryCountRef.current = 0;
 
-    if (!useVirtualFaststart) return;
+    if (!useVirtualFaststart) {
+      setPlaybackUrl(fileRef.current.download_url);
+      return;
+    }
 
     setTransportPreparing(true);
-    prepareVirtualMediaTransport()
-      .then(() => registerVirtualMediaFile(file, "share-video"))
+    registerVirtualPlaybackUrl()
       .then((url) => {
         if (!cancelled) setPlaybackUrl(url);
       })
@@ -248,7 +351,21 @@ function NativeVideoPreview({
     return () => {
       cancelled = true;
     };
-  }, [file, handlePlaybackFailure, useVirtualFaststart]);
+  }, [handlePlaybackFailure, playbackSessionKey, registerVirtualPlaybackUrl, useVirtualFaststart]);
+
+  useEffect(() => {
+    if (!useVirtualFaststart) return;
+    const refreshRegistration = () => {
+      if (document.visibilityState !== "visible" || !isVirtualPlaybackUrl) return;
+      void registerVirtualPlaybackUrl().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", refreshRegistration);
+    window.addEventListener("focus", refreshRegistration);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshRegistration);
+      window.removeEventListener("focus", refreshRegistration);
+    };
+  }, [isVirtualPlaybackUrl, registerVirtualPlaybackUrl, useVirtualFaststart]);
 
   useEffect(() => {
     if (!metadataTimeoutMs || metadataReady || preparingVirtualTransport || failed || !safeUrl) return;
@@ -293,7 +410,16 @@ function NativeVideoPreview({
     );
   }
 
-  return <NativeVideoPlayer src={playbackUrl} type={mime} onError={handlePlaybackFailure} onLoadedMetadata={() => setMetadataReady(true)} />;
+  return (
+    <NativeVideoPlayer
+      key={`${playbackUrl}:${virtualReloadKey}`}
+      src={playbackUrl}
+      type={mime}
+      onError={handleNativePlaybackFailure}
+      onLoadedMetadata={handleNativeLoadedMetadata}
+      resumeRequest={resumeRequest}
+    />
+  );
 }
 
 function MkvVideoPreview({ file, onDownload, debugLog }: { file: ShareFileDownload; onDownload: () => void; debugLog: DebugLogFn }) {
@@ -361,7 +487,6 @@ export default function SharePage() {
   const [reported, setReported] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [listExpanded, setListExpanded] = useState(false);
   const [downloadState, setDownloadState] = useState<DownloadLinksState>("idle");
@@ -373,40 +498,11 @@ export default function SharePage() {
 
   const appendDebugLog = useCallback<DebugLogFn>(() => {}, []);
 
-  // 主题切换按钮：改为单按钮，点击在白天/黑夜间切换
-  const ThemeToggle = ({ className = "" }: { className?: string }) => {
-    const isLight = theme === "light";
-    const nextThemeLabel = isLight ? "黑夜" : "白天";
-    return (
-      <button
-        type="button"
-        onClick={() => setTheme(isLight ? "dark" : "light")}
-        title={`当前${isLight ? "白天" : "黑夜"}，点击切换到${nextThemeLabel}`}
-        aria-label={`当前${isLight ? "白天" : "黑夜"}，点击切换到${nextThemeLabel}`}
-        className={`h-10 w-10 rounded-xl border border-white/10 bg-white/6 text-sm backdrop-blur-xl flex items-center justify-center transition-all hover:opacity-90 ${theme === "light" ? "text-white shadow-[0_0_14px_rgba(255,138,61,0.35)]" : `${s.tPrimary} shadow-[0_0_14px_rgba(255,138,61,0.18)]`} ${className}`}
-      >
-        {isLight ? "☀" : "☾"}
-      </button>
-    );
-  };
-
   const FooterSlogan = () => (
     <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
       文件中转，就用拿呀² · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">nyy.app</a>
     </p>
   );
-
-  // ===== 主题 =====
-  useEffect(() => {
-    const saved = localStorage.getItem("nyy-theme-4c");
-    if (saved === "light" || saved === "dark") setTheme(saved);
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.setAttribute("data-theme", theme);
-    localStorage.setItem("nyy-theme-4c", theme);
-  }, [theme]);
 
   // ===== 初始化:获取分享信息 =====
   useEffect(() => {
@@ -581,8 +677,8 @@ export default function SharePage() {
   // 注意：此处 share===null，不得访问 share.* 任何字段。
   if (pageState === "loading") {
     return (
-      <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
-        <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
+      <main className={`nyy-product-shell ${s.tPrimary}`}>
+        <div className="nyy-product-content max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
 
           {/* ── Topbar 骨架 ── */}
           <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
@@ -679,7 +775,7 @@ export default function SharePage() {
 
   // 状态页共用的 logo + 主题切换
   const StatusPage = ({ children }: { children: React.ReactNode }) => (
-    <main className={`min-h-dvh flex flex-col items-center justify-center gap-4 ${s.meshBg}`}>
+    <main className={`nyy-product-shell flex flex-col items-center justify-center gap-4 ${s.tPrimary}`}>
       <ThemeToggle className="fixed top-4 right-4 z-50" />
       <BrandLogo className="w-24 h-auto mx-auto mb-2 opacity-60" />
       {children}
@@ -718,7 +814,7 @@ export default function SharePage() {
   // ===== Vault Unlock（密码输入）=====
   if (pageState === "locked") {
     return (
-      <main className={`min-h-dvh flex flex-col items-center justify-center px-4 ${s.meshBg}`}>
+      <main className={`nyy-product-shell flex flex-col items-center justify-center px-4 ${s.tPrimary}`}>
         <ThemeToggle className="fixed top-4 right-4 z-50" />
 
         <div className={`${s.glass} p-10 max-w-sm w-full text-center animate-vault-open`}>
@@ -939,8 +1035,8 @@ export default function SharePage() {
   );
 
   return (
-    <main className={`min-h-dvh overflow-x-hidden ${s.meshBg} ${s.tPrimary}`}>
-      <div className="max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
+    <main className={`nyy-product-shell ${s.tPrimary}`}>
+      <div className="nyy-product-content max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
         {/* Topbar */}
         <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
           <div className="flex min-w-0 items-center gap-3 sm:gap-5">

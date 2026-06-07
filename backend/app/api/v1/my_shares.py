@@ -2,7 +2,7 @@
 
 GET    /api/v1/my/shares          — 列表（分页）
 DELETE /api/v1/my/shares/:code    — 撤销
-PATCH  /api/v1/my/shares/:code    — 编辑（密码/过期时间）
+PATCH  /api/v1/my/shares/:code    — 编辑（密码/过期时间/下载次数）
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user_required
 from app.db.session import get_db
-from app.models.share import Share, ShareFile
+from app.models.share import DownloadLog, Share, ShareFile
 from app.models.user import User
 
 log = logging.getLogger(__name__)
@@ -30,11 +30,14 @@ router = APIRouter(prefix="/my", tags=["my-shares"])
 class MyShareItem(BaseModel):
     code: str
     title: str | None = None
+    preview_files: list[str] = Field(default_factory=list)
+    empty_dir_count: int = 0
     file_count: int
     total_bytes: int
     has_password: bool
     download_count: int
     max_downloads: int
+    last_downloaded_at: str | None = None
     created_at: str
     expires_at: str | None
     revoked: bool
@@ -50,6 +53,7 @@ class MySharesListResponse(BaseModel):
 class ShareEditRequest(BaseModel):
     password: str | None = Field(default=None, description="新密码，空字符串表示清除密码")
     expires_hours: int | None = Field(default=None, ge=0, description="从现在起的过期小时数，0=永不过期")
+    max_downloads: int | None = Field(default=None, ge=0, le=200, description="最大下载次数，0=不限")
 
 
 class MessageResponse(BaseModel):
@@ -109,21 +113,49 @@ async def list_my_shares(
     result = await db.execute(stmt)
     shares = result.scalars().all()
 
-    items = [
-        MyShareItem(
+    share_ids = [s.id for s in shares]
+    last_downloaded_by_share = {}
+    if share_ids:
+        last_download_rows = await db.execute(
+            select(DownloadLog.share_id, func.max(DownloadLog.downloaded_at))
+            .where(DownloadLog.share_id.in_(share_ids))
+            .group_by(DownloadLog.share_id)
+        )
+        last_downloaded_by_share = dict(last_download_rows.all())
+
+    def build_preview(s: Share) -> tuple[list[str], int]:
+        logical_files = list(s.logical_files or [])
+        if logical_files:
+            return [f.original_name for f in logical_files[:3]], len(logical_files)
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for file in s.files or []:
+            if file.original_name in seen:
+                continue
+            seen.add(file.original_name)
+            names.append(file.original_name)
+        return names[:3], len(names)
+
+    items = []
+    for s in shares:
+        preview_files, file_count = build_preview(s)
+        last_downloaded_at = last_downloaded_by_share.get(s.id)
+        items.append(MyShareItem(
             code=s.code,
             title=s.title,
-            file_count=len(s.logical_files),
+            preview_files=preview_files,
+            empty_dir_count=len(s.empty_dirs or []),
+            file_count=file_count,
             total_bytes=s.total_bytes,
             has_password=s.password_hash is not None,
             download_count=s.download_count,
             max_downloads=s.max_downloads,
+            last_downloaded_at=last_downloaded_at.isoformat() if last_downloaded_at else None,
             created_at=s.created_at.isoformat() if s.created_at else "",
             expires_at=s.expires_at.isoformat() if s.expires_at else None,
             revoked=s.revoked_at is not None,
-        )
-        for s in shares
-    ]
+        ))
 
     return MySharesListResponse(
         shares=items, total=total, page=page, page_size=page_size
@@ -184,6 +216,11 @@ async def edit_share(
             share.expires_at = None
         else:
             share.expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_hours)
+
+    if body.max_downloads is not None:
+        if body.max_downloads not in {0, 1, 10, 50, 100, 200}:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "下载次数上限不合法")
+        share.max_downloads = body.max_downloads
 
     await db.commit()
     return MessageResponse(message="修改成功")

@@ -5,7 +5,7 @@ import { useTheme, type Theme } from "@/components/theme-provider";
 
 const cycle: Theme[] = ["auto", "light", "dark"];
 
-export function ThemeToggle() {
+export function ThemeToggle({ className = "" }: { className?: string }) {
   const { theme, setTheme } = useTheme();
 
   const next = () => {
@@ -21,7 +21,7 @@ export function ThemeToggle() {
       onClick={next}
       aria-label={`当前：${label}，点击切换`}
       title={label}
-      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-foreground/70 transition hover:bg-muted hover:text-foreground"
+      className={`retro-btn-secondary min-h-[44px] min-w-[44px] rounded-xl p-0 ${className}`}
     >
       {theme === "light" && <Sun size={20} />}
       {theme === "dark" && <Moon size={20} />}

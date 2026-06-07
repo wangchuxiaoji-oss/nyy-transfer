@@ -195,12 +195,15 @@ POST   /api/v1/shares/:code/zip       多文件签发（前端 client-zip）
 PATCH  /api/v1/shares/:id             改提取码 / 续期（owner）
 DELETE /api/v1/shares/:id             撤销（owner）
 POST   /api/v1/shares/:code/report    举报
+GET    /api/v1/captcha/challenge      获取人机验证码 challenge
+POST   /api/v1/captcha/verify         校验人机验证码
+POST   /api/v1/auth/send-code         发送邮箱验证码
 POST   /api/v1/auth/register
-POST   /api/v1/auth/verify-email
 POST   /api/v1/auth/login
+POST   /api/v1/auth/refresh
 POST   /api/v1/auth/logout
-GET    /api/v1/me
-GET    /api/v1/me/shares
+GET    /api/v1/auth/me
+GET    /api/v1/my/shares
 GET    /admin/...                     管理后台
 GET    /healthz                       健康检查
 ```

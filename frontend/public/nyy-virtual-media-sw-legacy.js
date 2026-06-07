@@ -19,6 +19,12 @@ self.addEventListener("message", (event) => {
   } else if (data.type === "NYY_DEBUG_DISABLE" && event.source?.id) {
     debugClientIds.delete(event.source.id);
     event.ports?.[0]?.postMessage({ ok: true });
+  } else if (data.type === "NYY_CLAIM_CLIENTS") {
+    event.waitUntil(self.clients.claim().then(() => {
+      event.ports?.[0]?.postMessage({ ok: true });
+    }).catch((err) => {
+      event.ports?.[0]?.postMessage({ ok: false, error: err?.message || "clients.claim failed" });
+    }));
   } else if (data.type === "REGISTER_VIRTUAL_FILE" && data.id && data.file) {
     files.set(data.id, normalizeFile(data.file));
     postDebug("sw", "register", { id: data.id, fileName: data.file.fileName, fileSize: data.file.fileSize, chunks: data.file.chunks?.length || 0 }, sourceClientId);

@@ -19,11 +19,13 @@
     "test:e2e": "npx playwright test",
     "smoke:share-faststart": "node scripts/share-virtual-faststart-smoke.mjs",
     "smoke:share-ac3": "node scripts/share-ac3-smoke.mjs",
+    "smoke:share-ac3-seek": "SHARE_RAPID_SEEK=1 node scripts/share-ac3-smoke.mjs",
     "smoke:share-mkv-native": "node scripts/share-mkv-native-smoke.mjs",
     "smoke:share-codec-matrix": "node scripts/share-codec-matrix-smoke.mjs"
   },
   "dependencies": {
     "@mediabunny/ac3": "^1.45.4",
+    "altcha": "^3.0.11",
     "class-variance-authority": "^0.7.0",
     "client-zip": "^2.5.0",
     "clsx": "^2.1.0",
@@ -37,6 +39,7 @@
     "plyr": "^3.7.8",
     "qrcode": "^1.5.4",
     "react": "^18",
+    "react-aria-components": "^1.18.0",
     "react-dom": "^18",
     "tailwind-merge": "^2.2.0"
   },

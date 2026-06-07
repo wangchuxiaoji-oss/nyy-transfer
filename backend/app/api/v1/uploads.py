@@ -47,6 +47,7 @@ _EMPTY_URI_PREFIX = "nyy-empty://"
 _MAX_EMPTY_DIRS = 500
 _MAX_EMPTY_DIR_PATH_LEN = 512
 _MAX_MEDIA_METADATA_BYTES = 64 * 1024
+_ALLOWED_MAX_DOWNLOADS = {0, 1, 10, 50, 100, 200}
 
 # multipart 上传参数（经真机实测，见 docs/spike-multipart-upload.md）
 _PART_SIZE = 64 * 1024 * 1024            # 64MB 每片
@@ -59,6 +60,7 @@ _MIN_NON_LAST_PART_SIZE = 5 * 1024 * 1024
 assert _PART_SIZE >= _MIN_NON_LAST_PART_SIZE, "_PART_SIZE 必须 ≥ 5MB，否则大文件 merge 会 500"
 
 _CRC32_RE = re.compile(r"^[0-9a-f]{8}$")
+_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
 
 
 def _is_valid_crc32(value: str) -> bool:
@@ -72,6 +74,14 @@ def _get_client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "0.0.0.0"
+
+
+def _get_guest_id(request: Request, ip: str) -> str:
+    """返回当前浏览器游客身份；缺失时退回旧的 IP 归属。"""
+    guest_id = (request.headers.get("x-nyy-guest-id") or "").strip()
+    if _GUEST_ID_RE.match(guest_id):
+        return guest_id
+    return f"ip:{ip}"
 
 
 def _active_share_limit_message(active_count: int, max_shares: int) -> str:
@@ -157,9 +167,9 @@ def _normalize_empty_dirs(paths: list[str]) -> list[str]:
     return normalized
 
 
-async def _count_active_shares(db, *, user_id: str | None, ip: str) -> int:
+async def _count_active_shares(db, *, user_id: str | None, ip: str, guest_id: str | None = None) -> int:
     from app.models.share import Share
-    from sqlalchemy import cast, func, or_, select
+    from sqlalchemy import and_, cast, func, or_, select
     from sqlalchemy.dialects.postgresql import INET
 
     now = datetime.now(timezone.utc)
@@ -175,10 +185,20 @@ async def _count_active_shares(db, *, user_id: str | None, ip: str) -> int:
             *active_filters,
         )
     else:
-        stmt = select(func.count()).select_from(Share).where(
-            Share.ip_created_from == cast(ip, INET),
-            *active_filters,
-        )
+        legacy_ip_filter = and_(Share.guest_id.is_(None), Share.ip_created_from == cast(ip, INET))
+        if guest_id:
+            guest_filter = Share.guest_id == guest_id
+            if guest_id == f"ip:{ip}":
+                guest_filter = or_(guest_filter, legacy_ip_filter)
+            stmt = select(func.count()).select_from(Share).where(
+                guest_filter,
+                *active_filters,
+            )
+        else:
+            stmt = select(func.count()).select_from(Share).where(
+                legacy_ip_filter,
+                *active_filters,
+            )
 
     result = await db.execute(stmt)
     return result.scalar() or 0
@@ -189,8 +209,9 @@ async def get_quota(
     request: Request,
     user: User | None = Depends(get_current_user_optional),
 ):
-    """返回当前用户/IP 的剩余配额信息。"""
+    """返回当前用户/游客身份的剩余配额信息。"""
     ip = _get_client_ip(request)
+    guest_id = _get_guest_id(request, ip)
     redis = request.app.state.redis
     used = 0
 
@@ -205,7 +226,7 @@ async def get_quota(
         ttl_hours = quota_config["user_ttl_hours"]
     else:
         if redis:
-            used = int(await redis.get(f"nyy:quota:ip:{ip}:bytes") or 0)
+            used = int(await redis.get(f"nyy:quota:guest:{guest_id}:bytes") or 0)
         limit = quota_config["guest_max_file_bytes"]
         ttl_hours = quota_config["guest_ttl_hours"]
 
@@ -231,6 +252,7 @@ async def upload_init(
     """Step 1: 校验配额 + hCaptcha，调豆包 prepare/apply，返回 TOS 上传凭证。"""
     settings = get_settings()
     ip = _get_client_ip(request)
+    guest_id = _get_guest_id(request, ip)
 
     # --- 大文件权限检查：>1GB 需要登录 ---
     _ONE_GB = 1024 * 1024 * 1024
@@ -270,7 +292,7 @@ async def upload_init(
                 request_owner_id = str(req.owner_id)
             else:
                 active_user_id = str(user.id) if user else None
-                active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip)
+                active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip, guest_id=None if active_user_id else guest_id)
                 max_shares = quota_config[
                     "user_max_active_shares" if active_user_id else "guest_max_active_shares"
                 ]
@@ -294,7 +316,7 @@ async def upload_init(
             else:
                 result = None
         else:
-            result = await quota_svc.check_guest_with_config(ip, body.file_size, quota_config)
+            result = await quota_svc.check_guest_with_config(guest_id, body.file_size, quota_config)
         if result is not None and not result.allowed:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
 
@@ -304,6 +326,7 @@ async def upload_init(
         authorization = ""
         token_data = {
             "ip": ip,
+            "guest_id": guest_id,
             "user_id": request_owner_id or (str(user.id) if user else None),
             "request_code": body.request_code or None,
             "file_name": body.file_name,
@@ -339,6 +362,7 @@ async def upload_init(
         authorization = init_result.authorization
         token_data = {
             "ip": ip,
+            "guest_id": guest_id,
             "user_id": request_owner_id or (str(user.id) if user else None),
             "request_code": body.request_code or None,
             "file_name": body.file_name,
@@ -390,6 +414,7 @@ async def multipart_init(
     """Step 1-alt: 大文件 multipart 上传初始化，返回 uploadID + TOS 凭证。"""
     settings = get_settings()
     ip = _get_client_ip(request)
+    guest_id = _get_guest_id(request, ip)
 
     # 大文件权限：>1GB 需登录
     is_large_file = body.file_size > _LARGE_FILE_SIZE
@@ -428,7 +453,7 @@ async def multipart_init(
             request_owner_id = str(req.owner_id)
         else:
             active_user_id = str(user.id) if user else None
-            active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip)
+            active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip, guest_id=None if active_user_id else guest_id)
             max_shares = quota_config[
                 "user_max_active_shares" if active_user_id else "guest_max_active_shares"
             ]
@@ -442,7 +467,7 @@ async def multipart_init(
     elif user:
         result = await quota_svc.check_user_with_config(str(user.id), body.file_size, quota_config)
     else:
-        result = await quota_svc.check_guest_with_config(ip, body.file_size, quota_config)
+        result = await quota_svc.check_guest_with_config(guest_id, body.file_size, quota_config)
     if result is not None and not result.allowed:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
 
@@ -469,6 +494,7 @@ async def multipart_init(
 
     session_data = {
         "ip": ip,
+        "guest_id": guest_id,
         "user_id": request_owner_id or (str(user.id) if user else None),
         "request_code": body.request_code or None,
         "file_name": body.file_name,
@@ -603,6 +629,8 @@ async def upload_commit(
     empty_dirs = _normalize_empty_dirs(body.empty_dirs)
     if not body.files and not empty_dirs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请至少选择一个文件或空文件夹")
+    if body.max_downloads not in _ALLOWED_MAX_DOWNLOADS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "下载次数上限不合法")
 
     upload_batch_id = body.upload_batch_id.strip() or None
 
@@ -658,6 +686,9 @@ async def upload_commit(
 
     # 取第一个文件的信息；纯空目录分享则取当前请求身份/IP
     ip = file_infos[0]["ip"] if file_infos else _get_client_ip(request)
+    guest_id = file_infos[0].get("guest_id") if file_infos else _get_guest_id(request, ip)
+    if not guest_id:
+        guest_id = _get_guest_id(request, ip)
     user_id = file_infos[0].get("user_id") if file_infos else (str(user.id) if user else None)
     total_bytes = sum(f["file_size"] for f in file_infos)
 
@@ -677,7 +708,7 @@ async def upload_commit(
     created_logical_file_count = 0
     async with factory() as db:
         quota_config = await get_quota_config(db)
-        active_count = await _count_active_shares(db, user_id=user_id, ip=ip)
+        active_count = await _count_active_shares(db, user_id=user_id, ip=ip, guest_id=None if user_id else guest_id)
         if user_id:
             max_shares = quota_config["user_max_active_shares"]
         else:
@@ -728,6 +759,7 @@ async def upload_commit(
         share = Share(
             code=share_code,
             owner_id=user_id,
+            guest_id=None if user_id else guest_id,
             ip_created_from=ip,
             total_bytes=total_bytes,
             empty_dirs=empty_dirs,
@@ -825,7 +857,7 @@ async def upload_commit(
     if user_id:
         await quota_svc.consume_user_with_config(user_id, total_bytes, quota_config)
     else:
-        await quota_svc.consume_guest_with_config(ip, total_bytes, quota_config)
+        await quota_svc.consume_guest_with_config(guest_id, total_bytes, quota_config)
 
     # --- 删除所有 commit_token ---
     for info in file_infos:

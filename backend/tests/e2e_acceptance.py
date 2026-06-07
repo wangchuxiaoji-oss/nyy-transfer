@@ -24,6 +24,8 @@ TEST_EMAIL = os.getenv("NYY_TEST_EMAIL", "test@nyy.app")
 TEST_PASSWORD = os.getenv("NYY_TEST_PASSWORD", "123456")
 ADMIN_EMAIL = os.getenv("NYY_ADMIN_EMAIL", "admin@nyy.app")
 ADMIN_PASSWORD = os.getenv("NYY_ADMIN_PASSWORD", "Admin@nyy2026!")
+E2E_GUEST_ID = os.getenv("NYY_E2E_GUEST_ID", "e2e-guest-device")
+E2E_GUEST_HEADERS = {"X-NYY-Guest-ID": E2E_GUEST_ID}
 
 
 class SuiteState:
@@ -233,8 +235,7 @@ async def ensure_guest_active_share(
     external: httpx.AsyncClient,
     state: SuiteState,
 ) -> None:
-    from sqlalchemy import cast, func, or_, select
-    from sqlalchemy.dialects.postgresql import INET
+    from sqlalchemy import func, or_, select
 
     from app.db.session import get_session_factory
     from app.models.share import Share
@@ -243,7 +244,7 @@ async def ensure_guest_active_share(
     async with get_session_factory()() as db:
         active_count = await db.scalar(
             select(func.count()).select_from(Share).where(
-                Share.ip_created_from == cast("127.0.0.1", INET),
+                Share.guest_id == E2E_GUEST_ID,
                 Share.revoked_at.is_(None),
                 Share.banned_at.is_(None),
                 or_(Share.expires_at.is_(None), Share.expires_at > now),
@@ -252,7 +253,7 @@ async def ensure_guest_active_share(
         ) or 0
 
     if active_count == 0:
-        code = await create_share(client, external, state, {"e2e-guest-active.txt": b"guest active"})
+        code = await create_share(client, external, state, {"e2e-guest-active.txt": b"guest active"}, headers=E2E_GUEST_HEADERS)
         state.created_guest_share = code
 
 
@@ -275,7 +276,7 @@ async def run_suite() -> None:
             assert admin["plan"] == "admin"
             state.test_user_id = user["id"]
             await snapshot_redis_key(state, redis, f"nyy:quota:user:{state.test_user_id}:bytes")
-            await snapshot_redis_key(state, redis, "nyy:quota:ip:127.0.0.1:bytes")
+            await snapshot_redis_key(state, redis, f"nyy:quota:guest:{E2E_GUEST_ID}:bytes")
 
             print("[1] Admin 配额读取、更新、列表接口")
             state.quota_config_existed = await config_row_exists()
@@ -298,6 +299,7 @@ async def run_suite() -> None:
             await ensure_guest_active_share(client, external, state)
             guest_block = await client.post(
                 "/api/v1/uploads/init",
+                headers=E2E_GUEST_HEADERS,
                 json={"file_name": "e2e-blocked.txt", "file_size": 12, "file_ext": "txt"},
             )
             expect(guest_block, 429, "guest active share limit")

@@ -7,6 +7,8 @@ const THROUGHPUT_WINDOW = 3;
 const THROUGHPUT_MIBPS_FOR_4 = 2;
 const THROUGHPUT_MIBPS_FOR_3 = 0.8;
 const RANGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const FETCH_RETRY_COUNT = 2;
+const FETCH_RETRY_DELAY_MS = 160;
 const debugClientIds = new Set();
 const rangeCache = new Map();
 let rangeCacheBytes = 0;
@@ -28,6 +30,12 @@ self.addEventListener("message", (event) => {
   } else if (data.type === "NYY_DEBUG_DISABLE" && event.source?.id) {
     debugClientIds.delete(event.source.id);
     event.ports?.[0]?.postMessage({ ok: true });
+  } else if (data.type === "NYY_CLAIM_CLIENTS") {
+    event.waitUntil(self.clients.claim().then(() => {
+      event.ports?.[0]?.postMessage({ ok: true });
+    }).catch((err) => {
+      event.ports?.[0]?.postMessage({ ok: false, error: err?.message || "clients.claim failed" });
+    }));
   } else if (data.type === "REGISTER_VIRTUAL_FILE" && data.id && data.file) {
     const existingFile = files.get(data.id);
     const file = normalizeFile(data.file, data.id);
@@ -177,6 +185,38 @@ function makeCachedReader(bytes) {
   };
 }
 
+function makeAbortError() {
+  return new DOMException("Aborted", "AbortError");
+}
+
+function isAbortError(err) {
+  return !!err && err.name === "AbortError";
+}
+
+function isTransientFetchError(err) {
+  return err instanceof TypeError && /failed to fetch|networkerror/i.test(err.message || "");
+}
+
+function waitForRetry() {
+  return new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+}
+
+async function fetchWithRetry(url, options, shouldStop) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= FETCH_RETRY_COUNT; attempt += 1) {
+    if (shouldStop?.()) throw makeAbortError();
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      if (shouldStop?.() || isAbortError(err)) throw makeAbortError();
+      lastError = err;
+      if (!isTransientFetchError(err) || attempt >= FETCH_RETRY_COUNT) break;
+      await waitForRetry();
+    }
+  }
+  throw lastError || new Error("fetch failed");
+}
+
 function postDebug(scope, event, data, targetClientId = null) {
   if (debugClientIds.size === 0) return;
   self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
@@ -261,10 +301,6 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
   const abortControllers = new Set();
   const recentThroughputsMibps = [];
   let sliceIndex = 0;
-
-  function isAbortError(err) {
-    return !!err && err.name === "AbortError";
-  }
 
   function isClosedStreamError(err) {
     return err instanceof Error && /closed readable stream|already closed|stream is closed/i.test(err.message);
@@ -367,11 +403,11 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
         cursorEnd: globalEnd,
         plannedBytes,
       });
-      return fetch(file.sidecar.url, {
+      return fetchWithRetry(file.sidecar.url, {
         headers: { Range: `bytes=${globalStart}-${globalEnd}` },
         mode: "cors",
         signal: abortController.signal,
-      }).then((resp) => {
+      }, () => streamClosed || abortController.signal.aborted || (signal && signal.aborted)).then((resp) => {
         if (!resp.ok && resp.status !== 206) {
           debug("sidecar:response-error", { sliceIndex: currentSliceIndex, status: resp.status });
           cleanup();
@@ -394,7 +430,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
         };
       }).catch((err) => {
         cleanup();
-        if (isAbortError(err)) return { done: true };
+        if (isAbortError(err) || streamClosed || (signal && signal.aborted)) return { done: true };
         return { error: err };
       });
     }
@@ -453,11 +489,11 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
       if (signal) signal.removeEventListener("abort", abortFromRequest);
     };
 
-    return fetch(chunk.url, {
+    return fetchWithRetry(chunk.url, {
       headers: { Range: `bytes=${localStart}-${localEnd}` },
       mode: "cors",
       signal: abortController.signal,
-    }).then((resp) => {
+    }, () => streamClosed || abortController.signal.aborted || (signal && signal.aborted)).then((resp) => {
       if (!resp.ok && resp.status !== 206) {
         debug("slice:response-error", { sliceIndex: currentSliceIndex, status: resp.status });
         cleanup();
@@ -486,7 +522,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
       };
     }).catch((err) => {
       cleanup();
-      if (isAbortError(err)) return { done: true };
+      if (isAbortError(err) || streamClosed || (signal && signal.aborted)) return { done: true };
       return { error: err };
     });
   }

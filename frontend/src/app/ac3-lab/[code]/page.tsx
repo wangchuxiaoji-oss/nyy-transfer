@@ -469,8 +469,8 @@ function Field({ label, value }: { label: string; value: CapabilityValue }) {
   const positive = value === true || value === "probably" || value === "maybe";
   const negative = value === false || value === "" || value === null;
   return (
-    <div className="rounded-xl border border-warm-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-white/[0.03]">
-      <p className="type-caption text-gray-500 dark:text-gray-400">{label}</p>
+    <div className="retro-card p-3">
+      <p className="retro-kicker">{label}</p>
       <p className={`type-body-sm mt-1 break-words ${positive ? "text-green-700 dark:text-green-400" : negative ? "text-red-600 dark:text-red-400" : "text-gray-800 dark:text-gray-200"}`}>
         {String(value)}
       </p>
@@ -873,35 +873,35 @@ export default function Ac3LabPage() {
   };
 
   return (
-    <main className="min-h-dvh bg-warm-50 px-4 py-8 text-gray-900 dark:bg-background dark:text-gray-100">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <header className="flex flex-col gap-4 rounded-3xl border border-warm-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-card sm:flex-row sm:items-center sm:justify-between">
+    <main className="nyy-product-shell px-4 py-8">
+      <div className="nyy-product-content mx-auto max-w-5xl space-y-6">
+        <header className="retro-panel-strong flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <BrandLogo className="h-auto w-32" />
             <div>
               <h1 className="type-title">AC-3 Frontend Lab</h1>
-              <p className="type-body-sm text-gray-600 dark:text-gray-400">源：{code} · Phase 0/1 能力检测与片源解析</p>
+              <p className="type-body-sm retro-text">源：{code} · Phase 0/1 能力检测与片源解析</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={runPhase01} disabled={loading} className="btn-primary inline-flex items-center gap-2">
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> 重新检测
             </button>
-            <button onClick={exportReport} className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-warm-200 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200">
+            <button onClick={exportReport} className="retro-btn-secondary">
               <Download size={16} /> 导出报告
             </button>
           </div>
         </header>
 
         {errors.length > 0 && (
-          <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/60 dark:bg-red-950/30">
+          <section className="retro-panel border-red-400/40 p-4">
             <h2 className="type-section text-red-700 dark:text-red-300">错误</h2>
             {errors.map((err, i) => <p key={i} className="type-body-sm mt-1 text-red-700 dark:text-red-300">{err}</p>)}
           </section>
         )}
 
         <section className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+          <div className="retro-panel p-5">
             <div className="mb-4 flex items-center gap-2">
               <Activity className="text-nyy-500" size={20} />
               <h2 className="type-section">Phase 0 · 浏览器能力</h2>
@@ -922,7 +922,7 @@ export default function Ac3LabPage() {
                   <p className="type-label mb-2">Codec support probes</p>
                   <div className="space-y-2">
                     {codecTypes.map((type) => (
-                      <div key={type} className="rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+                      <div key={type} className="retro-card p-3">
                         <p className="type-caption break-all text-gray-500 dark:text-gray-400">{type}</p>
                         <p className="type-body-sm">MSE: {String(capabilities.mediaSourceTypes[type])} · canPlayType: {capabilities.canPlayTypes[type] || "empty"}</p>
                       </div>
@@ -934,7 +934,7 @@ export default function Ac3LabPage() {
             ) : <p className="type-body-sm text-gray-500">{loading ? "检测中..." : "未检测"}</p>}
           </div>
 
-          <div className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+          <div className="retro-panel p-5">
             <div className="mb-4 flex items-center gap-2">
               <FileAudio className="text-nyy-500" size={20} />
               <h2 className="type-section">Phase 1 · 片源解析</h2>
@@ -954,7 +954,7 @@ export default function Ac3LabPage() {
                 </div>
                 <div className="space-y-2">
                   {media.tracks.map((track) => (
-                    <div key={track.id} className="rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+                    <div key={track.id} className="retro-card p-3">
                       <p className="type-body-sm font-medium">Track #{track.id}: {track.type} · {track.codec}</p>
                       <p className="type-caption text-gray-500 dark:text-gray-400">
                         duration={formatDuration(track.duration / track.timescale)} bitrate={track.bitrate || "unknown"}
@@ -969,7 +969,7 @@ export default function Ac3LabPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+        <section className="retro-panel p-5">
           <div className="mb-4 flex items-center gap-2">
             <FileAudio className="text-nyy-500" size={20} />
             <h2 className="type-section">Phase 2A · AC-3 样本提取 POC</h2>
@@ -990,7 +990,7 @@ export default function Ac3LabPage() {
                 key={point}
                 onClick={() => runAudioSampleExtraction(point)}
                 disabled={!downloadFile || sampleLoading !== null}
-                className="min-h-[44px] rounded-xl border border-warm-200 px-4 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                className="retro-btn-secondary disabled:opacity-50"
               >
                 {sampleLoading === point ? "提取中..." : `提取 ${formatDuration(point)}`}
               </button>
@@ -999,7 +999,7 @@ export default function Ac3LabPage() {
           {audioSampleTests.length > 0 && (
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {audioSampleTests.map((test, index) => (
-                <div key={`${test.targetSec}-${index}`} className="rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+                <div key={`${test.targetSec}-${index}`} className="retro-card p-3">
                   <p className={`type-body-sm font-medium ${test.status === "ok" ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                     {test.status === "ok" ? "OK" : "ERROR"} · target {formatDuration(test.targetSec)}
                   </p>
@@ -1016,7 +1016,7 @@ export default function Ac3LabPage() {
           )}
         </section>
 
-        <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+        <section className="retro-panel p-5">
           <div className="mb-4 flex items-center gap-2">
             <PlayCircle className="text-nyy-500" size={20} />
             <h2 className="type-section">Phase 2B · AC-3 decoder 初始化验证</h2>
@@ -1027,7 +1027,7 @@ export default function Ac3LabPage() {
           <div className="flex flex-wrap gap-2">
             <button onClick={runDecoderInitCheck} className="btn-primary">加载并初始化 AC-3 decoder</button>
           </div>
-          <div className="mt-4 rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+          <div className="retro-card mt-4 p-3">
             <p className={`type-body-sm font-medium ${decoderInit.status === "ok" ? "text-green-700 dark:text-green-400" : decoderInit.status === "error" ? "text-red-600 dark:text-red-400" : "text-gray-800 dark:text-gray-200"}`}>
               status={decoderInit.status}
             </p>
@@ -1038,7 +1038,7 @@ export default function Ac3LabPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+        <section className="retro-panel p-5">
           <div className="mb-4 flex items-center gap-2">
             <PlayCircle className="text-nyy-500" size={20} />
             <h2 className="type-section">Phase 2C · AC-3 samples → PCM 解码 POC</h2>
@@ -1052,7 +1052,7 @@ export default function Ac3LabPage() {
                 <button
                   onClick={() => runDecodeSample(point)}
                   disabled={decodeLoading !== null}
-                  className="min-h-[44px] rounded-xl border border-warm-200 px-4 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                  className="retro-btn-secondary disabled:opacity-50"
                 >
                   {decodeLoading === point ? "解码中..." : `解码 ${formatDuration(point)}`}
                 </button>
@@ -1070,7 +1070,7 @@ export default function Ac3LabPage() {
           {audioDecodeTests.length > 0 && (
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {audioDecodeTests.map((test, index) => (
-                <div key={`${test.targetSec}-${index}`} className="rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+                <div key={`${test.targetSec}-${index}`} className="retro-card p-3">
                   <p className={`type-body-sm font-medium ${test.status === "ok" ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                     {test.status === "ok" ? "OK" : "ERROR"} · decode {formatDuration(test.targetSec)}
                   </p>
@@ -1083,7 +1083,7 @@ export default function Ac3LabPage() {
                   {test.status === "ok" && (
                     <button
                       onClick={() => playDecodedSample(test.targetSec)}
-                      className="mt-2 min-h-[36px] rounded-lg border border-warm-200 px-3 text-xs font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                      className="retro-btn-secondary mt-2 min-h-[36px] rounded-lg px-3 text-xs"
                     >
                       播放该样本
                     </button>
@@ -1096,7 +1096,7 @@ export default function Ac3LabPage() {
         </section>
 
         {downloadFile && (
-          <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+          <section className="retro-panel p-5">
             <div className="mb-4 flex items-center gap-2">
               <PlayCircle className="text-nyy-500" size={20} />
               <h2 className="type-section">Phase 3A · 视频 + AC-3 窗口式同步 POC</h2>
@@ -1104,7 +1104,7 @@ export default function Ac3LabPage() {
             <p className="type-body-sm mb-4 text-gray-600 dark:text-gray-400">
               这是最低风险的同步实验：从当前视频时间点解 12 秒 AC-3 音频，重置视频到同一起点，然后同时开播。目标不是正式播放器，而是验证“嘴型能否大致对上”。
             </p>
-            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/20">
+            <div className="retro-card mb-4 border-amber-400/40 p-4">
               <p className="type-caption text-amber-900/80 dark:text-amber-200/80">
                 Edge init matrix 测试已移除（MSE 路径已废弃，改用 SW 原生 Range）。
               </p>
@@ -1112,14 +1112,14 @@ export default function Ac3LabPage() {
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 onClick={() => setShowSyncPreview((v) => !v)}
-                className="min-h-[44px] rounded-xl border border-warm-200 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                className="retro-btn-secondary"
               >
                 {showSyncPreview ? "隐藏预览器" : "显示预览器"}
               </button>
               <button onClick={runWindowSyncPoc} className="btn-primary">同步试听当前点（12秒窗口）</button>
             </div>
             {showSyncPreview && (
-              <div ref={playerWrapRef} className="mt-4 overflow-hidden rounded-2xl bg-black/5 p-2 dark:bg-white/[0.03]">
+              <div ref={playerWrapRef} className="retro-card mt-4 overflow-hidden p-2">
                 <SyncPreview file={downloadFile} />
               </div>
             )}
@@ -1128,7 +1128,7 @@ export default function Ac3LabPage() {
         )}
 
         {downloadFile && (
-          <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+          <section className="retro-panel p-5">
             <div className="mb-4 flex items-center gap-2">
               <PlayCircle className="text-nyy-500" size={20} />
               <h2 className="type-section">POC · Service Worker 原生 Range 播放</h2>
@@ -1141,7 +1141,7 @@ export default function Ac3LabPage() {
             </div>
             <p className="type-caption mt-3 break-all text-gray-600 dark:text-gray-400">状态：{nativeRangeStatus}</p>
             {nativeRangeUrl && (
-              <div className="mt-4 overflow-hidden rounded-2xl bg-black/5 p-2 dark:bg-white/[0.03]">
+              <div className="retro-card mt-4 overflow-hidden p-2">
                 <video
                   src={nativeRangeUrl}
                   controls
@@ -1166,7 +1166,7 @@ export default function Ac3LabPage() {
           </section>
         )}
 
-        <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+        <section className="retro-panel p-5">
           <div className="mb-4 flex items-center gap-2">
             <PlayCircle className="text-nyy-500" size={20} />
             <h2 className="type-section">人工听感记录</h2>
@@ -1189,26 +1189,26 @@ export default function Ac3LabPage() {
                 value={manual[key]}
                 onChange={(e) => setManual((prev) => ({ ...prev, [key]: e.target.value }))}
                 placeholder={placeholder}
-                className="min-h-[44px] rounded-xl border border-warm-200 bg-white px-3 text-sm outline-none focus:border-nyy-400 dark:border-gray-700 dark:bg-white/[0.04]"
+                className="retro-input px-3 text-sm"
               />
             ))}
             <textarea
               value={manual.notes}
               onChange={(e) => setManual((prev) => ({ ...prev, notes: e.target.value }))}
               placeholder="备注"
-              className="min-h-[88px] rounded-xl border border-warm-200 bg-white px-3 py-2 text-sm outline-none focus:border-nyy-400 dark:border-gray-700 dark:bg-white/[0.04] md:col-span-3"
+              className="retro-input min-h-[88px] px-3 py-2 text-sm md:col-span-3"
             />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button onClick={addManualResult} className="btn-primary">添加记录</button>
-            <button onClick={exportReport} className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-warm-200 px-4 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200">
+            <button onClick={exportReport} className="retro-btn-secondary">
               <FileJson size={16} /> 导出 JSON
             </button>
           </div>
           {manualResults.length > 0 && (
             <div className="mt-4 space-y-2">
               {manualResults.map((item, index) => (
-                <div key={index} className="rounded-xl bg-warm-50 p-3 dark:bg-white/[0.04]">
+                <div key={index} className="retro-card p-3">
                   <p className="type-body-sm font-medium">{item.device || "未命名设备"} · {item.testPoint} · score {item.score || "-"}</p>
                   <p className="type-caption text-gray-500 dark:text-gray-400">sound={item.hasSound} sync={item.syncRating} artifacts={item.artifacts} recovery={item.seekRecovery}</p>
                   {item.notes && <p className="type-caption mt-1 text-gray-600 dark:text-gray-300">{item.notes}</p>}
@@ -1218,7 +1218,7 @@ export default function Ac3LabPage() {
           )}
         </section>
 
-        <section className="rounded-3xl border border-warm-200 bg-white p-5 dark:border-gray-700 dark:bg-card">
+        <section className="retro-panel p-5">
           <h2 className="type-section mb-3">当前报告预览</h2>
           <pre className="max-h-[420px] overflow-auto rounded-2xl bg-gray-950 p-4 text-xs text-gray-100">{JSON.stringify(report, null, 2)}</pre>
         </section>

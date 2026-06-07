@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 
 class FileRequestCreate(BaseModel):
     title: str = Field(default="文件请求", min_length=1, max_length=255)
-    password: str = Field(default="", max_length=4, pattern=r"^[0-9]{0,4}$")
+    password: str = Field(default="", max_length=4, pattern=r"^(|[0-9]{4})$")
     expires_hours: int = Field(default=168, ge=1, le=720)
-    max_files: int = Field(default=20, ge=1, le=50)
+    max_files: int = Field(default=20, ge=1, le=100)
     max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
 
 
@@ -35,13 +35,21 @@ class FileRequestVerify(BaseModel):
     password: str = Field(..., min_length=4, max_length=4)
 
 
+class FileRequestEdit(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    password: str | None = Field(default=None, max_length=4, pattern=r"^(|[0-9]{4})$")
+    extend_hours: int | None = Field(default=None, ge=1, le=720)
+    max_files: int | None = Field(default=None, ge=1, le=100)
+    max_bytes: int | None = Field(default=None, ge=1, le=1024 * 1024 * 1024)
+
+
 class FileRequestCommitFile(BaseModel):
     commit_token: str = Field(..., min_length=1, max_length=512)
     store_uri: str = Field(..., min_length=1, max_length=512)
 
 
 class FileRequestCommit(BaseModel):
-    files: list[FileRequestCommitFile] = Field(..., min_length=1, max_length=50)
+    files: list[FileRequestCommitFile] = Field(..., min_length=1, max_length=100)
     password: str = Field(default="", max_length=4)
 
 
@@ -63,6 +71,20 @@ class FileRequestFileItem(BaseModel):
     created_at: datetime
 
 
+class FileRequestInboxGroup(BaseModel):
+    code: str
+    title: str
+    created_at: datetime
+    expires_at: datetime | None
+    file_count: int
+    total_bytes: int
+    max_files: int
+    max_bytes: int
+    has_password: bool
+    revoked: bool
+    files: list[FileRequestFileItem] = Field(default_factory=list)
+
+
 class FileRequestListResponse(BaseModel):
     requests: list[FileRequestItem]
     total: int = 0
@@ -72,6 +94,13 @@ class FileRequestListResponse(BaseModel):
 
 class FileRequestFilesResponse(BaseModel):
     files: list[FileRequestFileItem]
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+
+
+class FileRequestInboxResponse(BaseModel):
+    groups: list[FileRequestInboxGroup]
     total: int = 0
     page: int = 1
     page_size: int = 20

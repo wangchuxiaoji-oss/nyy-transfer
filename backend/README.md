@@ -118,6 +118,20 @@ npx tsc --noEmit
 
 注意：当前开发中优先用 `npx tsc --noEmit` 验证前端类型，不建议频繁用 `next build` 验证 dev 状态，因为曾出现 `.next` dev 缓存污染导致 500。
 
+CI 会在 `push` 和 `pull_request` 时运行：
+
+```bash
+cd /data/nyy/backend
+alembic upgrade head
+.venv/bin/pytest
+
+cd /data/nyy/frontend
+npm run build
+PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwright test
+```
+
+播放器 smoke 已加入 CI，但缺少对应 GitHub Secrets 时会跳过。可配置：`SMOKE_FASTSTART_URL`、`SMOKE_FASTSTART_EXPECT_NAME`、`SMOKE_AC3_URL`、`SMOKE_AC3_EXPECT_NAME`、`SMOKE_MKV_NATIVE_URL`、`SMOKE_MKV_NATIVE_EXPECT_NAME`、`SMOKE_CODEC_MATRIX_URL`、`SMOKE_CODEC_MATRIX_API_URL`。
+
 ## 5. 环境变量
 
 后端参考：`/data/nyy/backend/.env.example`
@@ -135,6 +149,7 @@ npx tsc --noEmit
 | `JWT_SECRET` | 至少 32 字节 | JWT 密钥 |
 | `DOUBAO_SESSION_FILE` | `/data/nyy/backend/.doubao_session.json` | 豆包会话文件 |
 | `SMTP_HOST` | `127.0.0.1` | 邮件发送 SMTP |
+| `SMTP_PORT` | `25` | 邮件发送 SMTP 端口 |
 | `EMAIL_FROM` | `noreply@nyy.app` | 邮件发件人 |
 
 前端关键变量：
@@ -175,14 +190,24 @@ npx tsc --noEmit
 
 能力：
 
-- 首页底部展示当前 IP 的游客活跃分享。
-- 后端接口：`GET /api/v1/shares/guest-mine`。
-- 列表显示 URL、倒计时、查看、删除。
+- 首页底部展示本浏览器保存了撤销令牌的游客活跃分享。
+- 后端接口：`POST /api/v1/shares/guest-mine`，请求体携带本机 `code/revoke_token` 列表。
+- 游客列表不再按 IP 枚举，避免同公网 IP / 同代理下的游客互相看到分享。
+- 首页游客区使用移动优先卡片：手机显示复制 / 更多，平板和桌面逐步展开打开、二维码、详情、撤销。
+- 卡片显示文件预览、文件数、空文件夹数、总大小、下载次数、提取码状态、倒计时和短链接。
 - 查看使用 Modal，不跳转新标签。
-- Modal 展示文件名、大小、下载次数、剩余时间、删除按钮。
-- 删除使用 revoke token：`DELETE /api/v1/shares/{code}/guest-revoke`。
+- Modal 展示文件名、大小、下载次数、剩余时间、撤销按钮。
+- 撤销使用 revoke token：`DELETE /api/v1/shares/{code}/guest-revoke`。
 - 新分享上传成功后会把 `code/url/revokeToken` 写入 localStorage。
-- 旧分享若无 revoke token，前端提示无法删除，只能等待过期。
+- 旧分享若无本地 revoke token，不再进入游客列表，只能通过分享链接访问并等待过期。
+
+游客身份与额度：
+
+- 前端为未登录游客生成 `localStorage.nyy_guest_id`，并随 API 请求发送 `X-NYY-Guest-ID`。
+- 游客上传额度和活跃分享数量按 `guest_id` 隔离，Redis key 为 `nyy:quota:guest:{guest_id}:bytes`。
+- iOS / iPadOS 主屏 Web App 与 Safari 标签页使用互相隔离的本地存储；同一网站添加到主屏后，看不到 Safari 中保存的 `nyy_guest_shares`。
+- 因此 Safari 创建的游客分享不会自动出现在主屏 Web App 的游客列表；主屏 Web App 自己上传的新分享会在主屏 Web App 内展示。
+- 缺失 `X-NYY-Guest-ID` 的旧客户端按 `ip:{ip}` 回退，只作为兼容路径，不作为新浏览器游客身份。
 
 关键注意：`guest-mine` 必须注册在 `/{code}` 路由之前，否则 FastAPI 会把 `guest-mine` 当成短码。
 
@@ -222,7 +247,8 @@ npx tsc --noEmit
 能力：
 
 - 邮箱验证码发送。
-- 注册、邮箱验证、登录、刷新 token、重置密码。
+- 发送注册验证码后，注册接口校验验证码并直接完成邮箱验证。
+- 登录、刷新 token、重置密码。
 - 前端 Auth Modal 支持登录 / 注册。
 - 登录后首页显示用户邮箱和我的工作台入口。
 - 我的工作台包含分享管理、文件请求、收到文件等。
@@ -284,7 +310,7 @@ npx tsc --noEmit
 
 分享：
 
-- `GET /api/v1/shares/guest-mine`
+- `POST /api/v1/shares/guest-mine`
 - `GET /api/v1/shares/{code}`
 - `POST /api/v1/shares/{code}/verify`
 - `GET /api/v1/shares/{code}/download`
@@ -293,11 +319,13 @@ npx tsc --noEmit
 
 认证：
 
+- `GET /api/v1/captcha/challenge`
+- `POST /api/v1/captcha/verify`
 - `POST /api/v1/auth/send-code`
 - `POST /api/v1/auth/register`
-- `POST /api/v1/auth/verify-email`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
 - `POST /api/v1/auth/reset-password`
 - `GET /api/v1/auth/me`
 
@@ -338,7 +366,7 @@ npx tsc --noEmit
 主要表：
 
 - `users`：用户、邮箱、密码哈希、plan、验证时间、登录时间。
-- `shares`：分享短码、owner、提取码哈希、过期时间、最大下载次数、下载计数、撤销 / 封禁、创建 IP、revoke token、总字节数。
+- `shares`：分享短码、owner、游客 ID、提取码哈希、过期时间、最大下载次数、下载计数、撤销 / 封禁、创建 IP、revoke token、总字节数。
 - `share_files`：分享下的文件，记录原始文件名、大小、content type、TOS URI、hash、chunk 信息。
 - `download_logs`：下载日志，预留审计 / 风控。
 - `ip_quotas`：IP 日上传配额记录。
@@ -356,6 +384,7 @@ npx tsc --noEmit
 - `alembic/versions/20260527_1200_admin_console.py`
 - `alembic/versions/20260527_1300_roadmap_features.py`
 - `alembic/versions/20260528_1000_add_revoke_token.py`
+- `alembic/versions/20260607_1300_add_guest_id_to_shares.py`
 
 ## 9. 关键文件清单
 

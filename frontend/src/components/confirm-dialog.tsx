@@ -79,12 +79,12 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={onCancel} />
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" className="relative w-full max-w-sm rounded-3xl bg-white dark:bg-card p-6 shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" className="retro-panel-strong relative w-full max-w-sm p-6">
         <button
           type="button"
           onClick={onCancel}
           aria-label="关闭确认弹窗"
-          className="absolute right-3 top-3 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-100"
+          className="retro-btn-secondary absolute right-3 top-3 min-h-[44px] min-w-[44px] rounded-full p-0"
         >
           <X className="h-4 w-4" />
         </button>
@@ -93,12 +93,12 @@ export function ConfirmDialog({
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
-            <h2 id="confirm-dialog-title" className="type-section text-gray-900 dark:text-gray-100">{title}</h2>
-            <p className="type-body-sm mt-2 text-gray-600 dark:text-gray-400">{description}</p>
+            <h2 id="confirm-dialog-title" className="retro-title text-lg">{title}</h2>
+            <p className="type-body-sm mt-2 retro-text">{description}</p>
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="type-action min-h-[44px] rounded-xl border border-gray-300 dark:border-gray-600 px-4 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5">
+          <button type="button" onClick={onCancel} className="retro-btn-secondary">
             {cancelText}
           </button>
           <button

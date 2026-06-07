@@ -16,11 +16,18 @@ import pytest
 @pytest.fixture(autouse=True)
 async def _reset_db_engine_singletons():
     """每个测试后 dispose 并清空模块级引擎/会话工厂单例。"""
-    yield
+    # 确保所有模型被导入以注册到 metadata
+    import app.models  # noqa: F401
+    from app.db.base import Base
     import app.db.session as db_session
 
-    engine = db_session._engine
-    if engine is not None:
-        await engine.dispose()
+    engine = db_session.get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+    if db_session._engine is not None:
+        await db_session._engine.dispose()
     db_session._engine = None
     db_session._session_factory = None

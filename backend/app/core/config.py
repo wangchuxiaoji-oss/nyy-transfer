@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -78,14 +78,52 @@ class Settings(BaseSettings):
     debug_log_ingest_enabled: bool = False
     debug_log_dir: str = ""
 
-    # 认证
+    # 认证 - Token
     jwt_secret: str = Field(default="change-me-jwt-secret-at-least-32-bytes!!", min_length=32)
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60 * 24  # 24h
-    jwt_refresh_token_expire_days: int = 30
-    auth_code_ttl_minutes: int = 15
-    auth_code_max_attempts: int = 5  # 验证码最大尝试次数
-    auth_code_rate_limit: int = 5   # 每邮箱每小时最多发 N 次
+    auth_access_token_expire_minutes: int = 15
+    auth_refresh_token_expire_days: int = 30
+    auth_refresh_cookie_name: str = "nyy_refresh_token"
+    auth_cookie_secure: bool = True
+    auth_cookie_samesite: str = "lax"
+    auth_cookie_domain: str | None = None
+
+    # 认证 - ALTCHA 验证码
+    captcha_hmac_secret: str = Field(default="change-me-captcha-hmac-secret-32bytes!", min_length=32)
+    captcha_challenge_ttl_seconds: int = 180
+    captcha_token_ttl_seconds: int = 300
+    altcha_algorithm: str = "PBKDF2/SHA-256"
+    altcha_cost: int = 5_000
+
+    # 认证 - 邮箱验证码
+    email_code_secret: str = Field(default="change-me-email-code-secret-32bytes!", min_length=32)
+    email_code_ttl_minutes: int = 10
+    email_code_max_attempts: int = 5
+    email_code_resend_cooldown_seconds: int = 60
+    email_code_email_hourly_limit: int = 5
+    email_code_ip_hourly_limit: int = 20
+    email_code_ip_daily_limit: int = 100
+
+    # 认证 - 登录风控
+    login_email_failure_captcha_threshold: int = 3
+    login_ip_failure_captcha_threshold: int = 10
+    login_ip_failure_rate_limit: int = 30
+
+    @model_validator(mode="after")
+    def validate_production_auth_secrets(self) -> "Settings":
+        if self.app_env == "dev":
+            return self
+        defaults = {
+            "JWT_SECRET": self.jwt_secret,
+            "CAPTCHA_HMAC_SECRET": self.captcha_hmac_secret,
+            "EMAIL_CODE_SECRET": self.email_code_secret,
+        }
+        weak = [name for name, value in defaults.items() if value.startswith("change-me")]
+        if weak:
+            raise ValueError(f"生产环境必须设置非默认认证密钥: {', '.join(weak)}")
+        if not self.auth_cookie_secure:
+            raise ValueError("生产环境必须设置 AUTH_COOKIE_SECURE=true")
+        return self
 
     @property
     def is_dev(self) -> bool:

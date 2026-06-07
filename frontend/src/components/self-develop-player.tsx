@@ -83,7 +83,7 @@ export function SelfDevelopPlayer({ file, className = "", debugLog }: SelfDevelo
       message,
     });
     return nextProbe;
-  }, [debugLog, ext, file.file_name, file.file_size]);
+  }, [debugLog, ext, file]);
 
   useEffect(() => {
     let cancelled = false;

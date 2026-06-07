@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ShareFileDownload } from "@/lib/api";
 import type { DebugLogFn } from "@/lib/debug";
-import { PlayerChrome, type PlayerViewState } from "@/components/player-chrome";
+import { PlayerChrome } from "@/components/player-chrome";
+import { makeCapabilities, type PlayerViewState } from "@/components/player/player-types";
 
 const VIDEO_EXTS = ["mp4", "webm", "ogg", "mov"];
 const AUDIO_EXTS = ["mp3", "aac", "ogg", "wav", "flac", "m4a"];
@@ -41,7 +42,7 @@ function NativeDirectMediaPlayer({ file, mediaType, className = "" }: { file: Sh
   });
 
   return (
-    <div className={className}>
+    <div className={`relative aspect-video overflow-hidden rounded-xl bg-black ${className}`}>
       <PlayerChrome view={view} actions={actions}>
         {mediaType === "video" ? (
           <video
@@ -166,6 +167,7 @@ function useNativeMediaChrome({
     state: error ? "error" : state,
     currentTime,
     duration,
+    bufferedPct: 0,
     buffering: null,
     error,
     title,
@@ -173,19 +175,14 @@ function useNativeMediaChrome({
     isMuted: forcedNativeMuted ? uiMuted : isMuted,
     volume: forcedNativeMuted ? uiVolume : volume,
     playbackRate,
-    canSeek: duration > 0 && state !== "loading" && state !== "idle" && state !== "error",
-    canFullscreen: mediaType === "video",
-    canPictureInPicture: mediaType === "video",
-    canVolume: true,
-    canSpeed: true,
-    canSubtitles: false,
-    canQuality: false,
-    unsupportedReasons: {
-      subtitles: "当前未接入字幕轨",
-      quality: "当前播放源为单轨，不支持手动切画质",
-      pip: mediaType !== "video" ? "音频不支持画中画" : undefined,
-      fullscreen: mediaType !== "video" ? "音频不支持全屏" : undefined,
-    },
+    capabilities: makeCapabilities({
+      seek: { enabled: duration > 0 && state !== "loading" && state !== "idle" && state !== "error" },
+      fullscreen: { enabled: mediaType === "video", reason: mediaType !== "video" ? "音频不支持全屏" : undefined },
+      pictureInPicture: { enabled: mediaType === "video", reason: mediaType !== "video" ? "音频不支持画中画" : undefined },
+      speed: { enabled: true },
+      quality: { enabled: false, reason: "当前播放源为单轨，不支持手动切画质" },
+      subtitles: { enabled: false, reason: "当前未接入字幕轨" },
+    }),
   };
 
   const actions = {
@@ -197,6 +194,12 @@ function useNativeMediaChrome({
       const media = mediaRef.current;
       if (!media) return;
       media.currentTime = Math.max(0, seconds);
+    },
+    seekBy: (deltaSeconds: number) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      const safe = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : duration;
+      media.currentTime = Math.max(0, Math.min(safe, (media.currentTime || 0) + deltaSeconds));
     },
     setVolume: (nextVolume: number) => {
       const media = mediaRef.current;
@@ -230,6 +233,9 @@ function useNativeMediaChrome({
       const host = media?.parentElement;
       if (!host?.requestFullscreen) return;
       await host.requestFullscreen();
+    },
+    exitFullscreen: async () => {
+      await document.exitFullscreen?.().catch(() => {});
     },
     togglePictureInPicture: async () => {
       const media = mediaRef.current as HTMLVideoElement | null;

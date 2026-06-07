@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.share import Share, ShareLogicalFile
+from app.models.share import DownloadLog, Share, ShareLogicalFile
 from app.models.system import Report
 from app.schemas.share import (
     ChunkDownloadInfo,
@@ -36,6 +36,33 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/shares", tags=["shares"])
 _EMPTY_URI_PREFIX = "nyy-empty://"
 _EMPTY_FILE_DATA_URL = "data:application/octet-stream;base64,"
+
+
+async def _reserve_download_link(db: AsyncSession, share: Share, request: Request) -> None:
+    from app.api.v1.uploads import _get_client_ip
+
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(Share)
+        .where(
+            Share.id == share.id,
+            Share.revoked_at.is_(None),
+            Share.banned_at.is_(None),
+            or_(Share.expires_at.is_(None), Share.expires_at > now),
+            or_(Share.max_downloads == 0, Share.download_count < Share.max_downloads),
+        )
+        .values(download_count=Share.download_count + 1)
+        .returning(Share.download_count)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status.HTTP_410_GONE, "下载次数已用完或分享已失效")
+
+    db.add(DownloadLog(
+        share_id=share.id,
+        ip=_get_client_ip(request),
+        ua=(request.headers.get("user-agent") or "")[:512],
+        downloaded_at=datetime.now(timezone.utc),
+    ))
 
 
 def _public_media_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -85,6 +112,15 @@ class ShareReportRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class GuestShareReference(BaseModel):
+    code: str = Field(..., min_length=1, max_length=16)
+    revoke_token: str = Field(..., min_length=1, max_length=64)
+
+
+class GuestSharesMineRequest(BaseModel):
+    shares: list[GuestShareReference] = Field(default_factory=list, max_length=50)
 
 
 async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
@@ -194,25 +230,41 @@ def _aggregate_file_info(logical_files: list[ShareLogicalFile]) -> list[ShareFil
     return results
 
 
-@router.get("/guest-mine", summary="游客查询自己的活跃分享")
-async def guest_my_shares(request: Request):
-    """通过 IP 查询游客的活跃分享列表。"""
+def _guest_share_status(share: Share, now: datetime) -> str:
+    if share.expires_at and share.expires_at <= now + timedelta(hours=1):
+        return "expiring"
+    return "active"
+
+
+@router.post("/guest-mine", summary="游客查询自己的活跃分享")
+async def guest_my_shares(body: GuestSharesMineRequest):
+    """通过本机保存的撤销令牌查询游客的活跃分享列表。"""
     from app.db.session import get_session_factory
-    from app.api.v1.uploads import _get_client_ip
-    from sqlalchemy import or_, cast
-    from sqlalchemy.dialects.postgresql import INET
     from app.core.config import get_settings
 
     settings = get_settings()
-    ip = _get_client_ip(request)
     now = datetime.now(timezone.utc)
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in body.shares:
+        code = item.code.strip()
+        revoke_token = item.revoke_token.strip()
+        key = (code, revoke_token)
+        if not code or not revoke_token or key in seen:
+            continue
+        seen.add(key)
+        pairs.append(key)
+
+    if not pairs:
+        return []
 
     async with get_session_factory()() as db:
         stmt = (
             select(Share)
+            .options(selectinload(Share.logical_files))
             .where(
-                Share.ip_created_from == cast(ip, INET),
                 Share.owner_id.is_(None),
+                or_(*[and_(Share.code == code, Share.revoke_token == token) for code, token in pairs]),
                 Share.revoked_at.is_(None),
                 Share.banned_at.is_(None),
                 or_(Share.expires_at.is_(None), Share.expires_at > now),
@@ -229,11 +281,16 @@ async def guest_my_shares(request: Request):
             "code": s.code,
             "url": f"{settings.app_base_url}/{s.code}",
             "has_revoke_token": s.revoke_token is not None,
+            "preview_files": [f.original_name for f in sorted(s.logical_files, key=lambda item: item.sort_index)[:3]],
+            "file_count": len(s.logical_files or []),
+            "empty_dir_count": len(s.empty_dirs or []),
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "expires_at": s.expires_at.isoformat() if s.expires_at else None,
             "total_bytes": s.total_bytes,
             "download_count": s.download_count,
             "max_downloads": s.max_downloads,
+            "has_password": s.password_hash is not None,
+            "status": _guest_share_status(s, now),
         }
         for s in shares
     ]
@@ -286,7 +343,7 @@ async def verify_share(code: str, body: ShareVerifyRequest, request: Request):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
 
         downloads = await _get_download_urls(share.logical_files)
-        share.download_count += 1
+        await _reserve_download_link(db, share, request)
         await db.commit()
     return ShareVerifyResponse(files=downloads, empty_dirs=share.empty_dirs or [])
 
@@ -316,7 +373,7 @@ async def download_share(code: str, request: Request):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
 
         downloads = await _get_download_urls(share.logical_files)
-        share.download_count += 1
+        await _reserve_download_link(db, share, request)
         await db.commit()
     return ShareDownloadResponse(files=downloads, empty_dirs=share.empty_dirs or [])
 
@@ -352,7 +409,11 @@ async def guest_revoke_share(code: str, body: GuestRevokeRequest):
 
     async with get_session_factory()() as db:
         share = await db.scalar(
-            select(Share).where(Share.code == code, Share.revoke_token == body.revoke_token)
+            select(Share).where(
+                Share.code == code,
+                Share.owner_id.is_(None),
+                Share.revoke_token == body.revoke_token,
+            )
         )
         if not share:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享不存在或令牌无效")

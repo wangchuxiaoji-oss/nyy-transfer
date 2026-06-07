@@ -24,12 +24,12 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/icons/favicon-16.png?v=20260607-no-halo", sizes: "16x16", type: "image/png" },
-      { url: "/icons/favicon-32.png?v=20260607-no-halo", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png?v=20260607-no-halo", sizes: "192x192", type: "image/png" },
+      { url: "/icons/favicon-16.png?v=20260607-handwrite-10", sizes: "16x16", type: "image/png" },
+      { url: "/icons/favicon-32.png?v=20260607-handwrite-10", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png?v=20260607-handwrite-10", sizes: "192x192", type: "image/png" },
     ],
-    shortcut: [{ url: "/icons/favicon-32.png?v=20260607-no-halo", sizes: "32x32", type: "image/png" }],
-    apple: [{ url: "/icons/apple-touch-icon.png?v=20260607-no-halo", sizes: "180x180", type: "image/png" }],
+    shortcut: [{ url: "/icons/favicon-32.png?v=20260607-handwrite-10", sizes: "32x32", type: "image/png" }],
+    apple: [{ url: "/icons/apple-touch-icon.png?v=20260607-handwrite-10", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,

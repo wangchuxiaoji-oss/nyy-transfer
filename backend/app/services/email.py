@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import logging
+from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 
 import aiosmtplib
 
@@ -50,9 +52,9 @@ async def send_email(to: str, subject: str, html: str, text: str) -> bool:
     settings = get_settings()
 
     msg = MIMEMultipart("alternative")
-    msg["From"] = f"拿呀呀 <{settings.email_from}>"
+    msg["From"] = formataddr((str(Header("拿呀呀", "utf-8")), settings.email_from))
     msg["To"] = to
-    msg["Subject"] = subject
+    msg["Subject"] = str(Header(subject, "utf-8"))
     msg.attach(MIMEText(text, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
 
@@ -76,7 +78,7 @@ async def send_verification_code(
 ) -> bool:
     """发送验证码邮件。"""
     settings = get_settings()
-    ttl = settings.auth_code_ttl_minutes
+    ttl = settings.email_code_ttl_minutes
 
     titles = {
         "register": "注册验证码",

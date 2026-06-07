@@ -334,7 +334,7 @@ export default function VideoInspectPage() {
     const playback = unsupportedProbe?.playback;
 
     return (
-      <div key={index} className="bg-gray-800 rounded-lg p-4">
+      <div key={index} className="retro-card p-4">
         {/* 文件信息 */}
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -612,26 +612,26 @@ export default function VideoInspectPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      <div className="max-w-6xl mx-auto px-4 py-8">
+    <main className="nyy-product-shell px-4 py-8">
+      <div className="nyy-product-content max-w-6xl mx-auto">
         {/* 标题 */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FileVideo className="w-6 h-6 text-blue-400" />
+          <h1 className="retro-title flex items-center gap-2 text-2xl">
+            <FileVideo className="w-6 h-6 text-nyy-500" />
             视频分析工具
           </h1>
-          <p className="text-gray-400 mt-2">
+          <p className="retro-text mt-2">
             选择本地文件夹，递归扫描所有视频文件并进行深度分析（纯客户端，不上传文件）
           </p>
         </div>
 
         {/* 选择文件夹 */}
-        <div className="bg-gray-900 rounded-lg p-6 mb-6">
+        <div className="retro-panel mb-6 p-6">
           <div className="flex items-center gap-4">
             <button
               onClick={handleSelectFolder}
               disabled={progress.isRunning}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors"
+              className="retro-btn-secondary disabled:opacity-50"
             >
               <FolderOpen className="w-4 h-4" />
               选择文件夹
@@ -640,7 +640,7 @@ export default function VideoInspectPage() {
             {files.length > 0 && !progress.isRunning && (
               <button
                 onClick={handleStartAnalysis}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                className="btn-primary"
               >
                 <Play className="w-4 h-4" />
                 开始分析 ({files.length} 个文件)
@@ -648,7 +648,7 @@ export default function VideoInspectPage() {
             )}
 
             {progress.isRunning && (
-              <div className="flex items-center gap-2 text-gray-400">
+              <div className="flex items-center gap-2 retro-text">
                 <Clock className="w-4 h-4 animate-spin" />
                 分析中...
               </div>
@@ -657,7 +657,7 @@ export default function VideoInspectPage() {
 
           {/* 文件统计 */}
           {files.length > 0 && (
-            <div className="mt-4 flex gap-4 text-sm text-gray-400">
+            <div className="mt-4 flex gap-4 text-sm retro-muted">
               <span>总计: {files.length} 个视频文件</span>
               <span>可分析: {files.filter(f => f.classification === "playable_video" || f.classification === "analyzable_video").length} 个</span>
               <span>不支持: {files.filter(f => f.classification === "unplayable_video").length} 个</span>
@@ -667,15 +667,15 @@ export default function VideoInspectPage() {
 
         {/* 进度条 */}
         {progress.isRunning && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-6">
+          <div className="retro-panel mb-6 p-6">
             <div className="mb-4">
-              <div className="flex justify-between text-sm text-gray-400 mb-2">
+              <div className="mb-2 flex justify-between text-sm retro-muted">
                 <span>分析进度</span>
                 <span>{progress.analyzed + progress.unsupported + progress.skipped + progress.errors} / {progress.total}</span>
               </div>
-              <div className="w-full bg-gray-800 rounded-full h-2">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  className="h-2 rounded-full bg-gradient-to-r from-yc-accent to-yc-accent-3 transition-all duration-300"
                   style={{
                     width: `${((progress.analyzed + progress.unsupported + progress.skipped + progress.errors) / progress.total) * 100}%`,
                   }}
@@ -683,7 +683,7 @@ export default function VideoInspectPage() {
               </div>
             </div>
 
-            <div className="text-sm text-gray-400">
+            <div className="text-sm retro-muted">
               <p>当前文件: {progress.currentFile}</p>
               <div className="flex gap-4 mt-2">
                 <span className="text-green-400">✓ 已分析: {progress.analyzed}</span>
@@ -697,7 +697,7 @@ export default function VideoInspectPage() {
 
         {/* 分析结果 */}
         {results.length > 0 && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-6">
+          <div className="retro-panel mb-6 p-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-400" />
               分析结果 ({results.length} 个文件)
@@ -711,7 +711,7 @@ export default function VideoInspectPage() {
 
         {/* 不支持的格式 */}
         {unsupported.length > 0 && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-6">
+          <div className="retro-panel mb-6 p-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-yellow-400" />
               不支持的格式 ({unsupported.length} 个文件)
@@ -751,7 +751,7 @@ export default function VideoInspectPage() {
                         <td className="py-2 text-gray-400">{item.error_message}</td>
                       </tr>
                       {item.unsupported_probe?.probe_status === "ok" && (
-                        <tr className="border-b border-gray-800/70 bg-gray-950/40">
+                        <tr className="border-b border-white/10 bg-white/5">
                           <td colSpan={5} className="py-3">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
                               <div>
@@ -804,7 +804,7 @@ export default function VideoInspectPage() {
 
         {/* 保存路径 */}
         {savedPath && (
-          <div className="bg-gray-900 rounded-lg p-6">
+          <div className="retro-panel p-6">
             <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <HardDrive className="w-5 h-5 text-blue-400" />
               报告已保存
@@ -813,6 +813,6 @@ export default function VideoInspectPage() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

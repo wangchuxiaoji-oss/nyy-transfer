@@ -1,6 +1,6 @@
-"""IP 配额服务 — Redis 滑动窗口。
+"""游客 / 用户配额服务 — Redis 滑动窗口。
 
-游客（未登录）：200 MB / 24h / 1 个活跃分享
+游客（未登录）：按浏览器游客身份隔离额度
 注册用户：1 GiB / 30d / 20 个活跃分享
 """
 
@@ -26,22 +26,19 @@ class QuotaService:
     """基于 Redis 的配额检查。
 
     key 格式：
-      nyy:quota:ip:{ip}:bytes   — 24h 滑动窗口已用字节
-      nyy:quota:ip:{ip}:count   — 24h 活跃分享数
+      nyy:quota:guest:{guest_id}:bytes — 游客滑动窗口已用字节
       nyy:quota:user:{uid}:bytes
-      nyy:quota:user:{uid}:count
     """
 
     def __init__(self, redis) -> None:  # redis: redis.asyncio.Redis
         self.redis = redis
 
-    async def check_guest(self, ip: str, file_size: int) -> QuotaCheckResult:
-        """检查游客 IP 是否允许上传 file_size 字节。"""
+    async def check_guest(self, guest_id: str, file_size: int) -> QuotaCheckResult:
+        """检查游客是否允许上传 file_size 字节。"""
         settings = get_settings()
         limit = settings.guest_max_file_bytes
-        ttl = settings.guest_ttl_hours * 3600
 
-        key = f"nyy:quota:ip:{ip}:bytes"
+        key = f"nyy:quota:guest:{guest_id}:bytes"
         used = int(await self.redis.get(key) or 0)
 
         if used + file_size > limit:
@@ -53,22 +50,22 @@ class QuotaService:
             )
         return QuotaCheckResult(allowed=True, used_bytes=used, limit_bytes=limit)
 
-    async def consume_guest(self, ip: str, file_size: int) -> None:
+    async def consume_guest(self, guest_id: str, file_size: int) -> None:
         """上传成功后扣减配额。"""
         settings = get_settings()
         ttl = settings.guest_ttl_hours * 3600
-        key = f"nyy:quota:ip:{ip}:bytes"
+        key = f"nyy:quota:guest:{guest_id}:bytes"
         pipe = self.redis.pipeline()
         pipe.incrby(key, file_size)
         pipe.expire(key, ttl)
         await pipe.execute()
-        log.info("quota consumed: ip=%s +%d bytes", ip, file_size)
+        log.info("quota consumed: guest=%s +%d bytes", guest_id, file_size)
 
     async def check_guest_with_config(
-        self, ip: str, file_size: int, quota_config: dict[str, int]
+        self, guest_id: str, file_size: int, quota_config: dict[str, int]
     ) -> QuotaCheckResult:
         limit = quota_config["guest_max_file_bytes"]
-        key = f"nyy:quota:ip:{ip}:bytes"
+        key = f"nyy:quota:guest:{guest_id}:bytes"
         used = int(await self.redis.get(key) or 0)
         if used + file_size > limit:
             return QuotaCheckResult(
@@ -80,10 +77,10 @@ class QuotaService:
         return QuotaCheckResult(allowed=True, used_bytes=used, limit_bytes=limit)
 
     async def consume_guest_with_config(
-        self, ip: str, file_size: int, quota_config: dict[str, int]
+        self, guest_id: str, file_size: int, quota_config: dict[str, int]
     ) -> None:
         ttl = quota_config["guest_ttl_hours"] * 3600
-        key = f"nyy:quota:ip:{ip}:bytes"
+        key = f"nyy:quota:guest:{guest_id}:bytes"
         pipe = self.redis.pipeline()
         pipe.incrby(key, file_size)
         pipe.expire(key, ttl)

@@ -41,6 +41,7 @@ class Share(Base, TimestampMixin):
     banned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     banned_reason: Mapped[str | None] = mapped_column(String(255))
     ip_created_from: Mapped[str | None] = mapped_column(INET)
+    guest_id: Mapped[str | None] = mapped_column(String(64), index=True)
     revoke_token: Mapped[str | None] = mapped_column(String(64))
     # 上传时计算好的总字节，方便列表页展示
     total_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
@@ -64,6 +65,7 @@ class Share(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_shares_owner_created", "owner_id", "created_at"),
+        Index("ix_shares_guest_created", "guest_id", "created_at"),
         Index("ix_shares_upload_batch_id", "upload_batch_id", unique=True),
     )
 

@@ -111,6 +111,7 @@ class FileRequestFile(Base, TimestampMixin):
     content_type: Mapped[str | None] = mapped_column(String(127))
     tos_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     uploader_ip: Mapped[str | None] = mapped_column(INET)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EmailDelivery(Base, TimestampMixin):

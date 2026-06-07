@@ -18,6 +18,13 @@ export default defineConfig({
       use: { browserName: "chromium" },
     },
   ],
-  // 不自动启动 dev server（已手动运行）
-  webServer: undefined,
+  // 本地默认手动启动；CI 通过环境变量启用自动服务。
+  webServer: process.env.PLAYWRIGHT_WEB_SERVER
+    ? {
+        command: process.env.PLAYWRIGHT_WEB_SERVER_COMMAND || "npm run dev",
+        url: "http://localhost:3000",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120000,
+      }
+    : undefined,
 });

@@ -71,22 +71,22 @@ export default function FileRequestPage() {
     }
   }
 
-  if (state === "loading") return <main className="type-body min-h-dvh bg-warm-50 dark:bg-background flex items-center justify-center text-gray-600 dark:text-gray-400">加载中...</main>;
-  if (!info) return <main className="type-body min-h-dvh bg-warm-50 dark:bg-background flex items-center justify-center px-4 text-center text-gray-700 dark:text-gray-300">{error}</main>;
+  if (state === "loading") return <main className="nyy-product-shell type-body flex items-center justify-center retro-text">加载中...</main>;
+  if (!info) return <main className="nyy-product-shell type-body flex items-center justify-center px-4 text-center retro-text">{error}</main>;
 
   return (
-    <main className="min-h-dvh bg-warm-50 dark:bg-background flex items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md rounded-3xl border border-warm-200 dark:border-gray-700 bg-white dark:bg-card p-8 shadow-sm dark:shadow-none">
+    <main className="nyy-product-shell flex items-center justify-center px-4 py-16">
+      <div className="nyy-product-content retro-panel-strong w-full max-w-md p-8">
         <div className="text-center">
           <BrandLogo className="mx-auto h-auto w-36" priority />
-          <h1 className="type-title mt-4 text-gray-900 dark:text-gray-100">{info.title}</h1>
-          <p className="type-body-sm mt-1 text-gray-600 dark:text-gray-400">对方正在通过拿呀呀收文件</p>
+          <h1 className="retro-title mt-4 text-lg">{info.title}</h1>
+          <p className="type-body-sm mt-1 retro-text">对方正在通过拿呀呀收文件</p>
         </div>
 
         {info.has_password && !verified ? (
           <div className="mt-8 space-y-3">
-            <label htmlFor={passwordInputId} className="type-label text-gray-700 dark:text-gray-300 flex items-center gap-1"><Lock className="w-4 h-4" /> 需要访问码</label>
-            <input id={passwordInputId} value={password} onChange={(e) => { setPassword(e.target.value.replace(/\D/g, "").slice(0, 4)); setError(""); }} maxLength={4} inputMode="numeric" className="min-h-[44px] w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-background px-4 text-center tracking-[0.5em] dark:text-gray-200 outline-none focus:ring-2 focus:ring-nyy-300" />
+            <label htmlFor={passwordInputId} className="type-label flex items-center gap-1 retro-text"><Lock className="w-4 h-4" /> 需要访问码</label>
+            <input id={passwordInputId} value={password} onChange={(e) => { setPassword(e.target.value.replace(/\D/g, "").slice(0, 4)); setError(""); }} maxLength={4} inputMode="numeric" className="retro-input w-full px-4 text-center tracking-[0.5em]" />
             {error && <p role="alert" className="type-caption text-red-700">{error}</p>}
             <button onClick={handleVerify} className="btn-primary w-full rounded-2xl">继续</button>
           </div>
@@ -95,24 +95,24 @@ export default function FileRequestPage() {
         ) : (
           <div className="mt-8 space-y-4">
             <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
-            <button onClick={() => inputRef.current?.click()} className="flex min-h-[140px] w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-warm-200 dark:border-gray-600 bg-warm-50 dark:bg-white/5 hover:border-nyy-300 dark:hover:border-nyy-700">
+            <button onClick={() => inputRef.current?.click()} className="retro-card flex min-h-[140px] w-full flex-col items-center justify-center gap-3 border-dashed hover:border-nyy-400">
               <Upload className="h-9 w-9 text-nyy-400" />
               <span className="type-body-sm text-gray-600 dark:text-gray-400">选择要提交的文件</span>
             </button>
             <div className="space-y-2">
-              {files.map((f) => <div key={f.name + f.size} className="flex items-center gap-2 rounded-xl border border-gray-100 dark:border-gray-700 p-2"><FileIcon className="h-4 w-4 text-gray-500 dark:text-gray-400" /><span className="type-file-name flex-1 truncate text-gray-700 dark:text-gray-300">{f.name}</span><span className="type-file-meta text-gray-600 dark:text-gray-400">{formatSize(f.size)}</span></div>)}
+              {files.map((f) => <div key={f.name + f.size} className="retro-card flex items-center gap-2 p-2"><FileIcon className="h-4 w-4 retro-muted" /><span className="type-file-name flex-1 truncate retro-text">{f.name}</span><span className="type-file-meta retro-muted">{formatSize(f.size)}</span></div>)}
             </div>
             {error && <p role="alert" className="type-caption flex items-center gap-1 text-red-700 dark:text-red-400"><AlertCircle className="h-3 w-3" />{error}</p>}
             <button disabled={state === "uploading" || files.length === 0} onClick={startUpload} className="btn-primary w-full rounded-2xl">{state === "uploading" ? "上传中..." : "提交文件"}</button>
-            <p className="type-body-sm text-center text-gray-600 dark:text-gray-400">剩余 {info.max_files - info.received_files} 个文件 / {formatSize(info.max_bytes - info.received_bytes)}</p>
+            <p className="type-body-sm text-center retro-text">剩余 {info.max_files - info.received_files} 个文件 / {formatSize(info.max_bytes - info.received_bytes)}</p>
           </div>
         )}
       </div>
 
       {/* Mobile fixed action bar (upload state only) */}
       {verified && state !== "done" && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-warm-200 dark:border-gray-700 bg-white/95 dark:bg-card/95 px-4 py-3 backdrop-blur-sm md:hidden">
-          <button onClick={() => inputRef.current?.click()} className="type-action flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-xl border border-warm-200 dark:border-gray-600 text-gray-700 dark:text-gray-300">
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-white/20 bg-white/70 px-4 py-3 backdrop-blur-2xl dark:border-white/10 dark:bg-card/70 md:hidden">
+          <button onClick={() => inputRef.current?.click()} className="retro-btn-secondary flex-1">
             <Upload className="h-4 w-4" /> 选择文件{files.length > 0 && ` (${files.length})`}
           </button>
           <button disabled={state === "uploading" || files.length === 0} onClick={startUpload} className="btn-primary flex min-h-[44px] flex-1 items-center justify-center gap-2">

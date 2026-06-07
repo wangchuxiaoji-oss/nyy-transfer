@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class SendCodeRequest(BaseModel):
@@ -19,7 +20,7 @@ class SendCodeRequest(BaseModel):
 
 class VerifyEmailRequest(BaseModel):
     email: EmailStr
-    code: str = Field(min_length=6, max_length=6)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 # ─── 登录 ────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ class RefreshRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
-    code: str = Field(min_length=6, max_length=6)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
     new_password: str = Field(min_length=8, max_length=128)
 
 

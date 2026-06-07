@@ -11,7 +11,7 @@ test.describe("分享页 4C 渲染", () => {
     await expect(page.locator("text=返回首页")).toBeVisible();
   });
 
-  test("页面包含 4C 关键元素:mesh 背景、glass 卡片、Orbitron 字体", async ({ page }) => {
+  test("页面包含 4C 关键元素和 tech 字体类", async ({ page }) => {
     await page.goto("/test-e2e");
     // 等待页面离开 loading 状态
     await page.waitForTimeout(3000);
@@ -21,7 +21,7 @@ test.describe("分享页 4C 渲染", () => {
     const dataTheme = await root.getAttribute("data-theme");
     expect(["dark", "light"]).toContain(dataTheme);
 
-    // 检查 Orbitron 字体链接存在（通过检查 font-tech 类的元素）
+    // 检查科技字体类元素存在
     const fontTechElements = page.locator(".font-tech");
     const count = await fontTechElements.count();
     expect(count).toBeGreaterThan(0);
@@ -42,33 +42,23 @@ test.describe("主题切换", () => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    const themeBtn = page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first();
+    const themeBtn = page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first();
 
     await expect(themeBtn).toBeVisible({ timeout: 10000 });
 
-    const before = await page.locator("html").getAttribute("data-theme");
-    expect(before).toMatch(/^(light|dark)$/);
-
     await themeBtn.click();
-    const afterFirstClick = await page.locator("html").getAttribute("data-theme");
-    expect(afterFirstClick).toMatch(/^(light|dark)$/);
-    expect(afterFirstClick).not.toBe(before);
-
-    await themeBtn.click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", before!);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
   });
 
   test("主题持久化到 localStorage", async ({ page }) => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
 
-    const themeBtn = page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first();
+    const themeBtn = page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first();
     await expect(themeBtn).toBeVisible({ timeout: 10000 });
-    const before = await page.locator("html").getAttribute("data-theme");
-    const expected = before === "light" ? "dark" : "light";
     await themeBtn.click();
-    const saved = await page.evaluate(() => localStorage.getItem("nyy-theme-4c"));
-    expect(saved).toBe(expected);
+    const saved = await page.evaluate(() => localStorage.getItem("nyy-theme"));
+    expect(["auto", "light", "dark"]).toContain(saved);
   });
 });
 
@@ -181,7 +171,7 @@ test.describe("无障碍", () => {
     await page.waitForTimeout(3000);
 
     // 检查主题按钮存在
-    await expect(page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first()).toBeVisible({ timeout: 10000 });
   });
 });
 
@@ -281,15 +271,40 @@ async function installMockNativeVideo(page: import("@playwright/test").Page) {
       configurable: true,
       get() { return false; },
     });
+    Object.defineProperty(HTMLMediaElement.prototype, "readyState", {
+      configurable: true,
+      get() { return 4; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "networkState", {
+      configurable: true,
+      get() { return 1; },
+    });
     Object.defineProperty(HTMLMediaElement.prototype, "duration", {
       configurable: true,
       get() { return 120; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "videoWidth", {
+      configurable: true,
+      get() { return 1280; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "videoHeight", {
+      configurable: true,
+      get() { return 720; },
+    });
+    Object.defineProperty(HTMLMediaElement.prototype, "error", {
+      configurable: true,
+      get() { return null; },
     });
     Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
       configurable: true,
       get() { return (this as MockVideo).__nyyCurrentTime ?? 0; },
       set(value: number) { (this as MockVideo).__nyyCurrentTime = value; },
     });
+    HTMLMediaElement.prototype.load = function () {
+      this.dispatchEvent(new Event("loadedmetadata"));
+      this.dispatchEvent(new Event("loadeddata"));
+      this.dispatchEvent(new Event("canplay"));
+    };
     HTMLMediaElement.prototype.play = function () {
       const video = this as MockVideo;
       video.__nyyPaused = false;
@@ -544,6 +559,27 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
   });
 
+  test("原生播放器点击播放后加载中不重新显示中心播放按钮", async ({ page }) => {
+    await installMockNativeVideo(page);
+    await page.addInitScript(() => {
+      HTMLMediaElement.prototype.play = function () {
+        this.dispatchEvent(new Event("waiting"));
+        return new Promise(() => undefined);
+      };
+    });
+    await mockReadyShare(page);
+    await page.route("https://example.com/v.mp4", async () => {
+      await new Promise(() => undefined);
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+
+    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("native-video-center-toggle").click();
+    await expect(page.getByTestId("native-video-buffering")).toBeVisible({ timeout: 1000 });
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+  });
+
   test("AC-3 MP4 默认走客户端 AC-3 播放路径", async ({ page }) => {
     const ac3Meta = {
       ...VIDEO_META,
@@ -579,6 +615,180 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.getByTestId("ac3-video-preview").first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
     await expect(page.locator("canvas")).toHaveCount(0);
+  });
+
+  test("AC-3 大文件使用 SW 虚拟视频通道而不是 Blob 兜底", async ({ page }) => {
+    await installMockNativeVideo(page);
+    const largeSize = 512 * 1024 * 1024;
+    const ac3Meta = {
+      ...VIDEO_META,
+      file_size: largeSize,
+      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
+      playback_hints: { has_video_only_virtual: true },
+      playback_assets: [{
+        kind: "mp4_video_only_init",
+        sidecar_size: 8192,
+        virtual_size: largeSize - 1024,
+        source_media_start: 4096,
+        source_media_end: largeSize - 4096,
+        download_url: "https://example.com/large-ac3-video-only-init.mp4",
+      }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: largeSize,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/large-ac3.mp4", chunks: [], media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+    await page.route("https://example.com/large-ac3-video-only-init.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/8192", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
+    );
+    await page.route("https://example.com/large-ac3.mp4", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": `bytes 0-524287/${largeSize}`, "Accept-Ranges": "bytes" }, body: "x".repeat(1024) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("ac3-video-preview").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("ac3-video-preview").first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+    await expect(page.getByText("当前文件过大，无法启用 AC-3 Blob 兜底")).toHaveCount(0);
+  });
+
+  test("AC-3 大文件播放中下载链接刷新不重置视频会话", async ({ page }) => {
+    await installMockNativeVideo(page);
+    const largeSize = 512 * 1024 * 1024;
+    const ac3Meta = {
+      ...VIDEO_META,
+      file_size: largeSize,
+      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
+      playback_hints: { has_video_only_virtual: true },
+      playback_assets: [{
+        kind: "mp4_video_only_init",
+        sidecar_size: 8192,
+        virtual_size: largeSize - 1024,
+        source_media_start: 4096,
+        source_media_end: largeSize - 4096,
+        download_url: "https://example.com/large-ac3-video-only-init-a.mp4",
+      }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: largeSize,
+    };
+    const makeDownload = (suffix: string) => ({
+      files: [
+        {
+          file_name: `${LONG_NAME}.mp4`,
+          file_size: largeSize,
+          content_type: "video/mp4",
+          is_chunked: false,
+          download_url: `https://example.com/large-ac3-${suffix}.mp4`,
+          chunks: [],
+          media_metadata: {
+            ...ac3Meta,
+            playback_assets: [{ ...ac3Meta.playback_assets[0], download_url: `https://example.com/large-ac3-video-only-init-${suffix}.mp4` }],
+          },
+        },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    });
+    let releaseSecondDownload!: () => void;
+    let downloadCalls = 0;
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
+      downloadCalls += 1;
+      if (downloadCalls > 1) await new Promise<void>((resolve) => { releaseSecondDownload = resolve; });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(makeDownload(downloadCalls === 1 ? "a" : "b")) });
+    });
+    await page.route("https://example.com/**", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": `bytes 0-8191/${largeSize}`, "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    const video = page.getByTestId("ac3-video-preview").first();
+    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+    await video.evaluate((node) => {
+      node.dispatchEvent(new Event("loadedmetadata"));
+      node.dispatchEvent(new Event("canplay"));
+    });
+    const firstSrc = await video.getAttribute("src");
+    await expect.poll(() => typeof releaseSecondDownload).toBe("function");
+    await page.getByTestId("native-video-center-toggle").dispatchEvent("click");
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+    releaseSecondDownload();
+    await page.waitForResponse((resp) => resp.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && resp.status() === 200);
+
+    await expect(video).toHaveAttribute("src", firstSrc || "");
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+    await expect(page.getByText("MEDIA_ELEMENT_ERROR: Empty src attribute")).toHaveCount(0);
+  });
+
+  test("AC-3 大文件 SW 播放失败时尝试恢复且不显示 Blob 过大错误", async ({ page }) => {
+    const largeSize = 512 * 1024 * 1024;
+    const ac3Meta = {
+      ...VIDEO_META,
+      file_size: largeSize,
+      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
+      playback_hints: { has_video_only_virtual: true },
+      playback_assets: [{
+        kind: "mp4_video_only_init",
+        sidecar_size: 8192,
+        virtual_size: largeSize - 1024,
+        source_media_start: 4096,
+        source_media_end: largeSize - 4096,
+        download_url: "https://example.com/large-ac3-video-only-init.mp4",
+      }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      total_bytes: largeSize,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/large-ac3.mp4", chunks: [], media_metadata: ac3Meta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    await expect(page.getByTestId("ac3-video-preview").first()).toBeAttached({ timeout: 10000 });
+    await expect(page.getByText("当前文件过大，无法启用 AC-3 Blob 兜底")).toHaveCount(0);
+    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
   });
 
   test("AC-3 MP4 可通过 sdp=1 显式进入 SDP 调试路径", async ({ page }) => {
@@ -695,6 +905,7 @@ test.describe("移动端横向溢出回归", () => {
   });
 
   test("tail-moov AAC MP4 在有 faststart sidecar 时走虚拟快启 URL", async ({ page }) => {
+    await installMockNativeVideo(page);
     const tailAacMeta = {
       ...VIDEO_META,
       is_faststart: false,
@@ -743,6 +954,137 @@ test.describe("移动端横向溢出回归", () => {
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="native-video-preview"] video').first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+  });
+
+  test("tail-moov 虚拟快启播放中下载链接刷新不重置视频会话", async ({ page }) => {
+    await installMockNativeVideo(page);
+    const tailAacMeta = {
+      ...VIDEO_META,
+      is_faststart: false,
+      moov_offset: 9000000,
+      moov_size: 4096,
+      playback_hints: { needs_virtual_faststart: true },
+      playback_assets: [{
+        kind: "mp4_faststart_init",
+        sidecar_size: 8192,
+        virtual_size: 12345678,
+        source_media_start: 32,
+        source_media_end: 12337486,
+        download_url: "https://example.com/tail-aac-init-a.mp4",
+      }],
+      audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const makeDownload = (suffix: string) => ({
+      files: [
+        {
+          file_name: `${LONG_NAME}.mp4`,
+          file_size: 12345678,
+          content_type: "video/mp4",
+          is_chunked: false,
+          download_url: `https://example.com/tail-aac-${suffix}.mp4`,
+          chunks: [],
+          media_metadata: {
+            ...tailAacMeta,
+            playback_assets: [{ ...tailAacMeta.playback_assets[0], download_url: `https://example.com/tail-aac-init-${suffix}.mp4` }],
+          },
+        },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    });
+    let releaseSecondDownload!: () => void;
+    let downloadCalls = 0;
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
+      downloadCalls += 1;
+      if (downloadCalls > 1) await new Promise<void>((resolve) => { releaseSecondDownload = resolve; });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(makeDownload(downloadCalls === 1 ? "a" : "b")) });
+    });
+    await page.route("https://example.com/**", (route) =>
+      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/12345678", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    const video = page.locator('[data-testid="native-video-preview"] video').first();
+    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+    const firstSrc = await video.getAttribute("src");
+    await expect.poll(() => typeof releaseSecondDownload).toBe("function");
+    await page.getByTestId("native-video-center-toggle").dispatchEvent("click");
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+    releaseSecondDownload();
+    await page.waitForResponse((resp) => resp.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && resp.status() === 200);
+
+    await expect(video).toHaveAttribute("src", firstSrc || "");
+    expect(await video.evaluate((node) => (node as HTMLVideoElement).paused)).toBe(false);
+    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
+  });
+
+  test("tail-moov 虚拟快启网络错误会恢复通道而不显示不可预览", async ({ page }) => {
+    await installMockNativeVideo(page);
+    const tailAacMeta = {
+      ...VIDEO_META,
+      is_faststart: false,
+      moov_offset: 9000000,
+      moov_size: 4096,
+      playback_hints: { needs_virtual_faststart: true },
+      playback_assets: [{
+        kind: "mp4_faststart_init",
+        sidecar_size: 8192,
+        virtual_size: 12345678,
+        source_media_start: 32,
+        source_media_end: 12337486,
+        download_url: "https://example.com/tail-aac-init.mp4",
+      }],
+      audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
+    };
+    const info = {
+      ...MOCK_SHARE_INFO,
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
+      ],
+      empty_dirs: [],
+      total_bytes: 12345678,
+    };
+    const download = {
+      files: [
+        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/tail-aac.mp4", chunks: [], media_metadata: tailAacMeta },
+      ],
+      empty_dirs: [],
+      expires_in: 3600,
+    };
+    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
+    );
+    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
+    );
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${MOCK_CODE}`);
+    const video = page.locator('[data-testid="native-video-preview"] video').first();
+    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+    await video.evaluate((node) => {
+      const el = node as HTMLVideoElement;
+      el.currentTime = 321;
+      Object.defineProperty(el, "error", {
+        configurable: true,
+        get: () => ({ code: MediaError.MEDIA_ERR_NETWORK, message: "mock virtual media missing" }),
+      });
+      el.dispatchEvent(new Event("error"));
+    });
+    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
+    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
   });
 
   test("MKV 在浏览器声明不支持时走 SDP 预览路径", async ({ page }) => {
@@ -881,7 +1223,7 @@ test.describe("反馈修复回归", () => {
     await page.waitForTimeout(1500);
 
     // 切到浅色主题
-    await page.getByRole("button", { name: /当前(白天|黑夜)，点击切换到(白天|黑夜)/ }).first().click();
+    await page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first().click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.waitForTimeout(300);
 

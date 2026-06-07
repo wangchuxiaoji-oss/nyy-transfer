@@ -40,9 +40,12 @@ http://127.0.0.1:8000
 npx tsc --noEmit
 npm run dev
 npm run build
+PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwright test
 ```
 
 开发中优先用 `npx tsc --noEmit` 做类型检查。历史上 `next build` 曾污染 `.next` dev 缓存导致开发服务器异常，必要时可删除 `.next` 后重启。
+
+Playwright 本地默认不自动启动服务；设置 `PLAYWRIGHT_WEB_SERVER=1` 后会按 `PLAYWRIGHT_WEB_SERVER_COMMAND` 自动启动，CI 使用生产构建后的 `npm run start`。
 
 ## 主要路由
 

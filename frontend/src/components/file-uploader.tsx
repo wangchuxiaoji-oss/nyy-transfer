@@ -1044,11 +1044,11 @@ export function FileUploader({
       setResultPhase("check");
       setResult({ shareCode: commitRes.share_code, shareUrl: commitRes.share_url, fileCount: commitRes.file_count, revokeToken: commitRes.revoke_token });
       QRCode.toDataURL(commitRes.share_url, { width: 160, margin: 2, color: { dark: "#2a1810" } }).then(setQrUrl).catch(() => {});
-      // 游客：存到 localStorage 以便后续撤销
-      if (commitRes.revoke_token) {
+      // 游客：存到 localStorage 以便后续展示；有撤销令牌时才允许撤销。
+      if (!loggedIn) {
         try {
           const stored = JSON.parse(localStorage.getItem("nyy_guest_shares") || "[]");
-          stored.unshift({ code: commitRes.share_code, url: commitRes.share_url, revokeToken: commitRes.revoke_token, createdAt: Date.now() });
+          stored.unshift({ code: commitRes.share_code, url: commitRes.share_url, revokeToken: commitRes.revoke_token || "", createdAt: Date.now() });
           localStorage.setItem("nyy_guest_shares", JSON.stringify(stored.slice(0, 10)));
         } catch {}
       }
@@ -1149,7 +1149,7 @@ export function FileUploader({
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={cn(
-          "relative rounded-2xl p-8",
+          "retro-card relative p-8",
           "transition-all duration-200 ease-out",
           "flex flex-col items-center justify-center gap-3 min-h-[120px] sm:min-h-[180px]",
           dragOver ? cn("bg-nyy-50 dark:bg-nyy-900/20 ring-2 ring-nyy-400/50 dark:ring-nyy-500/40", !shouldReduceMotion && "scale-[1.01]")
@@ -1170,7 +1170,7 @@ export function FileUploader({
           )}
         </AnimatePresence>
 
-        <p className="type-body-sm text-gray-600 dark:text-gray-400 text-center">
+        <p className="type-body-sm retro-text text-center">
           {overall === "idle" && (totalItemCount === 0 ? <><span className="hidden sm:inline">拖拽文件或文件夹到这里，或点击选择</span><span className="sm:hidden">选择要分享的文件</span></> : "可继续添加文件，或点击「开始上传」")}
           {overall === "uploading" && "上传中..."}
           {overall === "committing" && "确认中..."}
@@ -1178,7 +1178,7 @@ export function FileUploader({
         </p>
 
         {overall === "idle" && totalItemCount === 0 && (
-          <div className="inline-flex items-center rounded-xl bg-orange-100/60 dark:bg-orange-950/30 p-1 gap-1">
+          <div className="retro-tabbar inline-flex items-center gap-1">
               <button
                 onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
                 className="btn-primary rounded-lg"
@@ -1192,7 +1192,7 @@ export function FileUploader({
                 className={cn(
                   "type-action hidden sm:inline-flex items-center min-h-[44px] rounded-lg px-4 transition-all active:scale-[0.97]",
                   supportsDirectoryPicker
-                    ? "text-nyy-800 dark:text-nyy-300 hover:bg-white/70 dark:hover:bg-white/10"
+                    ? "retro-text hover:text-nyy-500"
                     : "cursor-not-allowed text-gray-300 dark:text-gray-600"
                 )}
               >
@@ -1202,21 +1202,21 @@ export function FileUploader({
         )}
 
         {overall === "idle" && totalItemCount === 0 && !supportsDirectoryPicker && (
-          <p className="type-caption max-w-xs text-center text-gray-400 dark:text-gray-500">
+          <p className="type-caption max-w-xs text-center retro-muted">
             当前浏览器无法完整保留空文件夹结构，请使用 Chrome / Edge 桌面端。
           </p>
         )}
 
         {/* Quota inside drop zone */}
         {quota && overall === "idle" && (
-          <p className="type-caption absolute bottom-3 left-0 right-0 text-center text-gray-400 dark:text-gray-500">
+          <p className="type-caption mt-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-center retro-muted">
             已用 {formatSize(quota.used_bytes)} / {formatSize(quota.limit_bytes)}，剩余 {formatSize(quota.remaining_bytes)}
           </p>
         )}
       </motion.div>
       ) : (
       /* Done state: true one-take — single checkmark, fixed pixel positions, CSS transition */
-      <div className="relative rounded-2xl overflow-hidden bg-green-50/60 dark:bg-green-900/10 border border-green-200 dark:border-green-800/40 min-h-[180px]"
+      <div className="retro-panel relative min-h-[180px] overflow-hidden border-green-400/40"
         style={{ padding: resultPhase === "check" ? 32 : 20 }}
       >
         {/* The ONE checkmark — always absolute, fixed px, CSS transition handles everything */}
@@ -1264,7 +1264,7 @@ export function FileUploader({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, transition: { duration: 0.2 } }}
               transition={{ delay: 0.7 }}
-              className="type-body-sm absolute left-0 right-0 text-center text-gray-600 dark:text-gray-400"
+              className="type-body-sm absolute left-0 right-0 text-center retro-text"
               style={{ top: 109 }}
             >
               上传完成！
@@ -1282,7 +1282,7 @@ export function FileUploader({
             >
               {/* Header row */}
               <div className="flex items-center justify-between mb-3">
-                <span className="type-label pl-6 text-gray-700 dark:text-gray-300">
+                <span className="type-label pl-6 retro-text">
                   上传完成 · {result?.fileCount} 个文件{emptyDirs.length > 0 ? ` · ${emptyDirs.length} 个空文件夹` : ""}
                 </span>
                 {password && (
@@ -1295,17 +1295,17 @@ export function FileUploader({
               {totalItemCount > 0 && (
                 <div className="mb-3 space-y-1.5">
                   {visibleFiles.map((entry) => (
-                    <div key={entry.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/60 dark:bg-white/5">
+                    <div key={entry.id} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
                       <FileIcon className="w-4 h-4 text-gray-400 shrink-0" />
-                      <span className="type-file-name flex-1 text-gray-700 dark:text-gray-300 truncate">{entry.uploadName}</span>
-                      <span className="type-file-meta text-gray-400 shrink-0">{formatSize(entry.file.size)}</span>
+                      <span className="type-file-name flex-1 truncate retro-text">{entry.uploadName}</span>
+                      <span className="type-file-meta shrink-0 retro-muted">{formatSize(entry.file.size)}</span>
                     </div>
                   ))}
                   {visibleEmptyDirs.map((dir) => (
-                    <div key={dir} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/60 dark:bg-white/5">
+                    <div key={dir} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
                       <Folder className="w-4 h-4 text-gray-400 shrink-0" />
-                      <span className="type-file-name flex-1 text-gray-700 dark:text-gray-300 truncate">{dir}</span>
-                      <span className="type-file-meta text-gray-400 shrink-0">空文件夹</span>
+                      <span className="type-file-name flex-1 truncate retro-text">{dir}</span>
+                      <span className="type-file-meta shrink-0 retro-muted">空文件夹</span>
                     </div>
                   ))}
                   {!showAllFiles && totalItemCount > 5 && (
@@ -1330,7 +1330,7 @@ export function FileUploader({
               <div className="flex flex-col sm:flex-row sm:gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <code className="type-body flex-1 px-3 py-2 bg-white dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-xl dark:text-gray-200 truncate select-all">
+                    <code className="retro-input type-body flex-1 truncate select-all px-3 py-2">
                       {result?.shareUrl}
                     </code>
                     <button
@@ -1344,7 +1344,7 @@ export function FileUploader({
                       {copied ? "已复制" : "复制"}
                     </button>
                   </div>
-                  <button onClick={reset} className="type-action mt-3 min-h-[36px] rounded-lg text-gray-600 dark:text-gray-400 hover:text-nyy-800 dark:hover:text-nyy-400 transition-colors">继续上传</button>
+                  <button onClick={reset} className="retro-btn-secondary mt-3 min-h-[36px] rounded-lg px-3">继续上传</button>
                 </div>
                 {qrUrl && (
                   <div className="flex justify-center sm:justify-end pt-3 sm:pt-0 sm:items-center shrink-0">
@@ -1359,32 +1359,32 @@ export function FileUploader({
       )}
 
       {(overall === "uploading" || overall === "committing") && totalSize > 0 && (
-        <div className="mt-4 rounded-2xl border border-warm-200 dark:border-gray-700 bg-white/70 dark:bg-white/[0.04] p-4">
+        <div className="retro-panel mt-4 p-4">
           <div className="flex items-center justify-between gap-3">
-            <span className="type-label text-gray-700 dark:text-gray-300">总进度</span>
-            <span className="type-body-sm text-gray-500 dark:text-gray-400">
+            <span className="type-label retro-text">总进度</span>
+            <span className="type-body-sm retro-muted">
               {overall === "committing" ? "确认中" : `${totalProgress}%`}
             </span>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-            <div className="h-full rounded-full bg-nyy-500 transition-all" style={{ width: `${totalProgress}%` }} />
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full bg-gradient-to-r from-yc-accent to-yc-accent-3 transition-all" style={{ width: `${totalProgress}%` }} />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
-              <p className="type-caption text-gray-400">已上传</p>
-              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatSize(displayedUploadedBytes)} / {formatSize(totalSize)}</p>
+            <div className="retro-card px-3 py-2">
+              <p className="type-caption retro-muted">已上传</p>
+              <p className="type-body-sm retro-text">{formatSize(displayedUploadedBytes)} / {formatSize(totalSize)}</p>
             </div>
-            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
-              <p className="type-caption text-gray-400">实时速度</p>
-              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatSpeed(uploadMetrics.speedBps)}</p>
+            <div className="retro-card px-3 py-2">
+              <p className="type-caption retro-muted">实时速度</p>
+              <p className="type-body-sm retro-text">{formatSpeed(uploadMetrics.speedBps)}</p>
             </div>
-            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
-              <p className="type-caption text-gray-400">已用时间</p>
-              <p className="type-body-sm text-gray-700 dark:text-gray-300">{formatDuration(uploadMetrics.elapsedMs)}</p>
+            <div className="retro-card px-3 py-2">
+              <p className="type-caption retro-muted">已用时间</p>
+              <p className="type-body-sm retro-text">{formatDuration(uploadMetrics.elapsedMs)}</p>
             </div>
-            <div className="rounded-xl bg-gray-50 dark:bg-white/[0.03] px-3 py-2">
-              <p className="type-caption text-gray-400">预计剩余</p>
-              <p className="type-body-sm text-gray-700 dark:text-gray-300">
+            <div className="retro-card px-3 py-2">
+              <p className="type-caption retro-muted">预计剩余</p>
+              <p className="type-body-sm retro-text">
                 {overall === "committing" ? "即将完成" : remainingMs > 0 ? formatDuration(remainingMs) : "计算中"}
               </p>
             </div>
@@ -1404,10 +1404,10 @@ export function FileUploader({
       {totalItemCount > 0 && overall !== "done" && (
         <div className="mt-4 space-y-2 max-h-[240px] overflow-y-auto">
           {visibleFiles.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-2 p-2 bg-white dark:bg-white/5 rounded-xl border border-warm-200 dark:border-gray-700">
+            <div key={entry.id} className="retro-card flex items-center gap-2 p-2">
               <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="type-file-name text-gray-700 dark:text-gray-300 truncate">{entry.uploadName}</p>
+                <p className="type-file-name truncate retro-text">{entry.uploadName}</p>
                 <div className="flex items-center gap-2">
                   <span className="type-file-meta text-gray-400">{formatSize(entry.file.size)}</span>
                   {entry.state === "uploading" && (
@@ -1440,10 +1440,10 @@ export function FileUploader({
             </div>
           ))}
           {visibleEmptyDirs.map((dir) => (
-            <div key={dir} className="flex items-center gap-2 p-2 bg-white dark:bg-white/5 rounded-xl border border-warm-200 dark:border-gray-700">
+            <div key={dir} className="retro-card flex items-center gap-2 p-2">
               <Folder className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="type-file-name text-gray-700 dark:text-gray-300 truncate">{dir}</p>
+                <p className="type-file-name truncate retro-text">{dir}</p>
                 <span className="type-file-meta text-gray-400">空文件夹</span>
               </div>
               {isIdle && (
@@ -1476,7 +1476,7 @@ export function FileUploader({
       {isIdle && totalItemCount > 0 && (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <span className="type-body-sm text-gray-600 dark:text-gray-400">
+            <span className="type-body-sm retro-text">
               <Files className="w-3 h-3 inline mr-1" />
               {files.length} 个文件，{emptyDirs.length} 个空文件夹，共 {formatSize(totalSize)}
             </span>
@@ -1501,7 +1501,7 @@ export function FileUploader({
           <div className="flex flex-wrap justify-end gap-2">
           <button
             onClick={() => inputRef.current?.click()}
-            className="type-action min-h-[44px] rounded-xl border border-nyy-700 dark:border-nyy-600 px-4 text-nyy-800 dark:text-nyy-400 transition-all hover:bg-nyy-50 dark:hover:bg-nyy-900/20"
+            className="retro-btn-secondary"
           >
             继续添加
           </button>
@@ -1535,7 +1535,7 @@ export function FileUploader({
                 placeholder="留空不设密码"
                 value={password}
                 onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                className="type-body-sm h-9 flex-1 max-w-[160px] rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 text-gray-700 dark:text-gray-200 placeholder:text-gray-300 dark:placeholder:text-gray-600 focus:outline-none focus:border-nyy-400 focus:ring-1 focus:ring-nyy-300/40 transition-all"
+                className="retro-input type-body-sm h-9 min-h-0 max-w-[160px] flex-1 rounded-lg px-3"
               />
             </div>
             <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.04]" />
@@ -1589,13 +1589,13 @@ export function FileUploader({
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { value: 1, label: "1次" },
-                  { value: 5, label: "5次" },
                   { value: 10, label: "10次" },
                   { value: 50, label: "50次" },
                   { value: 100, label: "100次" },
+                  { value: 200, label: "200次" },
                   { value: 0, label: "不限" },
                 ].map((opt) => {
-                  const locked = !loggedIn && ![1, 5, 10].includes(opt.value);
+                  const locked = !loggedIn && ![1, 10].includes(opt.value);
                   return (
                     <button
                       key={opt.value}
