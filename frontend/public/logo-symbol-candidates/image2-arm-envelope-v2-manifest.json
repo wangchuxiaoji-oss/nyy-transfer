@@ -1,0 +1,54 @@
+{
+  "createdAt": "2026-06-07T23:27:09.081Z",
+  "model": "gpt-image-2",
+  "items": [
+    {
+      "id": "01",
+      "name": "crook-arm-envelope-v2",
+      "label": "臂弯挎大信封 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: A single rounded amber arm forms a smooth U-shaped hook over the top-left edge of an oversized envelope with a clear triangular flap. All five fingers are fully visible, naturally curved and gripping the envelope edge. The envelope feels like a soft malt candy pouch, compact, friendly, flat logo style.",
+      "filename": "image2-arm-envelope-v2-01-crook-arm-envelope-v2.png",
+      "bytes": 908078
+    },
+    {
+      "id": "02",
+      "name": "sling-envelope-v2",
+      "label": "挎包式大信封 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: The large envelope is carried like a small sling bag under a curved arm strap. The arm is abstract and minimal, like a warm caramel band, but with fully visible fingers that naturally wrap around the envelope flap. The envelope flap is clear, with soft glass highlights and strong simple geometry.",
+      "filename": "image2-arm-envelope-v2-02-sling-envelope-v2.png",
+      "bytes": 877906
+    },
+    {
+      "id": "03",
+      "name": "hug-envelope-v2",
+      "label": "轻抱大信封 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: A simplified arm wraps gently around the side of a large envelope, like someone casually holding mail against the body, but without drawing the body. All fingers are visible and naturally curved around the envelope edge. Keep it flat, iconic, rounded, warm, and not realistic.",
+      "filename": "image2-arm-envelope-v2-03-hug-envelope-v2.png",
+      "bytes": 831666
+    },
+    {
+      "id": "04",
+      "name": "elbow-hook-envelope-v2",
+      "label": "肘部挂信封 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: A bent elbow-like amber stroke hooks through a soft handle gap on a large envelope pouch. The arm has clearly defined fingers that grip the handle, making it unmistakably a human arm. The result should read as an arm carrying an envelope, with an elegant negative-space loop and bold app-icon silhouette.",
+      "filename": "image2-arm-envelope-v2-04-elbow-hook-envelope-v2.png",
+      "bytes": 928256
+    },
+    {
+      "id": "05",
+      "name": "paper-pouch-arm-v2",
+      "label": "信封袋挎臂 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: A big envelope pouch with a folded flap is tucked under a curved arm band. The arm band partially covers the fingers, but the hand is clearly visible with fingers gripping the envelope. Make the envelope broader and flatter, like a deliverable package. Use maltose amber translucent edges and simple vector-like shading.",
+      "filename": "image2-arm-envelope-v2-05-paper-pouch-arm-v2.png",
+      "bytes": 968806
+    },
+    {
+      "id": "06",
+      "name": "minimal-arm-envelope-v2",
+      "label": "极简臂挎信封 v2",
+      "prompt": "Create a distinctive brand logo symbol for a Chinese file transfer product. The symbol shows a realistic human arm carrying a large envelope. The arm must have fully visible, naturally curved fingers that clearly grip or hold the envelope, making it unmistakably a human arm. Use the current warm malt candy visual language: amber orange, honey caramel, soft rounded shapes, subtle translucent glass or maltose jelly highlights, gentle dimensionality, but mostly flat and iconic. The envelope is large with a triangular flap, in amber and caramel tones. No readable text, no letters, no numbers, no Chinese characters, no watermark. No face, no full person, no realistic skin texture, no office folder, no cloud icon. Use a very light warm cream background only for presentation. Centered composition, clean silhouette, high legibility at 32px and app icon size. Composition: Ultra-minimal logo mark. A single caramel arm curve hangs over a large envelope silhouette. The arm has simplified but recognizable fingers that suggest holding the envelope. Few details, strong negative space, almost flat, suitable for favicon, but still warm and premium.",
+      "filename": "image2-arm-envelope-v2-06-minimal-arm-envelope-v2.png",
+      "bytes": 792660
+    }
+  ]
+}

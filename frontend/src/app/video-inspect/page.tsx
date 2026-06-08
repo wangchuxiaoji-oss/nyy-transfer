@@ -18,7 +18,7 @@ const UNPLAYABLE_VIDEO_EXTS = new Set([
 // 音频格式（跳过）
 const AUDIO_EXTS = new Set(["mp3", "aac", "wav", "flac", "m4a", "wma", "opus", "ape"]);
 
-// 最大文件大小：10GB
+// 最大文件大小：检测工具硬限制。
 const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
 
 interface FileInfo {
@@ -182,7 +182,7 @@ export default function VideoInspectPage() {
         relative_path: relativePath,
         file_size: fileSize,
         status: "skipped_too_large",
-        error_message: `文件大小 ${formatSize(fileSize)} 超过 10GB 限制`,
+        error_message: `文件大小 ${formatSize(fileSize)} 超过检测工具限制`,
       };
     }
 

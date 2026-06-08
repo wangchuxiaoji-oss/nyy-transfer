@@ -15,6 +15,7 @@ import { ShareDetailModal } from "@/components/share-detail-modal";
 import { GuestShareCard } from "@/components/guest-share-card";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatDebugLine, type DebugLogFn } from "@/lib/debug";
+import { BRAND_NAME, HOME_COPY } from "@/lib/copy";
 
 interface DebugEntry {
   elapsedMs: number;
@@ -37,8 +38,8 @@ interface UploadDebugStatus {
 
 function formatQuotaPeriod(hours: number): string {
   if (hours <= 0) return "长期";
-  if (hours % 24 === 0) return `${hours / 24} 天`;
-  return `${hours} 小时`;
+  if (hours % 24 === 0) return `${hours / 24} 天内`;
+  return `${hours} 小时内`;
 }
 
 export default function Home() {
@@ -287,10 +288,11 @@ export default function Home() {
     window.setTimeout(() => setDebugCopied(false), 1200);
   };
 
-  const quotaLabel = quota ? `${formatSize(quota.limit_bytes)} / ${formatQuotaPeriod(quota.ttl_hours)}` : quotaLoaded ? "额度暂不可用" : "额度同步中";
+  const quotaLabel = quota ? `已用 ${formatSize(quota.used_bytes)} / ${formatSize(quota.limit_bytes)} · ${formatQuotaPeriod(quota.ttl_hours)}` : quotaLoaded ? "额度暂不可用" : "额度同步中";
+  const quotaRemainingLabel = quota ? formatSize(quota.remaining_bytes) : quotaLoaded ? "暂不可用" : "同步中";
   const heroStatus = user
-    ? `当前额度：${quotaLabel} · 分享与收件都可管理`
-    : `游客额度：${quotaLabel} · 登录后可管理分享与收件`;
+    ? `账号上传额度：${quotaLabel}`
+    : `游客上传额度：${quotaLabel}`;
 
   return (
     <main className="nyy-product-shell flex flex-col items-center px-4 pt-[92px] pb-16">
@@ -298,8 +300,7 @@ export default function Home() {
       <header className="fixed inset-x-0 top-0 z-40 border-b border-white/20 bg-white/60 backdrop-blur-2xl transition-colors dark:border-white/10 dark:bg-[#121212]/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)]">
           <span className="select-none inline-flex min-w-0 items-center gap-1 text-sm tracking-wide">
-            <span className={`font-light text-gray-500 dark:text-gray-400 ${user ? "hidden sm:inline" : "inline"}`}>文件中转，就用</span>
-            <img src="/logo-main.webp?v=20260607-malt-logo" alt="拿呀呀" className="inline-block h-[26px] w-auto" />
+            <img src="/logo-lockup-scheme-02.png?v=20260608-lockup-02" alt={BRAND_NAME} className="inline-block h-[26px] w-auto" />
           </span>
           {user ? (
             <>
@@ -381,10 +382,10 @@ export default function Home() {
 
       {/* Header */}
       <div className="mb-4 flex flex-col items-center text-center sm:flex-row sm:items-center sm:gap-6 sm:text-left">
-        <BrandLogo className="h-auto w-36 sm:w-56 shrink-0" priority />
+        <BrandLogo className="h-auto w-44 sm:w-56 shrink-0" priority />
         <div className="mt-3 sm:mt-0">
-          <p className="retro-title text-lg">发给别人，或让别人发给你</p>
-          <p className="type-body-sm mt-1 retro-text">上传即生成分享链接；创建收件链接，也能让对方直接提交文件</p>
+          <p className="retro-title text-lg">{HOME_COPY.title}</p>
+          <p className="type-body-sm mt-1 retro-text">{HOME_COPY.subtitle}</p>
           <p className="retro-kicker mt-1">
             {heroStatus}
           </p>
@@ -463,7 +464,7 @@ export default function Home() {
               ) : (
                 <>
                   <FileRequestCreator embedded loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} />
-                  {user && <p className="type-caption mt-4 text-center retro-muted">收到的文件会占用你的账号配额：{quotaLabel}</p>}
+                  {user && <p className="type-caption mt-4 text-center retro-muted">收到的文件会占用你的账号上传额度，当前剩余 {quotaRemainingLabel}</p>}
                 </>
               )}
             </motion.div>

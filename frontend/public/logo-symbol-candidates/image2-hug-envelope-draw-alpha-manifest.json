@@ -1,0 +1,131 @@
+{
+  "createdBy": "local warm cream background alpha matte",
+  "items": [
+    {
+      "source": "image2-hug-envelope-draw-01.png",
+      "alpha": "image2-hug-envelope-draw-01-alpha.png",
+      "trim": "image2-hug-envelope-draw-01-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        248.0,
+        236.0
+      ],
+      "crop": [
+        163,
+        195,
+        848,
+        834
+      ],
+      "transparentPixels": 757419,
+      "partialAlphaPixels": 21056,
+      "opaquePixels": 270101,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-hug-envelope-draw-02.png",
+      "alpha": "image2-hug-envelope-draw-02-alpha.png",
+      "trim": "image2-hug-envelope-draw-02-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        249.0,
+        239.0
+      ],
+      "crop": [
+        170,
+        201,
+        854,
+        796
+      ],
+      "transparentPixels": 784690,
+      "partialAlphaPixels": 18042,
+      "opaquePixels": 245844,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-hug-envelope-draw-03.png",
+      "alpha": "image2-hug-envelope-draw-03-alpha.png",
+      "trim": "image2-hug-envelope-draw-03-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        248.0,
+        233.0
+      ],
+      "crop": [
+        159,
+        199,
+        854,
+        822
+      ],
+      "transparentPixels": 768706,
+      "partialAlphaPixels": 21121,
+      "opaquePixels": 258749,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-hug-envelope-draw-04.png",
+      "alpha": "image2-hug-envelope-draw-04-alpha.png",
+      "trim": "image2-hug-envelope-draw-04-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        248.0,
+        239.0
+      ],
+      "crop": [
+        146,
+        189,
+        878,
+        834
+      ],
+      "transparentPixels": 733363,
+      "partialAlphaPixels": 37743,
+      "opaquePixels": 277470,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-hug-envelope-draw-05.png",
+      "alpha": "image2-hug-envelope-draw-05-alpha.png",
+      "trim": "image2-hug-envelope-draw-05-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        249.0,
+        238.0
+      ],
+      "crop": [
+        130,
+        180,
+        864,
+        842
+      ],
+      "transparentPixels": 729610,
+      "partialAlphaPixels": 42314,
+      "opaquePixels": 276652,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-hug-envelope-draw-06.png",
+      "alpha": "image2-hug-envelope-draw-06-alpha.png",
+      "trim": "image2-hug-envelope-draw-06-alpha-trim.png",
+      "backgroundRGB": [
+        253.0,
+        246.0,
+        228.0
+      ],
+      "crop": [
+        104,
+        167,
+        877,
+        837
+      ],
+      "transparentPixels": 685813,
+      "partialAlphaPixels": 28775,
+      "opaquePixels": 333988,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    }
+  ]
+}

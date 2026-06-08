@@ -1,6 +1,6 @@
-# 拿呀呀前端 · nyy.app
+# 拿呀²前端 · nyy.app
 
-这是 `nyy.app`（拿呀呀）文件中转站的 Next.js 前端开发目录。
+这是 `nyy.app`（拿呀²）文件分享与收文件工具的 Next.js 前端开发目录。
 
 主项目 README 位于：`../backend/README.md`
 

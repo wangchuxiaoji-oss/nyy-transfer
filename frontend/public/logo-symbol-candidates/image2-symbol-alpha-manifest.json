@@ -1,0 +1,131 @@
+{
+  "createdBy": "local warm background alpha matte",
+  "items": [
+    {
+      "source": "image2-symbol-01-malt-carry-folder.png",
+      "alpha": "image2-symbol-01-malt-carry-folder-alpha.png",
+      "trim": "image2-symbol-01-malt-carry-folder-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        250.0,
+        243.0
+      ],
+      "crop": [
+        194,
+        114,
+        830,
+        862
+      ],
+      "transparentPixels": 736832,
+      "partialAlphaPixels": 67594,
+      "opaquePixels": 244150,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-symbol-02-soft-file-tote.png",
+      "alpha": "image2-symbol-02-soft-file-tote-alpha.png",
+      "trim": "image2-symbol-02-soft-file-tote-alpha-trim.png",
+      "backgroundRGB": [
+        253.0,
+        248.0,
+        243.0
+      ],
+      "crop": [
+        159,
+        135,
+        865,
+        906
+      ],
+      "transparentPixels": 675607,
+      "partialAlphaPixels": 63482,
+      "opaquePixels": 309487,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-symbol-03-squared-handle-folder.png",
+      "alpha": "image2-symbol-03-squared-handle-folder-alpha.png",
+      "trim": "image2-symbol-03-squared-handle-folder-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        249.0,
+        239.0
+      ],
+      "crop": [
+        233,
+        176,
+        790,
+        823
+      ],
+      "transparentPixels": 819484,
+      "partialAlphaPixels": 18920,
+      "opaquePixels": 210172,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-symbol-04-transfer-loop-folder.png",
+      "alpha": "image2-symbol-04-transfer-loop-folder-alpha.png",
+      "trim": "image2-symbol-04-transfer-loop-folder-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        249.0,
+        243.0
+      ],
+      "crop": [
+        145,
+        151,
+        878,
+        885
+      ],
+      "transparentPixels": 673180,
+      "partialAlphaPixels": 127112,
+      "opaquePixels": 248284,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-symbol-05-candy-wrapper-pouch.png",
+      "alpha": "image2-symbol-05-candy-wrapper-pouch-alpha.png",
+      "trim": "image2-symbol-05-candy-wrapper-pouch-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        251.0,
+        246.0
+      ],
+      "crop": [
+        191,
+        156,
+        837,
+        916
+      ],
+      "transparentPixels": 670683,
+      "partialAlphaPixels": 71060,
+      "opaquePixels": 306833,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-symbol-06-grab-file-folder.png",
+      "alpha": "image2-symbol-06-grab-file-folder-alpha.png",
+      "trim": "image2-symbol-06-grab-file-folder-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        249.0,
+        240.0
+      ],
+      "crop": [
+        228,
+        164,
+        792,
+        895
+      ],
+      "transparentPixels": 790414,
+      "partialAlphaPixels": 63070,
+      "opaquePixels": 195092,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    }
+  ]
+}

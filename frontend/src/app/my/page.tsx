@@ -292,7 +292,7 @@ function MyWorkbenchPage() {
     if (requestEditMaxBytesDirty) {
       const maxBytesValue = Number(requestEditMaxBytesValue);
       if (!Number.isFinite(maxBytesValue) || maxBytesValue <= 0 || maxBytes > ONE_GB) {
-        showToast({ title: "容量上限需要在 1MB 到 1GB 之间", type: "warning" });
+        showToast({ title: "收件容量上限需要在允许范围内", type: "warning" });
         return;
       }
       if (maxBytes < group.total_bytes) {
@@ -874,7 +874,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
             </div>
             <div>
               <div className="mb-1 flex justify-between gap-2 type-caption retro-muted">
-                <span>容量额度</span><span>剩余 {formatSize(Math.max(0, group.max_bytes - group.total_bytes))}</span>
+                <span>收件容量</span><span>剩余 {formatSize(Math.max(0, group.max_bytes - group.total_bytes))}</span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                 <span className="block h-full rounded-full bg-nyy-500" style={{ width: `${bytesProgress}%` }} />

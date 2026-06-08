@@ -1,0 +1,131 @@
+{
+  "createdBy": "local warm cream background alpha matte",
+  "items": [
+    {
+      "source": "image2-arm-envelope-01-crook-arm-envelope.png",
+      "alpha": "image2-arm-envelope-01-crook-arm-envelope-alpha.png",
+      "trim": "image2-arm-envelope-01-crook-arm-envelope-alpha-trim.png",
+      "backgroundRGB": [
+        253.0,
+        249.0,
+        238.0
+      ],
+      "crop": [
+        156,
+        127,
+        871,
+        863
+      ],
+      "transparentPixels": 727917,
+      "partialAlphaPixels": 29610,
+      "opaquePixels": 291049,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-arm-envelope-02-sling-envelope.png",
+      "alpha": "image2-arm-envelope-02-sling-envelope-alpha.png",
+      "trim": "image2-arm-envelope-02-sling-envelope-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        247.0,
+        236.0
+      ],
+      "crop": [
+        160,
+        115,
+        865,
+        893
+      ],
+      "transparentPixels": 770732,
+      "partialAlphaPixels": 35508,
+      "opaquePixels": 242336,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-arm-envelope-03-hug-envelope.png",
+      "alpha": "image2-arm-envelope-03-hug-envelope-alpha.png",
+      "trim": "image2-arm-envelope-03-hug-envelope-alpha-trim.png",
+      "backgroundRGB": [
+        253.0,
+        248.0,
+        236.0
+      ],
+      "crop": [
+        135,
+        187,
+        890,
+        837
+      ],
+      "transparentPixels": 718039,
+      "partialAlphaPixels": 51010,
+      "opaquePixels": 279527,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-arm-envelope-04-elbow-hook-envelope.png",
+      "alpha": "image2-arm-envelope-04-elbow-hook-envelope-alpha.png",
+      "trim": "image2-arm-envelope-04-elbow-hook-envelope-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        247.0,
+        236.0
+      ],
+      "crop": [
+        210,
+        137,
+        824,
+        868
+      ],
+      "transparentPixels": 815624,
+      "partialAlphaPixels": 20947,
+      "opaquePixels": 212005,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-arm-envelope-05-paper-pouch-arm.png",
+      "alpha": "image2-arm-envelope-05-paper-pouch-arm-alpha.png",
+      "trim": "image2-arm-envelope-05-paper-pouch-arm-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        250.0,
+        237.0
+      ],
+      "crop": [
+        146,
+        110,
+        889,
+        870
+      ],
+      "transparentPixels": 723366,
+      "partialAlphaPixels": 29152,
+      "opaquePixels": 296058,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    },
+    {
+      "source": "image2-arm-envelope-06-minimal-arm-envelope.png",
+      "alpha": "image2-arm-envelope-06-minimal-arm-envelope-alpha.png",
+      "trim": "image2-arm-envelope-06-minimal-arm-envelope-alpha-trim.png",
+      "backgroundRGB": [
+        254.0,
+        248.0,
+        235.0
+      ],
+      "crop": [
+        172,
+        145,
+        847,
+        851
+      ],
+      "transparentPixels": 757403,
+      "partialAlphaPixels": 34692,
+      "opaquePixels": 256481,
+      "minAlpha": 0,
+      "maxAlpha": 255
+    }
+  ]
+}

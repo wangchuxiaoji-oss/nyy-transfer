@@ -4,6 +4,7 @@ import "./globals.css";
 import "plyr/dist/plyr.css";
 import { ToastProvider } from "@/components/toast-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { BRAND_NAME, SEO_DESCRIPTION, SEO_KEYWORDS, SEO_TITLE } from "@/lib/copy";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -17,23 +18,23 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  applicationName: "拿呀呀",
-  title: "拿呀呀 nyy.app - 想传文件？拿呀呀",
-  description: "简单、快速、免注册的文件分享服务。单文件最大 1GB，浏览器直传。",
-  keywords: ["文件分享", "文件传输", "nyy", "拿呀呀"],
+  applicationName: BRAND_NAME,
+  title: SEO_TITLE,
+  description: SEO_DESCRIPTION,
+  keywords: SEO_KEYWORDS,
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/icons/favicon-16.png?v=20260607-handwrite-10", sizes: "16x16", type: "image/png" },
-      { url: "/icons/favicon-32.png?v=20260607-handwrite-10", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png?v=20260607-handwrite-10", sizes: "192x192", type: "image/png" },
+      { url: "/icons/favicon-16.png?v=20260608-symbol-transparent", sizes: "16x16", type: "image/png" },
+      { url: "/icons/favicon-32.png?v=20260608-symbol-transparent", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png?v=20260608-symbol-transparent", sizes: "192x192", type: "image/png" },
     ],
-    shortcut: [{ url: "/icons/favicon-32.png?v=20260607-handwrite-10", sizes: "32x32", type: "image/png" }],
-    apple: [{ url: "/icons/apple-touch-icon.png?v=20260607-handwrite-10", sizes: "180x180", type: "image/png" }],
+    shortcut: [{ url: "/icons/favicon-32.png?v=20260608-symbol-transparent", sizes: "32x32", type: "image/png" }],
+    apple: [{ url: "/icons/apple-touch-icon.png?v=20260608-symbol-transparent", sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,
-    title: "拿呀呀",
+    title: BRAND_NAME,
     statusBarStyle: "default",
   },
   formatDetection: {

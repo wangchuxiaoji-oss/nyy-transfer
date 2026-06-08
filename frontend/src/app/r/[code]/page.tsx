@@ -8,6 +8,7 @@ import { computeCRC32 } from "@/lib/crc32";
 import { commitFileRequest, getFileRequestInfo, uploadInit, verifyFileRequest, type CommitFileItem, type FileRequestInfo } from "@/lib/api";
 import { formatXhrStatusError, getErrorMessage, isSuccessfulHttpStatus } from "@/lib/errors";
 import { formatSize } from "@/lib/utils";
+import { BRAND_NAME } from "@/lib/copy";
 
 export default function FileRequestPage() {
   const passwordInputId = useId();
@@ -80,7 +81,7 @@ export default function FileRequestPage() {
         <div className="text-center">
           <BrandLogo className="mx-auto h-auto w-36" priority />
           <h1 className="retro-title mt-4 text-lg">{info.title}</h1>
-          <p className="type-body-sm mt-1 retro-text">对方正在通过拿呀呀收文件</p>
+          <p className="type-body-sm mt-1 retro-text">对方正在通过{BRAND_NAME}收文件</p>
         </div>
 
         {info.has_password && !verified ? (

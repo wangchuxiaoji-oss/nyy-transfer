@@ -1,8 +1,8 @@
-# 拿呀呀 · nyy.app
+# 拿呀² · nyy.app
 
-> 想传文件？拿呀呀。
+> 想传文件？拿呀²。
 >
-> `nyy.app` 是一个轻量文件中转站，产品体验参考奶牛快传，品牌名「拿呀呀」。文件本体直传豆包 TOS / 火山 CDN，VPS 只保存元信息、分享关系、权限与审计数据。
+> `nyy.app` 是一个轻量文件分享与收文件工具，品牌名「拿呀²」。文件本体直传豆包 TOS / 火山 CDN，VPS 只保存元信息、分享关系、权限与审计数据。
 
 ## 1. 项目状态
 
@@ -10,7 +10,7 @@
 
 最近重点：
 
-- 首页 slogan 改为"文件中转，就用 [logo-sm]"，Logo 重建为纯矢量 + CSS drop-shadow glow。
+- 首页 slogan 统一为"想传文件？拿呀²"，Logo 重建为纯矢量 + CSS drop-shadow glow。
 - Tab 切换动画优化为 translateX GPU 合成，消除 Chrome layout 重排丢帧。
 - 分享设置面板重设计：有效期/下载上限改为按钮组，直接展开不隐藏。
 - 游客锁定机制：受限选项视觉变淡 + 右上角小锁图标，点击弹登录弹窗。
@@ -462,7 +462,7 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 
 品牌：
 
-- 中文名：拿呀呀
+- 中文名：拿呀²
 - 域名：`nyy.app`
 - 主色：暖橘 `#FF8A3D`
 - 主要行动色：`action` token，深橘 `#bc4f14`

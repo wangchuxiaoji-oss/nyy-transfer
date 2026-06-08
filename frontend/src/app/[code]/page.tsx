@@ -20,6 +20,7 @@ import { useToast } from "@/components/toast-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { DebugLogFn } from "@/lib/debug";
 import { createVirtualMediaFileId, needsVideoOnlyVirtualMp4, needsVirtualFaststart, prepareVirtualMediaTransport, registerVirtualMediaFile } from "@/lib/virtual-media";
+import { BRAND_DOMAIN, BRAND_NAME, BRAND_SLOGAN_SHORT } from "@/lib/copy";
 import s from "./share-4c.module.css";
 
 type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "error";
@@ -500,7 +501,7 @@ export default function SharePage() {
 
   const FooterSlogan = () => (
     <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
-      文件中转，就用拿呀² · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">nyy.app</a>
+      {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">{BRAND_DOMAIN}</a>
     </p>
   );
 
@@ -861,7 +862,7 @@ export default function SharePage() {
 
         {/* 底部品牌 */}
         <p className={`mt-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
-          文件中转，就用拿呀² · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">nyy.app</a>
+          {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">{BRAND_DOMAIN}</a>
         </p>
       </main>
     );
@@ -1042,7 +1043,7 @@ export default function SharePage() {
           <div className="flex min-w-0 items-center gap-3 sm:gap-5">
             <BrandLogo className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
             <div className="min-w-0 flex-1">
-              <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-tech text-sm font-bold leading-none tracking-[0.03em] sm:text-base sm:tracking-[0.06em] ${s.tPrimary}`}>有人通过拿呀²分享给你</p>
+              <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-tech text-sm font-bold leading-none tracking-[0.03em] sm:text-base sm:tracking-[0.06em] ${s.tPrimary}`}>有人通过{BRAND_NAME}分享给你</p>
               <p className={`mt-2 truncate text-[11px] sm:text-[13px] ${s.tMuted}`}>{contentSummary}</p>
             </div>
             <ThemeToggle className="shrink-0 lg:hidden" />

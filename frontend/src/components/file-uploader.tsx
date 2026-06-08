@@ -30,8 +30,8 @@ import {
 } from "@/lib/upload-state";
 
 const MAX_RETRIES = 3;
-const MAX_FILE_SIZE_GUEST = 1024 * 1024 * 1024; // 1 GiB (guest limit)
-const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 10 GiB (logged-in limit)
+const MAX_FILE_SIZE_GUEST = 1024 * 1024 * 1024; // 游客单文件上限
+const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 登录用户单文件硬限制
 const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
 const MAX_FILE_COUNT = 500;
 const MAX_EMPTY_DIR_COUNT = 500;
@@ -194,18 +194,18 @@ export function FileUploader({
       incomingEmptyDirs: newEmptyDirs.length,
       loggedIn,
     });
-    // 检查是否有 >1GB 文件且未登录
+    // 检查是否超过游客单文件上限且未登录。
     const hasLargeFile = newFiles.some(({ file }) => file.size > MAX_FILE_SIZE_GUEST);
     if (hasLargeFile && !loggedIn) {
       debugLog?.("upload", "selection:blocked", { reason: "large-file-requires-login" });
-      setError("超过 1 GB 的大文件需要登录后上传");
+      setError("超过游客单文件上限的大文件需要登录后上传");
       onLoginClick?.();
       return;
     }
     const valid = newFiles.filter(({ file }) => file.size <= maxSize);
     if (valid.length < newFiles.length) {
       debugLog?.("upload", "selection:skipped", { skippedFiles: newFiles.length - valid.length, maxSize });
-      setError(`${newFiles.length - valid.length} 个文件超过 ${loggedIn ? "10" : "1"} GB 已跳过`);
+      setError(`${newFiles.length - valid.length} 个文件超过单文件上限，已跳过`);
     }
     const normalizedEmptyDirs = newEmptyDirs.map(normalizeDirPath).filter(Boolean);
     if (valid.length === 0 && normalizedEmptyDirs.length === 0) return;
@@ -506,7 +506,7 @@ export function FileUploader({
           xhr.timeout = PART_XHR_TIMEOUT;
           xhr.setRequestHeader("Authorization", mpu.tos_auth);
           xhr.setRequestHeader("Content-CRC32", crc32);
-          // gateway 模式（大文件 >1GB）：part 上传也必须带此头，否则 merge 时 TOS 找不到分片
+          // gateway 模式：part 上传也必须带此头，否则 merge 时 TOS 找不到分片。
           if (mpu.part_number_base === 1) {
             xhr.setRequestHeader("X-Storage-Mode", "gateway");
           }

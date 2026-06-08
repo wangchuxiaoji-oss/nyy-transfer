@@ -5,6 +5,7 @@ import { getCaptchaChallenge, verifyCaptcha } from "@/lib/auth";
 
 // ALTCHA Web Component 类型声明
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- ALTCHA 自定义元素需要扩展 JSX 命名空间。
   namespace JSX {
     interface IntrinsicElements {
       "altcha-widget": React.DetailedHTMLProps<

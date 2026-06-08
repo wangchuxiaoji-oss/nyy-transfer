@@ -30,7 +30,7 @@ test.describe("分享页 4C 渲染", () => {
   test("品牌 Logo 可见", async ({ page }) => {
     await page.goto("/test-e2e");
     await page.waitForTimeout(3000);
-    const logo = page.locator('img[alt="拿呀呀"]');
+    const logo = page.locator('img[alt="拿呀²"]');
     await expect(logo).toBeVisible({ timeout: 10000 });
   });
 });
@@ -1297,7 +1297,7 @@ test.describe("反馈修复回归", () => {
     await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(1500);
 
-    await expect(page.getByText("文件中转，就用拿呀²")).toBeVisible();
+    await expect(page.getByText("想传文件？拿呀²")).toBeVisible();
     await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
   });
 });

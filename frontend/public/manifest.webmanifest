@@ -1,7 +1,7 @@
 {
-  "name": "拿呀呀 nyy.app",
-  "short_name": "拿呀呀",
-  "description": "简单、快速、免注册的文件分享服务。",
+  "name": "拿呀² nyy.app",
+  "short_name": "拿呀²",
+  "description": "发文件，也收文件。浏览器直传，链接即走。",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -12,17 +12,17 @@
   "categories": ["productivity", "utilities"],
   "icons": [
     {
-      "src": "/icons/icon-192.png?v=20260607-handwrite-10",
+      "src": "/icons/icon-192.png?v=20260608-symbol-transparent",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-512.png?v=20260607-handwrite-10",
+      "src": "/icons/icon-512.png?v=20260608-symbol-transparent",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/icons/maskable-icon-512.png?v=20260607-handwrite-10",
+      "src": "/icons/maskable-icon-512.png?v=20260608-symbol-transparent",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

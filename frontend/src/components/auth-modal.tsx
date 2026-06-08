@@ -15,6 +15,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { BrandLogo } from "@/components/brand-logo";
 import { CaptchaChallenge } from "@/components/captcha-challenge";
 import { EmailCodeInput } from "@/components/email-code-input";
+import { AUTH_MOBILE_COPY, AUTH_SIDEBAR_COPY, BRAND_NAME } from "@/lib/copy";
 
 type Tab = "login" | "register" | "forgot";
 type RegisterStep = "email" | "password" | "complete";
@@ -286,9 +287,9 @@ function SecurityPanel({ children, caption }: { children: React.ReactNode; capti
 
 function SidePanel() {
   const benefits = [
-    { icon: <Mail className="h-4 w-4" />, title: "1 GB 账号配额", desc: "登录后分享和收件都能管理" },
-    { icon: <ShieldCheck className="h-4 w-4" />, title: "可撤销、可追踪", desc: "链接过期、撤销和访问限制更清楚" },
-    { icon: <KeyRound className="h-4 w-4" />, title: "30 天保持登录", desc: "安全 refresh cookie，不写本地 token" },
+    { icon: <Mail className="h-4 w-4" />, title: AUTH_SIDEBAR_COPY.benefits.quota.title, desc: AUTH_SIDEBAR_COPY.benefits.quota.description },
+    { icon: <ShieldCheck className="h-4 w-4" />, title: AUTH_SIDEBAR_COPY.benefits.workbench.title, desc: AUTH_SIDEBAR_COPY.benefits.workbench.description },
+    { icon: <KeyRound className="h-4 w-4" />, title: AUTH_SIDEBAR_COPY.benefits.login.title, desc: AUTH_SIDEBAR_COPY.benefits.login.description },
   ];
 
   return (
@@ -298,9 +299,9 @@ function SidePanel() {
       <div className="relative flex h-full flex-col">
         <BrandLogo className="h-auto w-36" priority />
         <div className="mt-10">
-          <p className="retro-kicker text-orange-200/55">账号中心</p>
-          <h3 className="mt-3 text-2xl font-semibold leading-tight tracking-tight">把文件交给别人之前，先把控制权拿回来。</h3>
-          <p className="type-body-sm mt-4 text-white/58">登录后，分享链接、收件入口和配额状态会集中到你的工作台。</p>
+          <p className="retro-kicker text-orange-200/55">{AUTH_SIDEBAR_COPY.kicker}</p>
+          <h3 className="mt-3 text-2xl font-semibold leading-tight tracking-tight">{AUTH_SIDEBAR_COPY.title}</h3>
+          <p className="type-body-sm mt-4 text-white/58">{AUTH_SIDEBAR_COPY.description}</p>
         </div>
         <div className="mt-10 space-y-3">
           {benefits.map((item) => (
@@ -318,7 +319,7 @@ function SidePanel() {
           ))}
         </div>
         <div className="mt-auto rounded-3xl border border-orange-200/10 bg-gradient-to-br from-orange-400/16 to-transparent p-4">
-          <p className="type-caption text-orange-100/60">nyy.app · 想传文件？拿呀呀</p>
+          <p className="type-caption text-orange-100/60">{AUTH_SIDEBAR_COPY.footer}</p>
         </div>
       </div>
     </aside>
@@ -331,8 +332,8 @@ function MobileBrandStrip({ compact }: { compact: boolean }) {
       <div className="flex items-center gap-4">
         <BrandLogo className="h-auto w-24" priority />
         <div>
-          <p className="type-body-sm font-semibold text-[#2a1810] dark:text-white">登录后管理分享与收件</p>
-          <p className="type-caption mt-0.5 text-[#7a6855] dark:text-white/45">1 GB 配额 · 30 天保持登录 · 安全验证码</p>
+          <p className="type-body-sm font-semibold text-[#2a1810] dark:text-white">{AUTH_MOBILE_COPY.title}</p>
+          <p className="type-caption mt-0.5 text-[#7a6855] dark:text-white/45">{AUTH_MOBILE_COPY.subtitle}</p>
         </div>
       </div>
     </div>
@@ -370,15 +371,14 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
 
   const registerStepIndex = regStep === "email" ? 0 : regStep === "password" ? 1 : 2;
   const forgotStepIndex = forgotStep === "email" ? 0 : forgotStep === "password" ? 1 : 2;
-  const activePassword = tab === "register" ? regPassword : forgotPassword;
   const authViewportState = useAuthViewportState(open);
   const focusScrollTokenRef = useRef(0);
   const keyboardActive = authViewportState.keyboardActive;
 
   const title = useMemo(() => {
-    if (tab === "login") return "登录拿呀呀";
+    if (tab === "login") return `登录${BRAND_NAME}`;
     if (tab === "forgot") return "重置密码";
-    return "注册拿呀呀";
+    return `注册${BRAND_NAME}`;
   }, [tab]);
   const visibleTitle = keyboardActive
     ? tab === "login" ? "登录" : tab === "forgot" ? "重置" : "注册"
@@ -703,7 +703,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                         <div className="rounded-[1.75rem] border border-emerald-400/25 bg-emerald-500/10 p-6 text-center">
                           <div className="mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500 text-white"><Check className="h-7 w-7" /></div>
                           <p className="type-section mt-4">注册完成</p>
-                          <p className="type-body-sm mt-2 text-[#6f5948] dark:text-white/55">正在为你进入拿呀呀。</p>
+                          <p className="type-body-sm mt-2 text-[#6f5948] dark:text-white/55">正在为你进入{BRAND_NAME}。</p>
                         </div>
                       )}
                     </div>
@@ -768,7 +768,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
               </div>
 
               <footer className={`shrink-0 border-t border-black/8 bg-white/32 px-5 py-3 dark:border-white/10 dark:bg-white/[0.035] sm:block sm:px-8 ${keyboardActive ? "hidden" : ""}`}>
-                <p className="type-caption text-center text-[#8b7563] dark:text-white/38">验证码 10 分钟内有效。我们不会在浏览器本地存储登录 token。</p>
+                <p className="type-caption text-center text-[#8b7563] dark:text-white/38">验证码 10 分钟内有效，请勿转发给他人。</p>
               </footer>
               <div aria-hidden="true" className="h-[var(--auth-keyboard-spacer)] shrink-0 sm:hidden" />
             </div>

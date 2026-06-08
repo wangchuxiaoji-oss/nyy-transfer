@@ -1,0 +1,54 @@
+{
+  "createdAt": "2026-06-07T22:35:45.897Z",
+  "model": "gpt-image-2",
+  "items": [
+    {
+      "id": "01",
+      "name": "malt-carry-folder",
+      "label": "麦芽糖手提文件夹",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a translucent amber carry-folder with a soft rounded handle at the top, like a small tote bag for files. The folder body has two subtle inner file layers visible through glass. Edges have caramel highlights, no harsh shadows, no text.",
+      "filename": "image2-symbol-01-malt-carry-folder.png",
+      "bytes": 961692
+    },
+    {
+      "id": "02",
+      "name": "soft-file-tote",
+      "label": "软糖文件手提袋",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a soft candy-like file tote bag, rounded rectangular body, gentle handle cutout, one thin document sheet peeking inside. The object should feel tactile like maltose jelly and liquid glass, with a distinctive silhouette, no text.",
+      "filename": "image2-symbol-02-soft-file-tote.png",
+      "bytes": 948767
+    },
+    {
+      "id": "03",
+      "name": "squared-handle-folder",
+      "label": "二次方提手夹",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a file folder where the handle shape subtly forms an upward folded loop suggesting a squared exponent idea, but do not draw any actual number or character. Compact, iconic, simple, amber glass, clean outline, no text.",
+      "filename": "image2-symbol-03-squared-handle-folder.png",
+      "bytes": 864570
+    },
+    {
+      "id": "04",
+      "name": "transfer-loop-folder",
+      "label": "流光传送夹",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a transparent amber folder with a small carry handle and a glowing caramel transfer loop crossing from one inner file layer to another. The loop should express passing files along, minimal and elegant, no text.",
+      "filename": "image2-symbol-04-transfer-loop-folder.png",
+      "bytes": 948262
+    },
+    {
+      "id": "05",
+      "name": "candy-wrapper-pouch",
+      "label": "糖纸文件袋",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a translucent malt candy wrapper shaped like a file pouch, with folded corners and a soft sealed flap. It should imply files being wrapped and handed over. Warm amber glass, modern brand icon, no text.",
+      "filename": "image2-symbol-05-candy-wrapper-pouch.png",
+      "bytes": 975672
+    },
+    {
+      "id": "06",
+      "name": "grab-file-folder",
+      "label": "拿取文件夹",
+      "prompt": "Create a premium app logo symbol for a Chinese file transfer product named Nayy. The symbol must be wordless: no typography, no readable letters, no Chinese characters, no numbers, no watermark. Use a warm malt candy / amber honey color palette, semi-transparent glassy material, soft rounded forms, subtle depth, clean silhouette, centered composition, high legibility at favicon size, production-grade brand mark, not a generic cloud icon, not a normal office folder icon. Use a very light warm off-white background only for presentation. Main concept: a simplified abstract hand-grab gesture integrated into a carry-folder silhouette, as if lifting a file pouch by the handle. Keep it extremely minimal and icon-like, amber malt glass material, no text.",
+      "filename": "image2-symbol-06-grab-file-folder.png",
+      "bytes": 893608
+    }
+  ]
+}

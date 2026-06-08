@@ -422,13 +422,13 @@ function QuotaPanel({ quota, saving, onChange, onSave }: { quota: QuotaConfig | 
     <form onSubmit={onSave} className="retro-panel p-6">
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div><p className="retro-kicker">配额规则</p><h2 className="retro-title mt-1 text-xl">配额配置</h2></div>
-        <p className="type-body-sm retro-text">填写运营可读单位，保存时自动转换为 bytes。</p>
+        <p className="type-body-sm retro-text">保存后，前台额度展示和上传校验同步生效。</p>
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section>
           <h3 className="type-body-sm font-semibold text-nyy-500">游客规则</h3>
           <div className="mt-3 grid gap-3 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-            <QSizeField label="单次分享容量" hint="游客 24h 窗口内可上传总量" bytes={quota.guest_max_file_bytes} unit="MB" onChange={(v) => onChange({ ...quota, guest_max_file_bytes: v })} />
+            <QSizeField label="游客周期上传额度" hint="游客统计周期内可上传总量" bytes={quota.guest_max_file_bytes} unit="MB" onChange={(v) => onChange({ ...quota, guest_max_file_bytes: v })} />
             <QNumField label="活跃分享数" hint="未撤销、未封禁的分享上限" value={quota.guest_max_active_shares} suffix="个" onChange={(v) => onChange({ ...quota, guest_max_active_shares: v })} />
             <QNumField label="统计周期" hint="游客配额滚动窗口" value={quota.guest_ttl_hours} suffix="小时" onChange={(v) => onChange({ ...quota, guest_ttl_hours: v })} />
           </div>
@@ -436,7 +436,7 @@ function QuotaPanel({ quota, saving, onChange, onSave }: { quota: QuotaConfig | 
         <section>
           <h3 className="type-body-sm font-semibold text-nyy-500">注册用户规则</h3>
           <div className="mt-3 grid gap-3 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-            <QSizeField label="周期上传容量" hint="注册用户统计周期内总上传量" bytes={quota.user_max_file_bytes} unit="GB" onChange={(v) => onChange({ ...quota, user_max_file_bytes: v })} />
+            <QSizeField label="注册用户周期上传额度" hint="注册用户统计周期内可上传总量" bytes={quota.user_max_file_bytes} unit="GB" onChange={(v) => onChange({ ...quota, user_max_file_bytes: v })} />
             <QNumField label="活跃分享数" hint="可同时保留的分享数量" value={quota.user_max_active_shares} suffix="个" onChange={(v) => onChange({ ...quota, user_max_active_shares: v })} />
             <QNumField label="统计周期" hint="注册用户配额滚动窗口" value={quota.user_ttl_hours} suffix="小时" onChange={(v) => onChange({ ...quota, user_ttl_hours: v })} />
           </div>

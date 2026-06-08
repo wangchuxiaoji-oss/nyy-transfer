@@ -1,0 +1,16 @@
+{
+  "source": "image2-arm-envelope-03-hug-envelope.png",
+  "baseAlpha": "image2-arm-envelope-03-hug-envelope-alpha.png",
+  "file": "image2-arm-envelope-03-hug-envelope-local-repair-fingers-highlight.png",
+  "trim": "image2-arm-envelope-03-hug-envelope-local-repair-fingers-highlight-trim.png",
+  "crop": [
+    135,
+    187,
+    890,
+    837
+  ],
+  "edits": [
+    "restore and warm-soften envelope highlights inside the original #03 only",
+    "draw four local finger separation strokes on the right hand to distinguish five fingers"
+  ]
+}
