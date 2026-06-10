@@ -92,7 +92,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => dismiss(toast.id)}
                 aria-label="关闭提示"
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-100"
+                className="retro-icon-button h-11 w-11 text-gray-500 dark:text-gray-400"
               >
                 <X className="h-4 w-4" />
               </button>

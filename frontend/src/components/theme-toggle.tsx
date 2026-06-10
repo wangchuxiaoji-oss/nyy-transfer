@@ -21,7 +21,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
       onClick={next}
       aria-label={`当前：${label}，点击切换`}
       title={label}
-      className={`retro-btn-secondary min-h-[44px] min-w-[44px] rounded-xl p-0 ${className}`}
+      className={`retro-icon-button h-11 w-11 ${className}`}
     >
       {theme === "light" && <Sun size={20} />}
       {theme === "dark" && <Moon size={20} />}

@@ -320,10 +320,10 @@ async def test_share_download_writes_download_log(client, redis, _raise_share_li
     assert commit_resp.status_code == 201
     code = commit_resp.json()["share_code"]
 
-    with patch("app.api.v1.shares.get_doubao_client", new_callable=AsyncMock) as mock_get:
-        mock_client = AsyncMock()
-        mock_client.get_download_url.return_value = "https://download.test/hello.txt"
-        mock_get.return_value = mock_client
+    with patch("app.api.v1.shares.DoubaoDownloadUrlResolver") as mock_resolver_cls:
+        mock_resolver = AsyncMock()
+        mock_resolver.get_download_url.return_value = "https://download.test/hello.txt"
+        mock_resolver_cls.return_value = mock_resolver
         download_resp = await client.get(f"/api/v1/shares/{code}/download")
 
     assert download_resp.status_code == 200

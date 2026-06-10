@@ -22,9 +22,14 @@ class AdminUserItem(BaseModel):
     id: str
     email: str
     plan: str
+    is_admin: bool
     email_verified: bool
+    disabled: bool = False
+    deleted: bool = False
     created_at: datetime
     last_login_at: datetime | None = None
+    disabled_at: datetime | None = None
+    deleted_at: datetime | None = None
 
 
 class AdminUsersResponse(BaseModel):
@@ -34,6 +39,13 @@ class AdminUsersResponse(BaseModel):
     page_size: int
 
 
+class AdminUserUpdate(BaseModel):
+    plan: str | None = Field(default=None, pattern="^(free|pro)$")
+    disabled: bool | None = None
+    deleted: bool | None = None
+    email_verified: bool | None = None
+
+
 class AdminShareItem(BaseModel):
     code: str
     title: str | None = None
@@ -41,6 +53,7 @@ class AdminShareItem(BaseModel):
     file_count: int
     total_bytes: int
     download_count: int
+    max_downloads: int
     created_at: datetime
     expires_at: datetime | None = None
     revoked: bool
@@ -73,6 +86,28 @@ class QuotaConfigUpdate(BaseModel):
     user_ttl_hours: int = Field(..., ge=1)
 
 
+class DownloadConfigResponse(BaseModel):
+    smart_download_enabled: bool
+    target_video: bool
+    target_audio: bool
+    target_pdf: bool
+    target_image: bool
+    target_other: bool
+    filesystem_access_enabled: bool
+    leave_warning_enabled: bool
+
+
+class DownloadConfigUpdate(BaseModel):
+    smart_download_enabled: bool
+    target_video: bool
+    target_audio: bool
+    target_pdf: bool
+    target_image: bool
+    target_other: bool
+    filesystem_access_enabled: bool
+    leave_warning_enabled: bool
+
+
 class BanShareRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=255)
 
@@ -95,6 +130,10 @@ class AdminReportsResponse(BaseModel):
     total: int = 0
     page: int = 1
     page_size: int = 20
+
+
+class ReportStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(pending|resolved|dismissed)$")
 
 
 class AdminEmailItem(BaseModel):

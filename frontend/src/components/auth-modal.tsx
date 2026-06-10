@@ -28,8 +28,8 @@ interface AuthModalProps {
 }
 
 const inputCls = "h-12 w-full rounded-2xl border border-white/45 bg-white/75 px-4 text-base text-[#261409] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] outline-none transition placeholder:text-[#9b8069] focus:border-nyy-500 focus:bg-white focus:ring-4 focus:ring-nyy-500/15 dark:border-white/12 dark:bg-white/[0.07] dark:text-white dark:placeholder:text-white/35 dark:focus:bg-white/[0.1] sm:text-[15px]";
-const primaryBtnCls = "btn-primary h-12 w-full rounded-2xl text-[15px] disabled:opacity-45";
-const subtleBtnCls = "type-action inline-flex min-h-[44px] items-center justify-center rounded-2xl px-4 text-[#8a6245] transition hover:bg-black/5 hover:text-[#43230f] dark:text-white/55 dark:hover:bg-white/8 dark:hover:text-white";
+const primaryBtnCls = "btn-primary h-12 w-full text-[15px] disabled:opacity-45";
+const subtleBtnCls = "retro-text-button px-4 text-[#8a6245] dark:text-white/55";
 
 type AuthViewportStyle = CSSProperties & {
   "--auth-visual-height": string;
@@ -580,7 +580,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
       className="fixed inset-0 z-50 block overflow-y-auto bg-[#170a03]/46 px-0 py-0 backdrop-blur-md [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:grid sm:place-items-center sm:px-4 sm:py-6"
     >
       <Modal className="h-[var(--auth-visual-height)] min-h-[var(--auth-visual-height)] w-full translate-y-[var(--auth-visual-offset-top)] outline-none sm:h-auto sm:min-h-0 sm:w-[min(960px,calc(100vw-2rem))] sm:max-w-[960px] sm:translate-y-0">
-        <Dialog className="h-[var(--auth-visual-height)] max-h-[var(--auth-visual-height)] overflow-y-auto bg-[#fff8f1] text-[#2a1810] shadow-[0_24px_90px_rgba(36,16,4,0.35)] outline-none [overflow-anchor:none] [scroll-padding-bottom:calc(var(--auth-keyboard-inset)+env(safe-area-inset-bottom)+6rem)] [touch-action:pan-y] [-webkit-overflow-scrolling:touch] dark:bg-[#110817] dark:text-white sm:h-auto sm:max-h-[min(820px,calc(100dvh-3rem))] sm:min-h-0 sm:overflow-hidden sm:rounded-[2rem] sm:border sm:border-white/18" aria-label={title}>
+        <Dialog className="h-[var(--auth-visual-height)] max-h-[var(--auth-visual-height)] overflow-y-auto bg-[#fff8f1] text-[#2a1810] shadow-[0_24px_90px_rgba(36,16,4,0.35)] outline-none [overflow-anchor:none] [scroll-padding-bottom:calc(var(--auth-keyboard-inset)+env(safe-area-inset-bottom)+6rem)] [touch-action:pan-y] [-webkit-overflow-scrolling:touch] dark:bg-[#110817] dark:text-white sm:h-auto sm:max-h-[min(820px,calc(100dvh-3rem))] sm:min-h-0 sm:overflow-hidden sm:rounded-shell sm:border sm:border-white/18" aria-label={title}>
           <div className="flex min-h-[var(--auth-visual-height)] flex-col [overflow-anchor:none] sm:max-h-[min(820px,calc(100dvh-3rem))] sm:min-h-0 lg:flex-row" onFocusCapture={handleDialogFocus} onInputCapture={handleDialogInput}>
             <SidePanel />
             <div className="flex min-w-0 flex-1 flex-col">
@@ -596,7 +596,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                   type="button"
                   onClick={onClose}
                   aria-label="关闭"
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-black/10 bg-white/60 text-[#6f5948] transition hover:bg-white hover:text-[#2a1810] dark:border-white/12 dark:bg-white/[0.06] dark:text-white/62 dark:hover:bg-white/12 dark:hover:text-white"
+                  className="retro-close-button"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -604,12 +604,12 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
 
               <div className={`flex-none overflow-visible px-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] sm:min-h-0 sm:flex-1 sm:overflow-y-auto sm:px-8 sm:py-7 sm:pb-7 sm:[-webkit-overflow-scrolling:touch] ${keyboardActive ? "py-3" : "py-5"}`} data-auth-content>
                 {tab !== "forgot" ? (
-                  <div className={`grid grid-cols-2 rounded-3xl border border-black/8 bg-white/52 p-1 dark:border-white/10 dark:bg-white/[0.045] sm:mb-6 ${keyboardActive ? "mb-3" : "mb-6"}`}>
-                    <button type="button" onClick={() => switchTab("login")} className={`${keyboardActive ? "h-11" : "h-12"} rounded-[1.25rem] type-action transition ${tab === "login" ? "bg-[#2a1810] text-white shadow-lg dark:bg-white dark:text-[#160b1d]" : "text-[#7a6855] hover:bg-white/60 dark:text-white/45 dark:hover:bg-white/8"}`}>登录</button>
-                    <button type="button" onClick={() => switchTab("register")} className={`${keyboardActive ? "h-11" : "h-12"} rounded-[1.25rem] type-action transition ${tab === "register" ? "bg-gradient-to-br from-nyy-500 to-[#e0652a] text-white shadow-[0_12px_32px_rgba(255,138,61,0.28)]" : "text-[#7a6855] hover:bg-white/60 dark:text-white/45 dark:hover:bg-white/8"}`}>注册</button>
+                  <div className={`retro-segmented grid grid-cols-2 sm:mb-6 ${keyboardActive ? "mb-3" : "mb-6"}`} role="tablist" aria-label="认证方式">
+                    <button type="button" role="tab" aria-selected={tab === "login"} onClick={() => switchTab("login")} className={`retro-segment-button ${keyboardActive ? "h-11" : "h-12"}`}>登录</button>
+                    <button type="button" role="tab" aria-selected={tab === "register"} onClick={() => switchTab("register")} className={`retro-segment-button ${keyboardActive ? "h-11" : "h-12"}`}>注册</button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => switchTab("login")} className="mb-5 inline-flex min-h-[44px] items-center gap-2 rounded-2xl px-2 text-[#7a6855] transition hover:text-[#2a1810] dark:text-white/55 dark:hover:text-white">
+                  <button type="button" onClick={() => switchTab("login")} className="retro-text-button mb-5 px-2 text-[#7a6855] dark:text-white/55">
                     <ArrowLeft className="h-4 w-4" /> 返回登录
                   </button>
                 )}
@@ -620,7 +620,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
 
                   {tab === "login" && (
                     <form onSubmit={handleLogin} className="space-y-5">
-                      <div className="rounded-[1.75rem] border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
+                      <div className="rounded-panel border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
                         <div className="space-y-4">
                           <AuthField label="邮箱">
                             <input className={inputCls} type="email" autoComplete="email" placeholder="you@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required />
@@ -628,7 +628,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                           <AuthField label="密码">
                             <div className="relative">
                               <input className={`${inputCls} pr-12`} type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="输入密码" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required />
-                              <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-[#8b7563] transition hover:bg-black/5 dark:text-white/45 dark:hover:bg-white/10">
+                              <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="retro-icon-button absolute right-1 top-1/2 h-11 w-11 -translate-y-1/2 text-[#8b7563] dark:text-white/45">
                                 {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                               </button>
                             </div>
@@ -654,7 +654,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                       <StepMeter steps={["验证邮箱", "设置密码", "完成注册"]} current={registerStepIndex} />
 
                       {regStep === "email" && (
-                        <div className="space-y-5 rounded-[1.75rem] border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
+                        <div className="space-y-5 rounded-panel border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
                           <AuthField label="邮箱" hint="邮箱格式正确后，完成安全验证即可自动发送 6 位验证码。">
                             <input className={inputCls} type="email" autoComplete="email" placeholder="you@example.com" value={regEmail} onChange={(e) => { setRegEmail(e.target.value); setRegCaptchaToken(null); setRegCaptchaResetKey((value) => value + 1); }} required />
                           </AuthField>
@@ -670,7 +670,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
 
                       {regStep === "password" && (
                         <form onSubmit={handleRegister} className="space-y-5">
-                          <div className="rounded-[1.75rem] border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
+                          <div className="rounded-panel border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
                             <p className="type-body-sm mb-4 text-[#6f5948] dark:text-white/58">验证码已发送至 <strong className="text-[#2a1810] dark:text-white">{regEmail}</strong></p>
                             <div className="space-y-4">
                               <AuthField label="验证码" hint="支持直接粘贴邮件中的 6 位数字。">
@@ -679,7 +679,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                               <AuthField label="设置密码" hint="最少 8 位；不强制复杂组合，但会拦截常见弱密码。">
                                 <div className="relative">
                                   <input className={`${inputCls} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="至少 8 位" value={regPassword} onChange={(e) => setRegPassword(e.target.value)} required minLength={8} />
-                                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-[#8b7563] transition hover:bg-black/5 dark:text-white/45 dark:hover:bg-white/10">
+                                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="retro-icon-button absolute right-1 top-1/2 h-11 w-11 -translate-y-1/2 text-[#8b7563] dark:text-white/45">
                                     {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                   </button>
                                 </div>
@@ -700,7 +700,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                       )}
 
                       {regStep === "complete" && (
-                        <div className="rounded-[1.75rem] border border-emerald-400/25 bg-emerald-500/10 p-6 text-center">
+                        <div className="rounded-panel border border-emerald-400/25 bg-emerald-500/10 p-6 text-center">
                           <div className="mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500 text-white"><Check className="h-7 w-7" /></div>
                           <p className="type-section mt-4">注册完成</p>
                           <p className="type-body-sm mt-2 text-[#6f5948] dark:text-white/55">正在为你进入{BRAND_NAME}。</p>
@@ -714,7 +714,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                       <StepMeter steps={["验证邮箱", "设置新密码", "完成"]} current={forgotStepIndex} />
 
                       {forgotStep === "email" && (
-                        <div className="space-y-5 rounded-[1.75rem] border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
+                        <div className="space-y-5 rounded-panel border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
                           <AuthField label="注册邮箱" hint="邮箱格式正确后，完成安全验证即可发送重置验证码。">
                             <input className={inputCls} type="email" autoComplete="email" placeholder="you@example.com" value={forgotEmail} onChange={(e) => { setForgotEmail(e.target.value); setForgotCaptchaToken(null); setForgotCaptchaResetKey((value) => value + 1); }} required />
                           </AuthField>
@@ -730,7 +730,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
 
                       {forgotStep === "password" && (
                         <form onSubmit={handleResetPassword} className="space-y-5">
-                          <div className="rounded-[1.75rem] border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
+                          <div className="rounded-panel border border-black/8 bg-white/58 p-4 dark:border-white/10 dark:bg-white/[0.045] sm:p-5">
                             <p className="type-body-sm mb-4 text-[#6f5948] dark:text-white/58">验证码已发送至 <strong className="text-[#2a1810] dark:text-white">{forgotEmail}</strong></p>
                             <div className="space-y-4">
                               <AuthField label="验证码">
@@ -739,7 +739,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                               <AuthField label="新密码">
                                 <div className="relative">
                                   <input className={`${inputCls} pr-12`} type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="至少 8 位" value={forgotPassword} onChange={(e) => setForgotPassword(e.target.value)} required minLength={8} />
-                                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-[#8b7563] transition hover:bg-black/5 dark:text-white/45 dark:hover:bg-white/10">
+                                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "隐藏密码" : "显示密码"} className="retro-icon-button absolute right-1 top-1/2 h-11 w-11 -translate-y-1/2 text-[#8b7563] dark:text-white/45">
                                     {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                   </button>
                                 </div>
@@ -756,7 +756,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                       )}
 
                       {forgotStep === "complete" && (
-                        <div className="rounded-[1.75rem] border border-emerald-400/25 bg-emerald-500/10 p-6 text-center">
+                        <div className="rounded-panel border border-emerald-400/25 bg-emerald-500/10 p-6 text-center">
                           <div className="mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-emerald-500 text-white"><Sparkles className="h-7 w-7" /></div>
                           <p className="type-section mt-4">密码已重置</p>
                           <p className="type-body-sm mt-2 text-[#6f5948] dark:text-white/55">即将回到登录页。</p>

@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.models.system import AppConfig
 
 QUOTA_CONFIG_KEY = "quota"
+DOWNLOAD_CONFIG_KEY = "download"
 
 
 def default_quota_config() -> dict[str, int]:
@@ -42,6 +43,43 @@ async def set_quota_config(db: AsyncSession, value: dict[str, int], updated_by) 
         row.updated_by = updated_by
     else:
         row = AppConfig(key=QUOTA_CONFIG_KEY, value=config, updated_by=updated_by)
+        db.add(row)
+    await db.commit()
+    return config
+
+
+def default_download_config() -> dict[str, bool | int | str]:
+    return {
+        "smart_download_enabled": True,
+        "target_video": True,
+        "target_audio": True,
+        "target_pdf": True,
+        "target_image": True,
+        "target_other": True,
+        "filesystem_access_enabled": True,
+        "leave_warning_enabled": True,
+    }
+
+
+async def get_download_config(db: AsyncSession) -> dict[str, bool | int | str]:
+    result = await db.execute(select(AppConfig).where(AppConfig.key == DOWNLOAD_CONFIG_KEY))
+    row = result.scalar_one_or_none()
+    config = default_download_config()
+    if row:
+        config.update(row.value)
+    return config
+
+
+async def set_download_config(db: AsyncSession, value: dict[str, bool | int | str], updated_by) -> dict[str, bool | int | str]:
+    config = default_download_config()
+    config.update(value)
+    result = await db.execute(select(AppConfig).where(AppConfig.key == DOWNLOAD_CONFIG_KEY))
+    row = result.scalar_one_or_none()
+    if row:
+        row.value = config
+        row.updated_by = updated_by
+    else:
+        row = AppConfig(key=DOWNLOAD_CONFIG_KEY, value=config, updated_by=updated_by)
         db.add(row)
     await db.commit()
     return config

@@ -1,5 +1,6 @@
 import { authFetch, API_BASE } from "./auth";
 import { createHttpError } from "./errors";
+import type { DownloadConfig } from "./smart-download";
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) throw await createHttpError(res);
@@ -21,9 +22,21 @@ export interface AdminUserItem {
   id: string;
   email: string;
   plan: string;
+  is_admin: boolean;
   email_verified: boolean;
+  disabled: boolean;
+  deleted: boolean;
   created_at: string;
   last_login_at: string | null;
+  disabled_at: string | null;
+  deleted_at: string | null;
+}
+
+export interface AdminUserPatch {
+  plan?: "free" | "pro";
+  disabled?: boolean;
+  deleted?: boolean;
+  email_verified?: boolean;
 }
 
 export interface AdminShareItem {
@@ -33,6 +46,7 @@ export interface AdminShareItem {
   file_count: number;
   total_bytes: number;
   download_count: number;
+  max_downloads: number;
   created_at: string;
   expires_at: string | null;
   revoked: boolean;
@@ -59,6 +73,8 @@ export interface QuotaConfig {
   user_ttl_hours: number;
 }
 
+export type { DownloadConfig };
+
 export interface AdminReportItem {
   id: string;
   share_code: string;
@@ -81,14 +97,26 @@ export async function getAdminStats(): Promise<AdminStats> {
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/stats`));
 }
 
-export async function getAdminUsers(params: { page?: number; pageSize?: number; q?: string; plan?: string; sort?: string } = {}): Promise<AdminList<AdminUserItem>> {
+export async function getAdminUsers(params: { page?: number; pageSize?: number; q?: string; plan?: string; status?: string; sort?: string } = {}): Promise<AdminList<AdminUserItem>> {
   const search = new URLSearchParams();
   search.set("page", String(params.page || 1));
   search.set("page_size", String(params.pageSize || 50));
   if (params.q) search.set("q", params.q);
   if (params.plan && params.plan !== "all") search.set("plan", params.plan);
+  if (params.status && params.status !== "all") search.set("status", params.status);
   if (params.sort) search.set("sort", params.sort);
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/users?${search.toString()}`));
+}
+
+export async function updateAdminUser(id: string, patch: AdminUserPatch): Promise<AdminUserItem> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  }));
+}
+
+export async function sendAdminUserPasswordReset(id: string): Promise<{ message: string }> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/users/${id}/password-reset`, { method: "POST" }));
 }
 
 export async function getAdminShares(params: { page?: number; pageSize?: number; q?: string; status?: string; sort?: string } = {}): Promise<AdminList<AdminShareItem>> {
@@ -105,6 +133,10 @@ export async function getQuotaConfig(): Promise<QuotaConfig> {
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/config/quota`));
 }
 
+export async function getDownloadConfig(): Promise<DownloadConfig> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/config/download`));
+}
+
 export async function getAdminReports(params: { page?: number; pageSize?: number; q?: string; status?: string } = {}): Promise<{ reports: AdminReportItem[]; total?: number; page?: number; page_size?: number }> {
   const search = new URLSearchParams();
   if (params.page) search.set("page", String(params.page));
@@ -113,6 +145,13 @@ export async function getAdminReports(params: { page?: number; pageSize?: number
   if (params.status && params.status !== "all") search.set("status", params.status);
   const query = search.toString();
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/reports${query ? `?${query}` : ""}`));
+}
+
+export async function updateAdminReportStatus(id: string, status: "pending" | "resolved" | "dismissed"): Promise<AdminReportItem> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/reports/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  }));
 }
 
 export async function getAdminEmails(params: { page?: number; pageSize?: number; q?: string; status?: string } = {}): Promise<{ emails: AdminEmailItem[]; total?: number; page?: number; page_size?: number }> {
@@ -127,6 +166,13 @@ export async function getAdminEmails(params: { page?: number; pageSize?: number;
 
 export async function updateQuotaConfig(config: QuotaConfig): Promise<QuotaConfig> {
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/config/quota`, {
+    method: "PUT",
+    body: JSON.stringify(config),
+  }));
+}
+
+export async function updateDownloadConfig(config: DownloadConfig): Promise<DownloadConfig> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/config/download`, {
     method: "PUT",
     body: JSON.stringify(config),
   }));
@@ -152,6 +198,19 @@ export interface DoubaoSessionStatus {
   sessionid_prefix: string;
   last_refresh: string;
   age_hours: number;
+  sid_guard_login_at: string;
+  sid_guard_expires_at: string;
+  sid_guard_expires_in_hours: number | null;
+  sid_guard_status: "unknown" | "ok" | "warning" | "expired";
+  last_probe_at: string;
+  last_probe_success_at: string;
+  last_probe_error: string;
+  last_heartbeat_at: string;
+  last_heartbeat_success_at: string;
+  last_heartbeat_error: string;
+  verified: boolean;
+  usable: boolean;
+  check_message: string;
 }
 
 export interface DoubaoQRStartResponse {
@@ -164,8 +223,9 @@ export interface DoubaoQRStatusResponse {
   message: string;
 }
 
-export async function getDoubaoSessionStatus(): Promise<DoubaoSessionStatus> {
-  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/session-status`));
+export async function getDoubaoSessionStatus(probe = false): Promise<DoubaoSessionStatus> {
+  const query = probe ? "?probe=true" : "";
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/session-status${query}`));
 }
 
 export async function startDoubaoQR(): Promise<DoubaoQRStartResponse> {
@@ -178,4 +238,21 @@ export async function getDoubaoQRStatus(): Promise<DoubaoQRStatusResponse> {
 
 export async function cancelDoubaoQR(): Promise<{ message: string }> {
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/qr-cancel`, { method: "POST" }));
+}
+
+export async function getDoubaoTestBSessionStatus(probe = false): Promise<DoubaoSessionStatus> {
+  const query = probe ? "?probe=true" : "";
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/test-b/session-status${query}`));
+}
+
+export async function startDoubaoTestBQR(): Promise<DoubaoQRStartResponse> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/test-b/qr-start`, { method: "POST" }));
+}
+
+export async function getDoubaoTestBQRStatus(): Promise<DoubaoQRStatusResponse> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/test-b/qr-status`));
+}
+
+export async function cancelDoubaoTestBQR(): Promise<{ message: string }> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/doubao/test-b/qr-cancel`, { method: "POST" }));
 }

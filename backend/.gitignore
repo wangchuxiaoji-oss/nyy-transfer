@@ -17,6 +17,7 @@ htmlcov/
 !.env.example
 *.session.json
 .doubao_session.json
+.doubao_session*.json*
 
 # Build / dist
 build/
@@ -48,4 +49,3 @@ backups/
 
 # Local docker volumes
 var/
-

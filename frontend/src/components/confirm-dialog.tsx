@@ -84,7 +84,7 @@ export function ConfirmDialog({
           type="button"
           onClick={onCancel}
           aria-label="关闭确认弹窗"
-          className="retro-btn-secondary absolute right-3 top-3 min-h-[44px] min-w-[44px] rounded-full p-0"
+          className="retro-close-button absolute right-3 top-3"
         >
           <X className="h-4 w-4" />
         </button>

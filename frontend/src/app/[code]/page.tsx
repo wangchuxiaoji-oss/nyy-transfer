@@ -1,20 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
-import { Download, Clock, AlertCircle, Package, Copy, Flag, X, Folder, Play } from "lucide-react";
+import { CheckCircle2, Download, Clock, AlertCircle, Package, Flag, X, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
+import { CopyLinkButton } from "@/components/copy-link-button";
+import { ShareFileBrowser } from "@/components/share-file-browser";
 import { SelfDevelopPlayer } from "@/components/self-develop-player";
 import { NativeVideoPlayer, type NativeVideoErrorInfo, type NativeVideoResumeRequest } from "@/components/native-video-player";
 import { Ac3VideoPreview } from "@/components/ac3-video-preview";
 import { PdfPreview } from "@/components/pdf-preview";
 import {
-  getShareInfo, verifyShare, downloadShare, reportShare,
+  getShareInfo, verifyShare, downloadShare, reportShare, getPublicDownloadConfig,
   type ShareInfo, type ShareFileDownload,
 } from "@/lib/api";
-import { supportsChunkedDownload, chunkedDownload, type ChunkedDownloadProgress } from "@/lib/chunked-download";
+import {
+  defaultDownloadConfig,
+  downloadFilesToDirectoryHandle,
+  downloadSmart,
+  pickDownloadDirectory,
+  supportsDirectoryPicker,
+  type DownloadConfig,
+  type SmartDownloadProgress,
+} from "@/lib/smart-download";
 import { getErrorMessage, isHttpStatusError } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -27,11 +37,12 @@ type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "err
 type FileType = "video" | "image" | "pdf" | "audio" | "text" | "other";
 type DownloadLinksState = "idle" | "loading" | "ready" | "error";
 type MobilePanel = "files" | "overview" | "scan";
+type DownloadTaskState = "idle" | "running" | "completed";
 
 // 分类文件类型（用于选择图标 + 预览策略）
 function classifyFile(name: string): FileType {
   const ext = name.split(".").pop()?.toLowerCase() || "";
-  if (["mp4", "mkv", "wmv", "mov", "webm", "ogg"].includes(ext)) return "video";
+  if (["mp4", "mkv", "wmv", "mov", "webm"].includes(ext)) return "video";
   if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext)) return "image";
   if (ext === "pdf") return "pdf";
   if (["mp3", "aac", "wav", "flac", "m4a", "ogg"].includes(ext)) return "audio";
@@ -44,25 +55,25 @@ function isSafeUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
-function getFileExtClass(type: FileType): string {
-  switch (type) {
-    case "video": return "bg-gradient-to-br from-yc-accent to-yc-accent-3";
-    case "image": return "bg-gradient-to-br from-yc-accent-2 to-yc-mesh-2";
-    case "pdf": return "bg-gradient-to-br from-yc-accent-3 to-yc-mesh-2";
-    case "audio": return "bg-gradient-to-br from-emerald-400 to-yc-accent-2";
-    default: return "bg-white/10";
+function isVirtualMediaUrl(url: string): boolean {
+  return url.startsWith("/__nyy_virtual_media__/");
+}
+
+function isSameOriginUrl(url: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
   }
 }
 
-function getFileIcon(type: FileType): string {
-  switch (type) {
-    case "video": return "▶";
-    case "image": return "🖼";
-    case "pdf": return "📄";
-    case "audio": return "♪";
-    case "text": return "¶";
-    default: return "⋯";
-  }
+function isAnalyzableAudioUrl(url: string): boolean {
+  return isVirtualMediaUrl(url) || isSameOriginUrl(url);
+}
+
+function hasSafeAudioSource(file: ShareFileDownload): boolean {
+  return isSafeUrl(file.download_url) || file.chunks.some((chunk) => isSafeUrl(chunk.download_url));
 }
 
 function formatSize(bytes: number): string {
@@ -70,6 +81,39 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function formatSpeed(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "计算中";
+  return `${formatSize(bytesPerSecond)}/s`;
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "计算中";
+  const rounded = Math.ceil(seconds);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const remainSeconds = rounded % 60;
+  if (hours > 0) return `${hours}小时${minutes.toString().padStart(2, "0")}分`;
+  if (minutes > 0) return `${minutes}分${remainSeconds.toString().padStart(2, "0")}秒`;
+  return `${remainSeconds}秒`;
+}
+
+function getProgressRatio(progress: SmartDownloadProgress): number {
+  return Math.min(1, Math.max(0, progress.downloadedBytes / Math.max(1, progress.totalBytes)));
+}
+
+function getDownloadPercentLabel(progress: SmartDownloadProgress, state: DownloadTaskState): string {
+  if (state === "completed") return "100%";
+  const percent = getProgressRatio(progress) * 100;
+  if (percent > 0 && percent < 1) return `${Math.max(0.1, percent).toFixed(1)}%`;
+  if (percent < 10) return `${percent.toFixed(1)}%`;
+  return `${Math.floor(percent)}%`;
+}
+
+function shouldSuspendPreviewForDownload(file: ShareFileDownload): boolean {
+  const type = classifyFile(file.file_name);
+  return type === "video" || type === "audio" || type === "pdf";
 }
 
 function getSingleContentLabel(type: FileType): string {
@@ -116,6 +160,211 @@ function getNativeVideoMime(file: ShareFileDownload): string {
     case "mkv": return "video/x-matroska";
     default: return "video/mp4";
   }
+}
+
+function getNativeAudioMime(file: ShareFileDownload): string {
+  if (file.content_type?.startsWith("audio/")) return file.content_type;
+  const ext = file.file_name.split(".").pop()?.toLowerCase() || "";
+  switch (ext) {
+    case "mp3": return "audio/mpeg";
+    case "aac": return "audio/aac";
+    case "wav": return "audio/wav";
+    case "flac": return "audio/flac";
+    case "m4a": return "audio/mp4";
+    case "ogg": return "audio/ogg";
+    default: return "audio/mpeg";
+  }
+}
+
+function formatAudioTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainSeconds = total % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainSeconds).padStart(2, "0")}`;
+  return `${minutes}:${String(remainSeconds).padStart(2, "0")}`;
+}
+
+function getAudioErrorMessage(error: MediaError | null): string {
+  switch (error?.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "音频加载已取消，请重新播放。";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "音频网络加载失败，请刷新页面或重新获取下载链接。";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "浏览器解码失败，可能是不支持当前音频编码。";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "浏览器不支持此音频格式或下载链接不可用。";
+    default:
+      return "音频无法播放，请下载后本地查看。";
+  }
+}
+
+function getVisualizerBandLevel(data: Uint8Array | null, bandIndex: number, bandCount: number, timestamp: number): number {
+  if (!data || data.length === 0) {
+    return Math.max(0.035, 0.08 + Math.sin(timestamp / 820 + bandIndex * 0.42) * 0.026);
+  }
+  const startRatio = bandIndex / bandCount;
+  const endRatio = (bandIndex + 1) / bandCount;
+  const start = Math.floor(Math.pow(startRatio, 1.9) * (data.length - 1));
+  const end = Math.max(start + 1, Math.floor(Math.pow(endRatio, 1.9) * data.length));
+  let sum = 0;
+  for (let i = start; i < end; i += 1) sum += data[i] || 0;
+  const normalized = sum / Math.max(1, end - start) / 255;
+  const contour = 0.86 + Math.sin((bandIndex / Math.max(1, bandCount - 1)) * Math.PI) * 0.2;
+  return Math.max(0.035, Math.min(1, Math.pow(normalized, 0.58) * contour));
+}
+
+function drawAudioVisualizer(canvas: HTMLCanvasElement, data: Uint8Array | null, active: boolean, timestamp: number) {
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, rect.width);
+  const cssHeight = Math.max(1, rect.height);
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.floor(cssWidth * pixelRatio);
+  const pixelHeight = Math.floor(cssHeight * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const bandCount = Math.max(96, Math.min(AUDIO_VISUALIZER_BANDS, Math.floor(cssWidth / 5)));
+  const levels = Array.from({ length: bandCount }, (_, index) => getVisualizerBandLevel(data, index, bandCount, timestamp));
+  const left = Math.max(8, cssWidth * 0.01);
+  const right = cssWidth - left;
+  const centerY = cssHeight * 0.54;
+  const amplitude = cssHeight * (active ? 0.46 : 0.22);
+  const energy = levels.reduce((sum, level) => sum + level, 0) / Math.max(1, levels.length);
+  const bass = levels.slice(0, Math.max(4, Math.floor(levels.length * 0.16))).reduce((sum, level) => sum + level, 0) / Math.max(1, Math.floor(levels.length * 0.16));
+  const glow = active ? 10 + energy * 34 : 8;
+  const phase = timestamp / 680;
+
+  const points = levels.map((level, index) => {
+    const ratio = index / Math.max(1, bandCount - 1);
+    const x = left + ratio * (right - left);
+    const shimmer = Math.sin(phase + index * 0.18) * 0.035 + Math.cos(phase * 0.72 + index * 0.07) * 0.025;
+    const shaped = Math.max(0.02, Math.min(1, level + shimmer + bass * Math.max(0, 0.42 - ratio) * 0.22));
+    return {
+      x,
+      top: centerY - shaped * amplitude,
+      bottom: centerY + shaped * amplitude * 0.62,
+      level: shaped,
+      ratio,
+    };
+  });
+
+  const strokePath = (items: typeof points, key: "top" | "bottom") => {
+    if (items.length === 0) return;
+    ctx.beginPath();
+    ctx.moveTo(items[0].x, items[0][key]);
+    for (let index = 1; index < items.length - 1; index += 1) {
+      const current = items[index];
+      const next = items[index + 1];
+      ctx.quadraticCurveTo(current.x, current[key], (current.x + next.x) / 2, (current[key] + next[key]) / 2);
+    }
+    const last = items[items.length - 1];
+    ctx.lineTo(last.x, last[key]);
+  };
+
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i += 1) {
+    const y = cssHeight * (0.14 + i * 0.14);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  const area = new Path2D();
+  points.forEach((point, index) => {
+    if (index === 0) area.moveTo(point.x, point.top);
+    else area.lineTo(point.x, point.top);
+  });
+  for (let index = points.length - 1; index >= 0; index -= 1) area.lineTo(points[index].x, points[index].bottom);
+  area.closePath();
+  const fill = ctx.createLinearGradient(0, cssHeight * 0.08, 0, cssHeight);
+  fill.addColorStop(0, active ? "rgba(255, 210, 143, 0.42)" : "rgba(255,255,255,0.12)");
+  fill.addColorStop(0.44, active ? "rgba(255, 55, 112, 0.2)" : "rgba(255,255,255,0.055)");
+  fill.addColorStop(0.8, active ? "rgba(121, 94, 255, 0.12)" : "rgba(255,255,255,0.02)");
+  fill.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = fill;
+  ctx.fill(area);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const neon = ctx.createLinearGradient(left, 0, right, 0);
+  neon.addColorStop(0, "rgba(255, 220, 154, 0.95)");
+  neon.addColorStop(0.34, "rgba(255, 64, 126, 0.98)");
+  neon.addColorStop(0.68, "rgba(174, 98, 255, 0.96)");
+  neon.addColorStop(1, "rgba(93, 150, 255, 0.9)");
+
+  ctx.strokeStyle = neon;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = active ? "rgba(255, 72, 126, 0.72)" : "rgba(255,255,255,0.18)";
+  ctx.shadowBlur = glow;
+  ctx.lineWidth = active ? 2.2 : 1.4;
+  strokePath(points, "top");
+  ctx.stroke();
+  ctx.globalAlpha = 0.62;
+  ctx.lineWidth = 1.15;
+  strokePath(points, "bottom");
+  ctx.stroke();
+
+  const ribbonOffsets = [-0.34, 0, 0.34];
+  ribbonOffsets.forEach((offset, ribbonIndex) => {
+    ctx.globalAlpha = active ? 0.2 - ribbonIndex * 0.035 : 0.08;
+    ctx.shadowBlur = glow * (0.55 + ribbonIndex * 0.18);
+    ctx.lineWidth = 1.15 + ribbonIndex * 0.55;
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const ripple = Math.sin(phase * (1.15 + ribbonIndex * 0.22) + index * (0.12 + ribbonIndex * 0.03)) * amplitude * 0.05;
+      const y = centerY + offset * amplitude * point.level + ripple;
+      if (index === 0) ctx.moveTo(point.x, y);
+      else ctx.lineTo(point.x, y);
+    });
+    ctx.stroke();
+  });
+
+  points.forEach((point, index) => {
+    if (index % 2 !== 0) return;
+    const height = Math.max(3, (point.bottom - point.top) * (0.7 + point.level * 0.38));
+    const top = centerY - height / 2;
+    const bottom = centerY + height / 2;
+    const needle = ctx.createLinearGradient(0, top, 0, bottom);
+    needle.addColorStop(0, "rgba(255, 225, 165, 0.34)");
+    needle.addColorStop(0.5, "rgba(255, 62, 122, 0.22)");
+    needle.addColorStop(1, "rgba(96, 100, 255, 0.08)");
+    ctx.strokeStyle = needle;
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = active ? 0.78 : 0.28;
+    ctx.lineWidth = point.level > 0.55 ? 1.25 : 0.7;
+    ctx.beginPath();
+    ctx.moveTo(point.x, top);
+    ctx.lineTo(point.x, bottom);
+    ctx.stroke();
+  });
+
+  ctx.globalAlpha = active ? 0.9 : 0.35;
+  ctx.shadowColor = "rgba(255, 195, 124, 0.72)";
+  ctx.shadowBlur = active ? 13 : 5;
+  points.forEach((point, index) => {
+    if (index % 4 !== 0) return;
+    const orbit = Math.sin(phase * 1.7 + index * 0.23) * Math.max(2, amplitude * 0.025);
+    const radius = active ? 0.9 + point.level * 2.1 : 0.8;
+    ctx.fillStyle = point.ratio < 0.42 ? "rgba(255, 213, 145, 0.95)" : point.ratio < 0.74 ? "rgba(255, 84, 142, 0.9)" : "rgba(150, 130, 255, 0.88)";
+    ctx.beginPath();
+    ctx.arc(point.x, point.top + orbit, radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 function isMkvFile(file: ShareFileDownload): boolean {
@@ -226,6 +475,9 @@ function UnsupportedVideoPreview({ message, onDownload }: { message: string; onD
 }
 
 const MKV_NATIVE_METADATA_TIMEOUT_MS = 20_000;
+const AUDIO_VOLUME_STORAGE_KEY = "nyy-share-audio-volume";
+const AUDIO_MUTED_STORAGE_KEY = "nyy-share-audio-muted";
+const AUDIO_VISUALIZER_BANDS = 128;
 
 function NativeVideoPreview({
   file,
@@ -469,6 +721,436 @@ function MkvVideoPreview({ file, onDownload, debugLog }: { file: ShareFileDownlo
   );
 }
 
+function AudioPreview({ file, onDownload }: { file: ShareFileDownload; onDownload: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const visualizerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const visualizerFrameRef = useRef<number | null>(null);
+  const audioVirtualIdRef = useRef<string | null>(null);
+  const virtualAudioFallbackAttemptedRef = useRef(false);
+  const [state, setState] = useState<"idle" | "loading" | "ready" | "playing" | "paused" | "ended" | "error">("idle");
+  const [playbackUrl, setPlaybackUrl] = useState("");
+  const [audioTransportPreparing, setAudioTransportPreparing] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [bufferedPct, setBufferedPct] = useState(0);
+  const [volume, setVolumeState] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const mime = getNativeAudioMime(file);
+  if (!audioVirtualIdRef.current) audioVirtualIdRef.current = createVirtualMediaFileId("share-audio");
+  const safeUrl = isSafeUrl(playbackUrl) || isVirtualMediaUrl(playbackUrl);
+  const isPlaying = state === "playing";
+  const isWaiting = state === "loading" || audioTransportPreparing;
+  const playable = duration > 0 && Number.isFinite(duration);
+  const progressPct = playable ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
+  const safeBufferedPct = Math.max(progressPct, bufferedPct);
+  const progressStyle: CSSProperties = {
+    background: `linear-gradient(90deg, #FF8A3D 0%, #FF8A3D ${progressPct}%, rgba(255,255,255,0.34) ${progressPct}%, rgba(255,255,255,0.34) ${safeBufferedPct}%, rgba(255,255,255,0.14) ${safeBufferedPct}%, rgba(255,255,255,0.14) 100%)`,
+  };
+  const volumeStyle: CSSProperties = {
+    background: `linear-gradient(90deg, #FF8A3D 0%, #FF8A3D ${(isMuted ? 0 : volume) * 100}%, rgba(255,255,255,0.16) ${(isMuted ? 0 : volume) * 100}%, rgba(255,255,255,0.16) 100%)`,
+  };
+
+  const persistVolume = useCallback((nextVolume: number, muted: boolean) => {
+    try {
+      localStorage.setItem(AUDIO_VOLUME_STORAGE_KEY, String(nextVolume));
+      localStorage.setItem(AUDIO_MUTED_STORAGE_KEY, String(muted));
+    } catch {}
+  }, []);
+
+  const syncBuffered = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0 || audio.buffered.length === 0) {
+      setBufferedPct(0);
+      return;
+    }
+    const end = audio.buffered.end(audio.buffered.length - 1);
+    setBufferedPct(Math.max(0, Math.min(100, (end / audio.duration) * 100)));
+  }, []);
+
+  const drawIdleVisualizer = useCallback(() => {
+    const canvas = visualizerCanvasRef.current;
+    if (!canvas || typeof window === "undefined") return;
+    drawAudioVisualizer(canvas, null, false, performance.now());
+  }, []);
+
+  const stopVisualizerLoop = useCallback(() => {
+    if (visualizerFrameRef.current !== null) {
+      window.cancelAnimationFrame(visualizerFrameRef.current);
+      visualizerFrameRef.current = null;
+    }
+  }, []);
+
+  const releaseAudioGraph = useCallback(() => {
+    stopVisualizerLoop();
+    analyserRef.current?.disconnect();
+    audioSourceRef.current?.disconnect();
+    void audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+    audioSourceRef.current = null;
+    analyserRef.current = null;
+  }, [stopVisualizerLoop]);
+
+  const resetVisualizer = useCallback(() => {
+    stopVisualizerLoop();
+    drawIdleVisualizer();
+  }, [drawIdleVisualizer, stopVisualizerLoop]);
+
+  const ensureAudioGraph = useCallback(async (): Promise<AnalyserNode | null> => {
+    const audio = audioRef.current;
+    if (!audio || typeof window === "undefined" || !isAnalyzableAudioUrl(playbackUrl)) return null;
+    if (analyserRef.current) {
+      await audioContextRef.current?.resume().catch(() => {});
+      return analyserRef.current;
+    }
+    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    try {
+      const context = new AudioContextCtor();
+      const source = context.createMediaElementSource(audio);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+      analyser.connect(context.destination);
+      audioContextRef.current = context;
+      audioSourceRef.current = source;
+      analyserRef.current = analyser;
+      await context.resume().catch(() => {});
+      return analyser;
+    } catch {
+      return null;
+    }
+  }, [playbackUrl]);
+
+  const startVisualizerLoop = useCallback(() => {
+    stopVisualizerLoop();
+    const canvas = visualizerCanvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) {
+      drawIdleVisualizer();
+      return;
+    }
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    const tick = (timestamp: number) => {
+      analyser.getByteFrequencyData(data);
+      drawAudioVisualizer(canvas, data, true, timestamp);
+      visualizerFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    visualizerFrameRef.current = window.requestAnimationFrame(tick);
+  }, [drawIdleVisualizer, stopVisualizerLoop]);
+
+  useEffect(() => {
+    let cancelled = false;
+    releaseAudioGraph();
+    drawIdleVisualizer();
+    setPlaybackUrl("");
+    setAudioTransportPreparing(true);
+    virtualAudioFallbackAttemptedRef.current = false;
+
+    if (!hasSafeAudioSource(file)) {
+      setAudioTransportPreparing(false);
+      return;
+    }
+
+    const audioFile = { ...file, content_type: file.content_type || mime };
+    prepareVirtualMediaTransport()
+      .then(() => registerVirtualMediaFile(audioFile, "share-audio", undefined, audioVirtualIdRef.current || undefined))
+      .then((url) => {
+        if (!cancelled) setPlaybackUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPlaybackUrl(file.download_url);
+      })
+      .finally(() => {
+        if (!cancelled) setAudioTransportPreparing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [drawIdleVisualizer, file, mime, releaseAudioGraph]);
+
+  useEffect(() => {
+    drawIdleVisualizer();
+    if (typeof ResizeObserver === "undefined") return;
+    const canvas = visualizerCanvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => drawIdleVisualizer());
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [drawIdleVisualizer, file.file_name]);
+
+  useEffect(() => {
+    try {
+      const savedVolume = Number(localStorage.getItem(AUDIO_VOLUME_STORAGE_KEY));
+      if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) setVolumeState(savedVolume);
+      setIsMuted(localStorage.getItem(AUDIO_MUTED_STORAGE_KEY) === "true");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    setState("idle");
+    setCurrentTime(0);
+    setDuration(0);
+    setBufferedPct(0);
+    setErrorMessage("");
+    if (audioTransportPreparing) return;
+    if (!safeUrl) {
+      setErrorMessage("音频链接无效，请下载后本地查看。");
+      setState("error");
+      return;
+    }
+    if (typeof document !== "undefined" && mime) {
+      const probe = document.createElement("audio");
+      if (probe.canPlayType(mime) === "") {
+        setErrorMessage("浏览器不支持此音频格式，请下载后本地查看。");
+        setState("error");
+      }
+    }
+  }, [audioTransportPreparing, mime, playbackUrl, safeUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = volume;
+    audio.muted = isMuted;
+  }, [isMuted, playbackUrl, volume]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !safeUrl || audioTransportPreparing || state === "error") return;
+
+    const syncMetadata = () => {
+      if (!audio.error) setState(audio.paused ? "ready" : "playing");
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+      setCurrentTime(audio.currentTime || 0);
+      syncBuffered();
+    };
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
+    const onProgress = () => syncBuffered();
+    const onPlay = () => setState("playing");
+    const onPause = () => {
+      setState(audio.ended ? "ended" : "paused");
+      resetVisualizer();
+    };
+    const onEnded = () => {
+      setState("ended");
+      resetVisualizer();
+    };
+    const onWaiting = () => setState("loading");
+    const onPlaying = () => {
+      setState("playing");
+      void ensureAudioGraph().then((ready) => {
+        if (ready) startVisualizerLoop();
+      });
+    };
+    const onCanPlay = () => { if (audio.paused) setState("ready"); };
+    const onVolumeChange = () => {
+      setVolumeState(audio.volume);
+      setIsMuted(audio.muted);
+      persistVolume(audio.volume, audio.muted);
+    };
+    const onAudioError = () => {
+      if (isVirtualMediaUrl(playbackUrl) && isSafeUrl(file.download_url) && !virtualAudioFallbackAttemptedRef.current) {
+        virtualAudioFallbackAttemptedRef.current = true;
+        releaseAudioGraph();
+        drawIdleVisualizer();
+        setErrorMessage("");
+        setState("idle");
+        setPlaybackUrl(file.download_url);
+        return;
+      }
+      setErrorMessage(getAudioErrorMessage(audio.error));
+      setState("error");
+      resetVisualizer();
+    };
+
+    audio.addEventListener("loadedmetadata", syncMetadata);
+    audio.addEventListener("durationchange", syncMetadata);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("progress", onProgress);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("canplay", onCanPlay);
+    audio.addEventListener("volumechange", onVolumeChange);
+    audio.addEventListener("error", onAudioError);
+
+    if (audio.error) onAudioError();
+    else if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) syncMetadata();
+    else syncBuffered();
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", syncMetadata);
+      audio.removeEventListener("durationchange", syncMetadata);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("progress", onProgress);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("canplay", onCanPlay);
+      audio.removeEventListener("volumechange", onVolumeChange);
+      audio.removeEventListener("error", onAudioError);
+    };
+  }, [audioTransportPreparing, drawIdleVisualizer, ensureAudioGraph, file.download_url, persistVolume, playbackUrl, releaseAudioGraph, resetVisualizer, safeUrl, startVisualizerLoop, state, syncBuffered]);
+
+  useEffect(() => () => {
+    releaseAudioGraph();
+  }, [releaseAudioGraph]);
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio || !safeUrl || audioTransportPreparing || state === "error") return;
+    if (isPlaying) {
+      audio.pause();
+      return;
+    }
+    try {
+      setState("loading");
+      const graphReady = ensureAudioGraph();
+      await audio.play();
+      if (!audio.paused) setState("playing");
+      void graphReady.then((ready) => {
+        if (ready && !audio.paused) startVisualizerLoop();
+      });
+    } catch (err) {
+      if (audio.error) return;
+      setErrorMessage(getErrorMessage(err, "音频播放失败，请下载后本地查看。"));
+      setState("error");
+      resetVisualizer();
+    }
+  };
+
+  const seekTo = (seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || !playable) return;
+    const next = Math.max(0, Math.min(duration, seconds));
+    audio.currentTime = next;
+    setCurrentTime(next);
+  };
+
+  const setVolume = (next: number) => {
+    const safeVolume = Math.max(0, Math.min(1, next));
+    const muted = safeVolume === 0;
+    setVolumeState(safeVolume);
+    setIsMuted(muted);
+    persistVolume(safeVolume, muted);
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = safeVolume;
+    audio.muted = muted;
+  };
+
+  const setMuted = (muted: boolean) => {
+    const nextVolume = !muted && volume === 0 ? 0.8 : volume;
+    if (nextVolume !== volume) setVolumeState(nextVolume);
+    setIsMuted(muted);
+    persistVolume(nextVolume, muted);
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (nextVolume !== volume) audio.volume = nextVolume;
+    audio.muted = muted;
+  };
+
+  return (
+    <div data-testid="audio-preview" className={s.audioStage}>
+      {safeUrl && state !== "error" && (
+        <audio key={playbackUrl} ref={audioRef} src={playbackUrl} preload="metadata" data-testid="audio-element">
+          <source src={playbackUrl} type={mime} />
+        </audio>
+      )}
+
+      <div className={s.audioLayout}>
+        <div className={s.audioHero}>
+          <div className={s.audioVisualPanel}>
+            <div className={s.audioTitleRow}>
+              <div className="min-w-0">
+                <p className="font-tech text-[10px] font-bold tracking-[0.24em] text-nyy-300 sm:text-[11px]">音频预览</p>
+                <p className="mt-1 truncate font-tech text-[17px] font-bold leading-tight tracking-wide text-white sm:text-3xl">{file.file_name}</p>
+              </div>
+            </div>
+            <div className={s.audioCanvasShell}>
+              <canvas ref={visualizerCanvasRef} data-testid="audio-visualizer" className={s.audioVisualizerCanvas} aria-hidden="true" />
+            </div>
+          </div>
+        </div>
+
+        {state === "error" ? (
+          <div className={s.audioError}>
+            <p className="font-tech text-sm font-bold tracking-widest text-white">浏览器无法直接预览此音频</p>
+            <p className="mt-2 text-xs leading-5 text-white/58">{errorMessage}</p>
+            <button type="button" onClick={onDownload} className={`${s.glowBtn} mt-4 inline-flex items-center gap-2 px-4 py-2.5 font-tech text-xs tracking-widest`}>
+              <Download className="h-4 w-4" /> 下载此文件
+            </button>
+          </div>
+        ) : (
+          <div data-testid="audio-controls" className={s.audioControls}>
+            <div className={s.audioControlRow}>
+              <button
+                type="button"
+                data-testid="audio-play-toggle"
+                onClick={() => { void togglePlay(); }}
+                disabled={!safeUrl || isWaiting}
+                aria-label={isPlaying ? "暂停" : "播放"}
+                className={s.audioControlButton}
+              >
+                {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
+              </button>
+              <span className={s.audioTimeLabel}>{formatAudioTime(currentTime)}</span>
+              <input
+                type="range"
+                data-testid="audio-progress"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={Number.isFinite(currentTime) ? currentTime : 0}
+                disabled={!playable}
+                aria-label="音频播放进度"
+                onChange={(event) => seekTo(Number(event.target.value))}
+                className={`${s.audioRange} ${s.audioProgressRange}`}
+                style={progressStyle}
+              />
+              <span className={s.audioTimeLabel}>{formatAudioTime(duration)}</span>
+              <div className={s.audioVolumeGroup}>
+                <button
+                  type="button"
+                  onClick={() => setMuted(!(isMuted || volume === 0))}
+                  aria-label={isMuted || volume === 0 ? "取消静音" : "静音"}
+                  className={s.audioControlButton}
+                >
+                  {isMuted || volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={isMuted ? 0 : volume}
+                  onChange={(event) => setVolume(Number(event.target.value))}
+                  aria-label="音量"
+                  className={`${s.audioRange} ${s.audioVolumeRange}`}
+                  style={volumeStyle}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SharePage() {
   const params = useParams();
   const code = params.code as string;
@@ -483,19 +1165,21 @@ export default function SharePage() {
   const [pwError, setPwError] = useState("");
   const [pwVerifying, setPwVerifying] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [chunkProgress, setChunkProgress] = useState<ChunkedDownloadProgress | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<SmartDownloadProgress | null>(null);
+  const [downloadProgressFile, setDownloadProgressFile] = useState<ShareFileDownload | null>(null);
+  const [downloadTaskState, setDownloadTaskState] = useState<DownloadTaskState>("idle");
+  const [downloadCancelArmed, setDownloadCancelArmed] = useState(false);
+  const [downloadPreviewSuspended, setDownloadPreviewSuspended] = useState(false);
+  const [downloadConfig, setDownloadConfig] = useState<DownloadConfig>(() => defaultDownloadConfig());
+  const [directoryDownloadSupported, setDirectoryDownloadSupported] = useState(false);
   const [qr, setQr] = useState("");
   const [reported, setReported] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-  const [listExpanded, setListExpanded] = useState(false);
   const [downloadState, setDownloadState] = useState<DownloadLinksState>("idle");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("files");
 
-  // 文件列表折叠阈值：超过 COLLAPSE_THRESHOLD 个文件时默认折叠，只显示 COLLAPSE_SHOW 条
-  const COLLAPSE_THRESHOLD = 5;
-  const COLLAPSE_SHOW = 4;
+  const downloadAbortRef = useRef<AbortController | null>(null);
 
   const appendDebugLog = useCallback<DebugLogFn>(() => {}, []);
 
@@ -522,6 +1206,28 @@ export default function SharePage() {
         else setPageState("error");
       });
   }, [code]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false;
+    getPublicDownloadConfig()
+      .then((config) => { if (!cancelled) setDownloadConfig(config); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    setDirectoryDownloadSupported(supportsDirectoryPicker());
+  }, []);
+
+  useEffect(() => {
+    if (!downloadConfig.leave_warning_enabled || !downloadProgress || downloadTaskState !== "running") return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [downloadConfig.leave_warning_enabled, downloadProgress, downloadTaskState]);
 
   // QR 二维码
   useEffect(() => {
@@ -592,44 +1298,85 @@ export default function SharePage() {
 
     if (res.files.length === 1 && res.emptyDirs.length === 0) {
       const f = res.files[0];
-      if (f.is_chunked && f.chunks.length > 0) {
-        if (!supportsChunkedDownload()) {
-          setPwError("当前浏览器不支持大文件下载，请使用桌面版 Chrome 或 Edge");
-          setDownloading(false);
-          return;
-        }
-        try {
-          await chunkedDownload(f.file_name, f.file_size, f.chunks, setChunkProgress, appendDebugLog);
-          setChunkProgress(null);
-        } catch (err) {
-          setChunkProgress(null);
-          if (!(err instanceof DOMException && err.name === "AbortError")) setPwError(getErrorMessage(err, "下载失败"));
-        }
-      } else {
-        const a = document.createElement("a");
-        if (!isSafeUrl(f.download_url)) { setPwError("下载链接无效"); setDownloading(false); return; }
-        a.href = f.download_url; a.download = f.file_name; a.rel = "noopener"; a.click();
-      }
+      await downloadOneFile(f);
     }
     setDownloading(false);
   };
 
   const handleDownloadAll = async () => {
-    if (downloads.length === 0 && (!share || share.empty_dirs.length === 0)) return;
-    setDownloading(true);
-    try {
-      const { downloadZip } = await import("client-zip");
-      const responses = await Promise.all(downloads.map(async (f) => ({ name: f.file_name, input: await fetch(f.download_url) })));
-      const folders = (share?.empty_dirs || []).map((dir) => ({ name: dir.endsWith("/") ? dir : `${dir}/` }));
-      const blob = await downloadZip([...folders, ...responses]).blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `${code}.zip`; a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setPwError("打包下载失败");
+    if (!share) return;
+    const filesToDownload = downloads;
+    const emptyDirs = share.empty_dirs;
+    if (filesToDownload.length === 0 && emptyDirs.length === 0) return;
+    if (!downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled || !directoryDownloadSupported) {
+      showToast({
+        title: !downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled
+          ? "批量保存到文件夹已关闭，请逐个下载文件。"
+          : "当前浏览器不支持批量保存到文件夹，请逐个下载文件。",
+        type: "warning",
+        duration: 8000,
+      });
+      return;
     }
-    setDownloading(false);
+    let directory;
+    try {
+      directory = await pickDownloadDirectory();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      showToast({ title: getErrorMessage(err, "无法选择保存文件夹"), type: "error" });
+      return;
+    }
+    downloadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    downloadAbortRef.current = abortController;
+    let lastProgress: SmartDownloadProgress | null = null;
+    setDownloading(true);
+    setPwError("");
+    setDownloadCancelArmed(false);
+    setDownloadProgress(null);
+    setDownloadProgressFile(filesToDownload[0] || null);
+    setDownloadTaskState(filesToDownload.length > 0 ? "running" : "idle");
+    setDownloadPreviewSuspended(filesToDownload.some(shouldSuspendPreviewForDownload));
+    try {
+      await downloadFilesToDirectoryHandle(directory, filesToDownload, {
+        config: downloadConfig,
+        emptyDirs,
+        signal: abortController.signal,
+        debugLog: appendDebugLog,
+        onFileStart: (file) => {
+          setDownloadProgressFile(file);
+          setDownloadPreviewSuspended(shouldSuspendPreviewForDownload(file));
+        },
+        onProgress: (progress) => {
+          if (!progress) return;
+          lastProgress = progress;
+          setDownloadProgress(progress);
+        },
+      });
+      const completedProgress = lastProgress as SmartDownloadProgress | null;
+      if (completedProgress) {
+        setDownloadProgress({ ...completedProgress, downloadedBytes: completedProgress.totalBytes, bytesPerSecond: 0 });
+        setDownloadTaskState("completed");
+      } else {
+        setDownloadProgress(null);
+        setDownloadProgressFile(null);
+        setDownloadTaskState("idle");
+        showToast({ title: "空文件夹已保存", type: "success" });
+      }
+    } catch (err) {
+      setDownloadProgress(null);
+      setDownloadProgressFile(null);
+      setDownloadTaskState("idle");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        showToast({ title: "下载已取消", type: "info" });
+      } else {
+        showToast({ title: getErrorMessage(err, "批量保存失败"), type: "error" });
+      }
+    } finally {
+      if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
+      setDownloadPreviewSuspended(false);
+      setDownloading(false);
+    }
   };
 
   const handleCopyLink = () => {
@@ -641,24 +1388,70 @@ export default function SharePage() {
 
   // 下载单个文件（文件列表行内图标使用）
   const downloadOneFile = async (file: ShareFileDownload) => {
-    if (file.is_chunked && file.chunks.length > 0) {
-      if (!supportsChunkedDownload()) {
-        showToast({ title: "当前浏览器不支持大文件下载", type: "error" });
-        return;
+    if (!file.is_chunked && !isSafeUrl(file.download_url)) { showToast({ title: "下载链接无效", type: "error" }); return; }
+    if (file.is_chunked && !file.chunks.every((chunk) => isSafeUrl(chunk.download_url))) { showToast({ title: "下载链接无效", type: "error" }); return; }
+    downloadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    downloadAbortRef.current = abortController;
+    let lastProgress: SmartDownloadProgress | null = null;
+    setDownloading(true);
+    setDownloadProgress(null);
+    setDownloadProgressFile(file);
+    setDownloadTaskState("running");
+    setDownloadPreviewSuspended(shouldSuspendPreviewForDownload(file));
+    try {
+      await downloadSmart(file, {
+        config: downloadConfig,
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          if (!progress) return;
+          lastProgress = progress;
+          setDownloadProgress(progress);
+        },
+        debugLog: appendDebugLog,
+        onUnsupported: (message) => showToast({ title: message, type: "warning", duration: 6000 }),
+      });
+      const completedProgress = lastProgress as SmartDownloadProgress | null;
+      if (completedProgress) {
+        setDownloadProgress({ ...completedProgress, downloadedBytes: completedProgress.totalBytes, bytesPerSecond: 0 });
+        setDownloadTaskState("completed");
+      } else {
+        setDownloadProgress(null);
+        setDownloadProgressFile(null);
+        setDownloadTaskState("idle");
       }
-      try {
-        await chunkedDownload(file.file_name, file.file_size, file.chunks, setChunkProgress, appendDebugLog);
-        setChunkProgress(null);
-      } catch (err) {
-        setChunkProgress(null);
-        if (!(err instanceof DOMException && err.name === "AbortError")) showToast({ title: getErrorMessage(err, "下载失败"), type: "error" });
+    } catch (err) {
+      setDownloadProgress(null);
+      setDownloadProgressFile(null);
+      setDownloadTaskState("idle");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        showToast({ title: "下载已取消", type: "info" });
+      } else {
+        showToast({ title: getErrorMessage(err, "下载失败"), type: "error" });
       }
-    } else {
-      if (!isSafeUrl(file.download_url)) { showToast({ title: "下载链接无效", type: "error" }); return; }
-      const a = document.createElement("a");
-      a.href = file.download_url; a.download = file.file_name; a.rel = "noopener"; a.click();
+    } finally {
+      if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
+      setDownloadPreviewSuspended(false);
+      setDownloading(false);
     }
   };
+
+  const handleCancelDownload = () => {
+    downloadAbortRef.current?.abort();
+  };
+
+  const handleDismissDownloadHud = () => {
+    setDownloadProgress(null);
+    setDownloadProgressFile(null);
+    setDownloadTaskState("idle");
+    setDownloadCancelArmed(false);
+  };
+
+  useEffect(() => {
+    if (!downloadCancelArmed) return;
+    const timeout = window.setTimeout(() => setDownloadCancelArmed(false), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [downloadCancelArmed]);
 
   const handleReport = async () => {
     if (!reportReason.trim()) return;
@@ -672,6 +1465,32 @@ export default function SharePage() {
   // 选中文件的“元信息”：share.files 在第一阶段（getShareInfo）就有 file_name/file_size，
   // 据此让文件名+操作栏区域提前以恒定高度渲染，避免 downloads 后到时把布局挤开。
   const selectedMeta = share && share.files.length > 0 ? share.files[Math.min(selectedIdx, share.files.length - 1)] : null;
+  const downloadProgressRatio = downloadProgress ? getProgressRatio(downloadProgress) : 0;
+  const downloadProgressPercentLabel = downloadProgress ? getDownloadPercentLabel(downloadProgress, downloadTaskState) : "0%";
+  const downloadProgressName = downloadProgress?.currentFileName || downloadProgressFile?.file_name || selectedMeta?.file_name || "正在下载的文件";
+  const downloadSpeedLabel = downloadTaskState === "completed" ? "已完成" : downloadProgress ? formatSpeed(downloadProgress.bytesPerSecond) : "计算中";
+  const downloadEtaLabel = downloadProgress && downloadProgress.bytesPerSecond > 0
+    ? formatDuration((Math.max(0, downloadProgress.totalBytes - downloadProgress.downloadedBytes)) / downloadProgress.bytesPerSecond)
+    : "计算中";
+  const downloadBatchLabel = downloadProgress?.totalFiles && downloadProgress.totalFiles > 1
+    ? `第 ${downloadProgress.currentFileIndex || 1} / ${downloadProgress.totalFiles} 个 · `
+    : "";
+  const downloadStatusLabel = downloadTaskState === "completed" ? "已保存到本地" : "请保持页面打开";
+  const downloadHintLabel = downloadTaskState === "completed" ? "可以关闭此提示" : `${downloadBatchLabel}预计剩余 ${downloadEtaLabel}`;
+  const showDownloadHud = Boolean(downloadProgress && downloadProgressFile && downloadTaskState !== "idle");
+  const downloadActionLabel = downloadTaskState === "completed" ? "关闭" : "取消下载";
+  const handleDownloadRailAction = () => {
+    if (downloadTaskState === "completed") {
+      handleDismissDownloadHud();
+      return;
+    }
+    const canHover = typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    if (canHover || downloadCancelArmed) {
+      handleCancelDownload();
+      return;
+    }
+    setDownloadCancelArmed(true);
+  };
 
   // ===== 状态页渲染 =====
   // loading：渲染与 ready 完全等尺寸的骨架布局，数据到达后原地替换，零布局跳变。
@@ -684,7 +1503,7 @@ export default function SharePage() {
           {/* ── Topbar 骨架 ── */}
           <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
             <div className="flex min-w-0 items-center gap-3 sm:gap-5">
-              <BrandLogo className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
+              <BrandLogo href="/" className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
               <div className="min-w-0 flex-1">
                 <div className={`${s.skel} h-4 w-full max-w-[11.5rem] sm:h-5 sm:max-w-[18rem]`} />
                 <div className={`${s.skel} mt-2 h-3.5 w-28 sm:w-36`} />
@@ -778,7 +1597,7 @@ export default function SharePage() {
   const StatusPage = ({ children }: { children: React.ReactNode }) => (
     <main className={`nyy-product-shell flex flex-col items-center justify-center gap-4 ${s.tPrimary}`}>
       <ThemeToggle className="fixed top-4 right-4 z-50" />
-      <BrandLogo className="w-24 h-auto mx-auto mb-2 opacity-60" />
+      <BrandLogo href="/" className="w-24 h-auto mx-auto mb-2 opacity-60" />
       {children}
     </main>
   );
@@ -819,7 +1638,7 @@ export default function SharePage() {
         <ThemeToggle className="fixed top-4 right-4 z-50" />
 
         <div className={`${s.glass} p-10 max-w-sm w-full text-center animate-vault-open`}>
-          <BrandLogo className="w-28 h-auto mx-auto mb-6" />
+          <BrandLogo href="/" className="w-28 h-auto mx-auto mb-6" />
           <h1 className={`font-tech text-lg font-bold tracking-[0.15em] ${s.tPrimary} mb-2`}>安全保险库</h1>
           <p className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted} mb-8`}>请输入 4 位提取码解锁</p>
 
@@ -872,11 +1691,7 @@ export default function SharePage() {
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
 
-  // 文件列表折叠：超过阈值时默认折叠，只显示前 COLLAPSE_SHOW 条
   const effectiveFiles = downloads.length > 0 ? downloads : share.files;
-  const isCollapsed = effectiveFiles.length > COLLAPSE_THRESHOLD && !listExpanded;
-  const displayFiles = isCollapsed ? effectiveFiles.slice(0, COLLAPSE_SHOW) : effectiveFiles;
-  const hiddenFileCount = effectiveFiles.length - COLLAPSE_SHOW;
   const contentSummary = getShareContentSummary(share);
   const expiryLabel = getExpiryLabel(share);
   const downloadLabel = getDownloadLabel(share);
@@ -884,122 +1699,25 @@ export default function SharePage() {
   const showLinkFetchButton =
     (isSingle && downloadState === "error") ||
     (!isSingle && !hasOnlyEmptyDirs && !showMultiDownloadActions);
+  const canBatchSaveToDirectory = downloadConfig.smart_download_enabled && downloadConfig.filesystem_access_enabled && directoryDownloadSupported;
+  const batchDownloadLabel = canBatchSaveToDirectory ? "保存到文件夹" : "请逐个下载";
+  const batchDownloadBusyLabel = canBatchSaveToDirectory ? "保存中…" : "请逐个下载";
   const activeMobilePanel = isSingle && mobilePanel === "files" ? "overview" : mobilePanel;
   const mobileTabs: Array<{ id: MobilePanel; label: string }> = isSingle
     ? [{ id: "overview", label: "概览" }, { id: "scan", label: "扫码" }]
     : [{ id: "files", label: "文件" }, { id: "overview", label: "概览" }, { id: "scan", label: "扫码" }];
 
-  const renderFileListContent = () => (
-    <>
-      <div className="flex items-center justify-between mb-3">
-        <span className={`font-tech text-[11px] tracking-[0.1em] ${s.tMuted}`}>文件列表</span>
-        <div className="flex gap-1 bg-white/6 border border-white/10 rounded-md p-0.5">
-          <button onClick={() => setViewMode("list")} title="列表视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "list" ? "bg-yc-accent text-white" : s.tMuted}`}>≡</button>
-          <button onClick={() => setViewMode("grid")} title="网格视图" className={`px-2 py-1 rounded text-xs transition-all ${viewMode === "grid" ? "bg-yc-accent text-white" : s.tMuted}`}>▦</button>
-        </div>
-      </div>
-
-      {share.empty_dirs.map((dir) => (
-        <div key={dir} className="flex items-center gap-3 px-3 py-2.5 mb-1.5 rounded-lg border border-white/8 bg-white/3">
-          <Folder className="w-5 h-5 text-yc-accent flex-shrink-0" />
-          <span className="text-sm truncate flex-1">{dir}</span>
-          <span className={`font-tech text-[10px] ${s.tMuted}`}>空</span>
-        </div>
-      ))}
-
-      {viewMode === "list" && downloads.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {displayFiles.map((_dl, i) => {
-            const dl = _dl as ShareFileDownload;
-            const ft = classifyFile(dl.file_name);
-            const isActive = i === selectedIdx;
-            return (
-              <div key={i}
-                className={`${s.fileRow} flex items-center gap-3 px-3 py-2.5 rounded-lg border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"}`}>
-                <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
-                  className="min-w-0 flex flex-1 items-center gap-3 text-left">
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
-                    {getFileIcon(ft)}
-                  </div>
-                  <span className="text-sm truncate flex-1 font-medium">{dl.file_name}</span>
-                  <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
-                </button>
-                <button type="button" onClick={() => void downloadOneFile(dl)}
-                  className={`shrink-0 p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
-                  title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
-                  <Download className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
-          {isCollapsed && (
-            <button onClick={() => setListExpanded(true)}
-              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-              展开更多（{hiddenFileCount} 项）
-            </button>
-          )}
-        </div>
-      )}
-
-      {viewMode === "grid" && downloads.length > 0 && (
-        <>
-          <div className="grid grid-cols-2 gap-2">
-            {displayFiles.map((_dl, i) => {
-              const dl = _dl as ShareFileDownload;
-              const ft = classifyFile(dl.file_name);
-              const isActive = i === selectedIdx;
-              return (
-                <div key={i}
-                  className={`${s.fileRow} p-3 rounded-xl border ${isActive ? s.active : "border-white/8 bg-white/3 hover:border-yc-accent"} flex flex-col gap-2`}>
-                  <button type="button" onClick={() => setSelectedIdx(i)} aria-label={`预览 ${dl.file_name}`}
-                    className="min-w-0 flex flex-col gap-2 text-left">
-                    <div className={`aspect-[4/3] rounded-lg flex items-center justify-center text-2xl text-white ${getFileExtClass(ft)}`}>
-                      {getFileIcon(ft)}
-                    </div>
-                    <span className="text-xs truncate font-medium">{dl.file_name}</span>
-                    <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(dl.file_size)}</span>
-                  </button>
-                  <button type="button" onClick={() => void downloadOneFile(dl)}
-                    className={`self-end p-1 rounded-full transition-colors ${s.tMuted} hover:text-yc-accent hover:bg-white/10`}
-                    title="下载此文件" aria-label={`下载 ${dl.file_name}`}>
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          {isCollapsed && (
-            <button onClick={() => setListExpanded(true)}
-              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-              展开更多（{hiddenFileCount} 项）
-            </button>
-          )}
-        </>
-      )}
-
-      {downloads.length === 0 && (
-        <div className="flex flex-col gap-1.5">
-          {displayFiles.map((f, i) => {
-            const ft = classifyFile(f.file_name);
-            return (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/8 bg-white/3">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm flex-shrink-0 text-white ${getFileExtClass(ft)}`}>
-                  {getFileIcon(ft)}
-                </div>
-                <span className="text-sm truncate flex-1 font-medium">{f.file_name}</span>
-                <span className={`font-tech text-[10px] ${s.tMuted}`}>{formatSize(f.file_size)}</span>
-              </div>
-            );
-          })}
-          {isCollapsed && (
-            <button onClick={() => setListExpanded(true)}
-              className={`w-full py-2 text-center font-tech text-[11px] tracking-widest ${s.tMuted} hover:text-yc-accent transition-colors`}>
-              展开更多（{hiddenFileCount} 项）
-            </button>
-          )}
-        </div>
-      )}
-    </>
+  const renderFileListContent = (variant: "desktop" | "mobile") => (
+    <ShareFileBrowser
+      files={effectiveFiles}
+      emptyDirs={share.empty_dirs}
+      downloadsReady={downloads.length > 0}
+      selectedIndex={selectedIdx}
+      onSelectFile={setSelectedIdx}
+      onDownloadFile={(file) => { void downloadOneFile(file); }}
+      formatSize={formatSize}
+      variant={variant}
+    />
   );
 
   const renderOverviewStats = () => (
@@ -1041,7 +1759,7 @@ export default function SharePage() {
         {/* Topbar */}
         <div className={`mb-4 grid gap-5 ${s.desktopTwoCol}`}>
           <div className="flex min-w-0 items-center gap-3 sm:gap-5">
-            <BrandLogo className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
+            <BrandLogo href="/" className="w-[112px] h-auto shrink-0 sm:w-[156px] lg:w-[168px]" />
             <div className="min-w-0 flex-1">
               <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-tech text-sm font-bold leading-none tracking-[0.03em] sm:text-base sm:tracking-[0.06em] ${s.tPrimary}`}>有人通过{BRAND_NAME}分享给你</p>
               <p className={`mt-2 truncate text-[11px] sm:text-[13px] ${s.tMuted}`}>{contentSummary}</p>
@@ -1061,8 +1779,17 @@ export default function SharePage() {
             <div className={s.stagePlayer}>
               {downloads.length > 0 && selectedFile ? (
                 <div key={`${selectedType}-${selectedIdx}`} className={s.stageContent}>
-                  {/* 视频路由：MKV / 需要SDP的mp4 / 正常mp4 */}
-                  {selectedType === "video" && (
+                  {downloadPreviewSuspended && downloadProgress ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-white/15 bg-white/6 shadow-[0_0_28px_rgba(255,138,61,0.18)]">
+                        <Download className="h-7 w-7 text-yc-accent" />
+                      </div>
+                      <div>
+                        <p className={`font-tech text-sm font-bold tracking-widest ${s.tSecondary}`}>正在下载，已暂停预览以节省内存</p>
+                        <p className={`mt-2 text-xs ${s.tMuted}`}>完成后会自动恢复当前文件预览。</p>
+                      </div>
+                    </div>
+                  ) : selectedType === "video" && (
                     isMkvFile(selectedFile) ? (
                       <MkvVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} debugLog={appendDebugLog} />
                     ) : needsSdpPlayer(selectedFile) ? (
@@ -1079,29 +1806,22 @@ export default function SharePage() {
                     )
                   )}
                   {/* 图片 */}
-                  {selectedType === "image" && isSafeUrl(selectedFile.download_url) && (
+                  {!downloadPreviewSuspended && selectedType === "image" && isSafeUrl(selectedFile.download_url) && (
                     <div className={s.imageStage}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={selectedFile.download_url} alt={selectedFile.file_name} className="max-w-full max-h-full object-contain rounded-lg" />
                     </div>
                   )}
                   {/* PDF */}
-                  {selectedType === "pdf" && (
+                  {!downloadPreviewSuspended && selectedType === "pdf" && (
                     <PdfPreview url={selectedFile.download_url} className={`w-full h-full ${s.pdfScroll}`} />
                   )}
                   {/* 音频 */}
-                  {selectedType === "audio" && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-yc-bg via-yc-mesh-1 to-yc-mesh-2">
-                      <div className="w-44 h-44 rounded-2xl bg-gradient-to-br from-yc-accent to-yc-accent-3 flex items-center justify-center text-6xl text-white shadow-[0_0_48px_rgba(255,138,61,0.5)]">♪</div>
-                      <p className={`font-tech font-bold tracking-widest ${s.tPrimary}`}>{selectedFile.file_name}</p>
-                      <p className={`text-xs ${s.tMuted}`}>{formatSize(selectedFile.file_size)}</p>
-                      <div className={s.audioWave}>
-                        {Array.from({ length: 24 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 0.06}s` }} />)}
-                      </div>
-                    </div>
+                  {!downloadPreviewSuspended && selectedType === "audio" && (
+                    <AudioPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
                   )}
                   {/* 文本 */}
-                  {selectedType === "text" && (
+                  {!downloadPreviewSuspended && selectedType === "text" && (
                     <div className={s.textScroll}>
                       <div className={s.textContent}>
                         <p className={`${s.tMuted} mb-2`}># {selectedFile.file_name}</p>
@@ -1111,7 +1831,7 @@ export default function SharePage() {
                     </div>
                   )}
                   {/* 其他 */}
-                  {selectedType === "other" && (
+                  {!downloadPreviewSuspended && selectedType === "other" && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                       <div className="w-20 h-20 rounded-2xl bg-white/6 border border-white/10 flex items-center justify-center text-3xl">⋯</div>
                       <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>{selectedFile.file_name}</p>
@@ -1147,11 +1867,13 @@ export default function SharePage() {
                       {Math.min(selectedIdx + 1, share.files.length)} / {share.files.length}
                     </span>
                   )}
-                  <button type="button" onClick={handleCopyLink}
-                    className={`${s.ghostBtn} h-9 w-9 flex items-center justify-center rounded-lg`}
-                    title="复制链接" aria-label="复制链接">
-                    <Copy className="w-4 h-4" />
-                  </button>
+                  <CopyLinkButton
+                    onCopy={handleCopyLink}
+                    iconOnly
+                    className="retro-icon-button h-9 w-9"
+                    iconClassName="w-4 h-4"
+                    title="复制链接"
+                  />
                 </div>
               </div>
             )}
@@ -1165,7 +1887,7 @@ export default function SharePage() {
                 <button onClick={handleDownloadAll} disabled={downloading}
                   className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                   <Package className="w-4 h-4" />
-                  {downloading ? "打包中…" : "整体打包下载"}
+                  {downloading ? batchDownloadBusyLabel : batchDownloadLabel}
                 </button>
               )}
               {isSingle && downloadState === "ready" && downloads[0] && (
@@ -1192,7 +1914,7 @@ export default function SharePage() {
                   <button onClick={handleDownloadAll} disabled={downloading}
                     className={`${s.glowBtn} min-w-0 w-full py-3.5 font-tech text-[11px] tracking-[0.08em] sm:text-xs sm:tracking-widest flex items-center justify-center gap-2`}>
                     <Package className="w-4 h-4 shrink-0" />
-                    <span className="truncate">整体打包下载</span>
+                    <span className="truncate">{downloading ? batchDownloadBusyLabel : batchDownloadLabel}</span>
                   </button>
                 </>
               )}
@@ -1204,29 +1926,30 @@ export default function SharePage() {
                 </button>
               )}
               {!selectedMeta && (
-                <button onClick={handleCopyLink}
-                  className={`${s.ghostBtn} col-span-2 w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
-                  <Copy className="w-4 h-4" /> 复制链接
-                </button>
+                <CopyLinkButton
+                  onCopy={handleCopyLink}
+                  className={`${s.ghostBtn} col-span-2 w-full py-3 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}
+                  iconClassName="w-4 h-4"
+                />
               )}
             </div>
 
             {/* 移动端：文件 / 概览 / 扫码选项卡 */}
             <div className={`${s.glass} p-3 sm:hidden`}>
-              <div role="tablist" aria-label="分享信息" className={`grid gap-1 rounded-xl border border-white/10 bg-white/6 p-1 ${isSingle ? "grid-cols-2" : "grid-cols-3"}`}>
+              <div role="tablist" aria-label="分享信息" className={`retro-segmented grid gap-1 ${isSingle ? "grid-cols-2" : "grid-cols-3"}`}>
                 {mobileTabs.map((tab) => {
                   const active = activeMobilePanel === tab.id;
                   return (
                     <button key={tab.id} type="button" role="tab" aria-selected={active}
                       onClick={() => setMobilePanel(tab.id)}
-                      className={`rounded-lg py-2 font-tech text-[11px] tracking-[0.12em] transition-all ${active ? "bg-yc-accent text-white shadow-[0_0_18px_rgba(255,138,61,0.35)]" : `${s.tMuted} hover:text-yc-accent`}`}>
+                      className="retro-segment-button py-2 font-tech text-[11px] tracking-[0.12em]">
                       {tab.label}
                     </button>
                   );
                 })}
               </div>
               <div role="tabpanel" className="mt-3">
-                {!isSingle && activeMobilePanel === "files" && renderFileListContent()}
+                {!isSingle && activeMobilePanel === "files" && renderFileListContent("mobile")}
                 {activeMobilePanel === "overview" && renderOverviewStats()}
                 {activeMobilePanel === "scan" && (
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_24px_rgba(255,138,61,0.08)]">
@@ -1238,7 +1961,7 @@ export default function SharePage() {
 
             {/* 桌面/平板：保持文件列表展开展示 */}
             {!isSingle && <div className={`${s.glass} hidden p-4 sm:block`}>
-              {renderFileListContent()}
+              {renderFileListContent("desktop")}
             </div>}
 
             {/* 桌面/平板：保持分享概览 + 扫码取件同屏展示 */}
@@ -1257,37 +1980,66 @@ export default function SharePage() {
 
             {/* 底部操作（举报 / 首页保持低调） */}
             <div className={`flex items-center justify-center gap-5 text-xs ${s.tMuted}`}>
-              <button onClick={() => setReportOpen(true)} disabled={reported} className="flex items-center gap-1 hover:text-red-400 transition-colors disabled:opacity-40"><Flag className="w-3 h-3" /> {reported ? "已举报" : "举报"}</button>
+              <button onClick={() => setReportOpen(true)} disabled={reported} className="retro-text-button retro-text-button-danger min-h-0 px-2 py-1 text-xs"><Flag className="w-3 h-3" /> {reported ? "已举报" : "举报"}</button>
               <a href="/" className="hover:text-yc-accent transition-colors">返回首页</a>
             </div>
           </aside>
         </div>
 
-        {/* 分片下载进度 */}
-        {chunkProgress && (
-          <div className={`${s.glass} mt-4 p-4`}>
-            <div className={`flex justify-between text-xs ${s.tSecondary} mb-2`}>
-              <span className="font-tech">下载中 · 分片 {chunkProgress.currentChunk + 1}/{chunkProgress.totalChunks}</span>
-              <span className="font-tech">{Math.round((chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100)}%</span>
-            </div>
-            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-yc-accent to-yc-accent-3 rounded-full transition-all duration-300"
-                style={{ width: `${(chunkProgress.downloadedBytes / chunkProgress.totalBytes) * 100}%` }} />
-            </div>
-            <p className={`font-tech text-[10px] ${s.tMuted} mt-1`}>{formatSize(chunkProgress.downloadedBytes)} / {formatSize(chunkProgress.totalBytes)}</p>
-          </div>
-        )}
-
         {/* 底部品牌 */}
         <FooterSlogan />
       </div>
+
+      {/* 智能下载进度：固定在视口，避免长文件列表把进度挤到页面底部 */}
+      {showDownloadHud && downloadProgress && (
+        <div
+          className={`${s.downloadHud} ${downloadTaskState === "completed" ? s.downloadHudComplete : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className={s.downloadHudVeil} />
+          <div className="relative grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2 pr-1">
+                <span className={s.downloadStatusPill}>{downloadTaskState === "completed" && <CheckCircle2 className="h-3 w-3" />}{downloadStatusLabel}</span>
+                <p className={`min-w-0 flex-1 truncate font-tech text-sm font-black tracking-wide ${s.tPrimary}`} title={downloadProgressName}>
+                  {downloadProgressName}
+                </p>
+              </div>
+              <div className={s.downloadProgressTrack} aria-hidden="true">
+                <div
+                  className={`${s.downloadProgressFill} ${downloadTaskState === "completed" ? s.downloadProgressFillComplete : ""}`}
+                  style={{ width: `${downloadTaskState === "completed" ? 100 : Math.max(downloadProgressRatio * 100, downloadProgressRatio > 0 ? 1.6 : 0)}%` }}
+                />
+              </div>
+              <div className={`mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 font-tech text-[10px] ${s.tMuted}`}>
+                <span>{formatSize(downloadProgress.downloadedBytes)} / {formatSize(downloadProgress.totalBytes)}</span>
+                <span>{downloadHintLabel}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className={`${s.downloadSideRail} ${downloadCancelArmed ? s.downloadSideRailArmed : ""}`}
+              onClick={handleDownloadRailAction}
+              aria-label={downloadActionLabel}
+            >
+              <div className={s.downloadMetrics}>
+                <strong>{downloadProgressPercentLabel}</strong>
+                <span>{downloadSpeedLabel}</span>
+              </div>
+              <span className={s.downloadCancelLabel}>{downloadActionLabel}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 举报 Modal */}
       {reportOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setReportOpen(false)} />
           <div className={`${s.glass} relative w-full max-w-sm p-6`}>
-            <button onClick={() => setReportOpen(false)} className={`absolute right-4 top-4 ${s.tMuted} hover:opacity-80`}><X className="h-5 w-5" /></button>
+            <button type="button" onClick={() => setReportOpen(false)} aria-label="关闭举报弹窗" className="retro-close-button absolute right-4 top-4"><X className="h-4 w-4" /></button>
             <h3 className={`font-tech text-sm tracking-widest font-bold mb-2 ${s.tPrimary}`}>举报分享</h3>
             <p className={`text-xs ${s.tMuted} mb-4`}>请选择举报原因。</p>
             <select value={reportReason} onChange={(e) => setReportReason(e.target.value)}

@@ -12,8 +12,11 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
@@ -21,6 +24,7 @@ import httpx
 from app.core.config import get_settings
 
 log = logging.getLogger(__name__)
+_SESSION_STATUS_LOCK = threading.Lock()
 
 # --- AWS Signature V4 (inline, 避免对 doubao-file-station 的运行时依赖) ---
 
@@ -126,6 +130,28 @@ _DEFAULT_FP = "verify_mlcfw5f7_TPq0YmFD_NrsC_4RuQ_BJPg_M5W7i58I7wV0"
 _BASE_URL = "https://www.doubao.com"
 
 
+def record_doubao_session_status(session_file: str | None, **updates: object) -> None:
+    """把豆包 session 探活状态写回本地 session 文件。"""
+    if not session_file or not updates:
+        return
+    path = Path(session_file)
+    if not path.exists():
+        return
+    try:
+        with _SESSION_STATUS_LOCK:
+            data = json.loads(path.read_text("utf-8"))
+            status = data.get("nyy_status")
+            if not isinstance(status, dict):
+                status = {}
+            status.update(updates)
+            data["nyy_status"] = status
+            tmp_path = path.with_name(f"{path.name}.tmp")
+            tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("record doubao session status failed: %s", exc)
+
+
 class DoubaoUploadClient:
     """封装豆包 TOS 上传三步流程（prepare / apply / commit）和下载 URL 获取。
 
@@ -138,12 +164,15 @@ class DoubaoUploadClient:
         device_id: str = _DEFAULT_DEVICE_ID,
         web_id: str = _DEFAULT_WEB_ID,
         fp: str = _DEFAULT_FP,
+        session_file: str | None = None,
     ) -> None:
         self.cookies = cookies
         self.device_id = device_id
         self.web_id = web_id
         self.fp = fp
+        self.session_file = session_file
         self._http: httpx.AsyncClient | None = None
+        self._last_login_heartbeat_at = 0.0
 
     async def start(self) -> None:
         self._http = httpx.AsyncClient(
@@ -195,20 +224,82 @@ class DoubaoUploadClient:
             "fp": self.fp,
         }
 
+    async def refresh_login_heartbeat(
+        self,
+        *,
+        force: bool = False,
+        min_interval_seconds: int = 600,
+    ) -> bool:
+        """刷新豆包 Web 登录态活跃时间，不刷新上传 STS。"""
+        now = time.monotonic()
+        if not force and now - self._last_login_heartbeat_at < min_interval_seconds:
+            return False
+        started_at = time.time()
+        params = {
+            "aid": "497858",
+            "scene": "polling",
+            "device_platform": "web",
+            "passport_jssdk_version": "1.0.0",
+        }
+        try:
+            resp = await self.http.get(f"{_BASE_URL}/passport/token/beat/web/?{urlencode(params)}")
+            try:
+                body = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                raise DoubaoClientError(f"token_beat 响应非 JSON: {resp.text[:200]}") from exc
+            data = body.get("data") if isinstance(body, dict) else None
+            if resp.status_code != 200 or not isinstance(data, dict) or data.get("error_code") != 0:
+                raise DoubaoClientError(f"token_beat failed: {body}")
+        except Exception as exc:  # noqa: BLE001
+            record_doubao_session_status(
+                self.session_file,
+                last_heartbeat_at=started_at,
+                last_heartbeat_error=str(exc)[:300],
+            )
+            raise
+        self._last_login_heartbeat_at = now
+        record_doubao_session_status(
+            self.session_file,
+            last_heartbeat_at=started_at,
+            last_heartbeat_success_at=time.time(),
+            last_heartbeat_error="",
+        )
+        return True
+
     async def _prepare_upload_auth(self) -> UploadAuthResult:
         """获取一组新的豆包上传 STS 授权。"""
+        try:
+            await self.refresh_login_heartbeat()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("doubao login heartbeat failed before prepare_upload: %s", exc)
+
+        started_at = time.time()
         params = self._security_params()
         prepare_url = f"{_BASE_URL}/alice/resource/prepare_upload?{urlencode(params)}"
-        resp = await self.http.post(
-            prepare_url,
-            json={"tenant_id": "5", "scene_id": "5", "resource_type": 1},
-        )
-        body = resp.json()
-        if body.get("code") != 0:
-            raise DoubaoClientError(f"prepare_upload failed: {body.get('msg', body)}")
+        try:
+            resp = await self.http.post(
+                prepare_url,
+                json={"tenant_id": "5", "scene_id": "5", "resource_type": 1},
+            )
+            body = resp.json()
+            if body.get("code") != 0:
+                raise DoubaoClientError(f"prepare_upload failed: {body.get('msg', body)}")
+            data = body["data"]
+            auth_token = data["upload_auth_token"]
+        except Exception as exc:  # noqa: BLE001
+            record_doubao_session_status(
+                self.session_file,
+                last_probe_at=started_at,
+                last_probe_error=str(exc)[:300],
+            )
+            raise
 
-        data = body["data"]
-        auth_token = data["upload_auth_token"]
+        record_doubao_session_status(
+            self.session_file,
+            last_probe_at=started_at,
+            last_probe_success_at=time.time(),
+            last_probe_error="",
+        )
         return UploadAuthResult(
             service_id=data["service_id"],
             access_key=auth_token["access_key"],
@@ -426,7 +517,106 @@ def create_doubao_client_from_session(session_file: str) -> DoubaoUploadClient:
         device_id=str(params.get("device_id") or _DEFAULT_DEVICE_ID),
         web_id=str(params.get("web_id") or _DEFAULT_WEB_ID),
         fp=str(params.get("fp") or _DEFAULT_FP),
+        session_file=str(path),
     )
+
+
+def _same_session_path(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    try:
+        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+    except Exception:
+        return left == right
+
+
+def _download_fallback_session_files() -> list[str]:
+    settings = get_settings()
+    candidates: list[str] = []
+
+    configured = settings.doubao_download_fallback_session_files.replace("\n", ",")
+    for raw_path in configured.split(","):
+        path = raw_path.strip()
+        if path:
+            candidates.append(path)
+
+    test_b_file = settings.project_root / ".doubao_session_test_b.json"
+    if test_b_file.exists():
+        candidates.append(str(test_b_file))
+
+    unique: list[str] = []
+    for path in candidates:
+        if _same_session_path(path, settings.doubao_session_file):
+            continue
+        if not Path(path).expanduser().exists():
+            continue
+        if any(_same_session_path(path, existing) for existing in unique):
+            continue
+        unique.append(path)
+    return unique
+
+
+class DoubaoDownloadUrlResolver:
+    """下载签名 URL resolver；生产 session 失败时尝试备用 session。"""
+
+    def __init__(self) -> None:
+        self._primary_client: DoubaoUploadClient | None = None
+        self._fallback_clients: dict[str, DoubaoUploadClient] = {}
+        self._failed_labels: set[str] = set()
+
+    async def close(self) -> None:
+        for client in self._fallback_clients.values():
+            await client.close()
+        self._fallback_clients.clear()
+
+    async def _get_primary_client(self) -> DoubaoUploadClient:
+        if self._primary_client is None:
+            self._primary_client = await get_doubao_client()
+        return self._primary_client
+
+    async def _get_fallback_client(self, session_file: str) -> DoubaoUploadClient:
+        client = self._fallback_clients.get(session_file)
+        if client is None:
+            client = create_doubao_client_from_session(session_file)
+            await client.start()
+            self._fallback_clients[session_file] = client
+        return client
+
+    async def get_download_url(self, uri: str, expire_seconds: int = 3600) -> str:
+        errors: list[str] = []
+        if "primary" not in self._failed_labels:
+            try:
+                client = await self._get_primary_client()
+                return await client.get_download_url(uri, expire_seconds=expire_seconds)
+            except Exception as exc:  # noqa: BLE001
+                self._failed_labels.add("primary")
+                errors.append(f"primary: {exc}")
+                log.warning("doubao primary download url failed for %s: %s", uri, exc)
+
+        for session_file in _download_fallback_session_files():
+            label = f"fallback:{session_file}"
+            if label in self._failed_labels:
+                continue
+            try:
+                client = await self._get_fallback_client(session_file)
+                url = await client.get_download_url(uri, expire_seconds=expire_seconds)
+                log.info("doubao fallback download url OK for %s via %s", uri, Path(session_file).name)
+                return url
+            except Exception as exc:  # noqa: BLE001
+                self._failed_labels.add(label)
+                errors.append(f"{Path(session_file).name}: {exc}")
+                log.warning("doubao fallback download url failed for %s via %s: %s", uri, session_file, exc)
+
+        detail = "; ".join(errors) if errors else "no available doubao session"
+        raise DoubaoClientError(f"get_download_url failed for all sessions: {detail}")
+
+
+async def get_doubao_download_url(uri: str, expire_seconds: int = 3600) -> str:
+    resolver = DoubaoDownloadUrlResolver()
+    try:
+        return await resolver.get_download_url(uri, expire_seconds=expire_seconds)
+    finally:
+        await resolver.close()
 
 
 # --- 全局单例（应用生命周期管理） ---

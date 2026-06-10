@@ -34,7 +34,7 @@ from app.schemas.file_request import (
     MessageResponse,
 )
 from app.services.app_config import get_quota_config
-from app.services.doubao_client import DoubaoClientError, get_doubao_client
+from app.services.doubao_client import DoubaoClientError, get_doubao_client, get_doubao_download_url
 from app.services.quota import QuotaService
 from app.utils.security import hash_secret, verify_secret
 from app.utils.short_code import gen_short_code
@@ -458,5 +458,4 @@ async def download_request_file(
     file = result.scalar_one_or_none()
     if not file:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
-    client = await get_doubao_client()
-    return FileRequestFileDownloadResponse(download_url=await client.get_download_url(file.tos_uri))
+    return FileRequestFileDownloadResponse(download_url=await get_doubao_download_url(file.tos_uri))

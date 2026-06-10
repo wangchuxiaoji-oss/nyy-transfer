@@ -43,14 +43,18 @@ async def lifespan(app: FastAPI):
         redis_client = None
     app.state.redis = redis_client
 
-    # --- Doubao client ---
+    # --- Doubao client / auto verify ---
+    from app.services.doubao_auto_verify import shutdown_doubao_auto_verifier, start_doubao_auto_verifier
     from app.services.doubao_client import shutdown_doubao_client
+
+    start_doubao_auto_verifier()
 
     yield
 
     # --- Shutdown ---
     if redis_client:
         await redis_client.aclose()
+    await shutdown_doubao_auto_verifier()
     await shutdown_doubao_client()
     slog.info("nyy stopped")
 

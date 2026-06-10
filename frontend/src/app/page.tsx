@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { User, FolderOpen, Upload, Inbox, LogOut, ChevronDown } from "lucide-react";
+import { User, FolderOpen, Upload, Inbox, LogOut, ChevronDown, Shield } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { FileUploader } from "@/components/file-uploader";
@@ -200,10 +200,6 @@ export default function Home() {
     }
   };
 
-  const handleRequestRevokeGuest = (share: GuestShareInfo) => {
-    setRevokeTarget(share);
-  };
-
   const handleConfirmRevokeGuest = async () => {
     if (!revokeTarget) return;
     setRevokeLoading(true);
@@ -305,27 +301,42 @@ export default function Home() {
           {user ? (
             <>
               <div className="hidden items-center gap-3 sm:flex">
-                <ThemeToggle className="retro-nav-button" />
+                <ThemeToggle />
                 <Link
                   href="/my"
-                  className="retro-nav-button rounded-full"
+                  className="retro-nav-button"
                 >
                   <FolderOpen size={16} />
                   我的分享
                 </Link>
+                {user.is_admin && (
+                  <Link
+                    href="/admin"
+                    className="retro-nav-button"
+                  >
+                    <Shield size={16} />
+                    后台
+                  </Link>
+                )}
                 <span className="type-body-sm max-w-[11rem] truncate retro-text">{user.email}</span>
                 <button
                   onClick={handleLogout}
-                  className="retro-nav-button rounded-full"
+                  className="retro-nav-button"
                 >
                   退出
                 </button>
               </div>
               <div className="flex shrink-0 items-center gap-2 sm:hidden">
-                <Link href="/my" className="retro-nav-button rounded-full px-3">
+                <Link href="/my" className="retro-nav-button px-3">
                   <FolderOpen size={16} />
                   工作台
                 </Link>
+                {user.is_admin && (
+                  <Link href="/admin" className="retro-nav-button px-3">
+                    <Shield size={16} />
+                    后台
+                  </Link>
+                )}
                 <div ref={accountMenuRef} className="relative">
                   <button
                     type="button"
@@ -333,7 +344,7 @@ export default function Home() {
                     aria-expanded={accountMenuOpen}
                     aria-label="打开账号菜单"
                     onClick={() => setAccountMenuOpen((open) => !open)}
-                    className="retro-nav-button h-11 rounded-full px-2.5"
+                    className="retro-nav-button h-11 px-2.5"
                   >
                     <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-nyy-500 to-[#e0652a] text-sm font-bold text-white shadow-[0_8px_22px_rgba(255,138,61,0.24)]">
                       {user.email.slice(0, 1).toUpperCase()}
@@ -349,7 +360,7 @@ export default function Home() {
                       <div className="my-1 h-px bg-black/8 dark:bg-white/10" />
                       <div className="flex items-center justify-between gap-3 rounded-2xl px-3 py-2">
                         <span className="type-body-sm retro-text">切换主题</span>
-                        <ThemeToggle className="h-10 min-h-[40px] w-10 min-w-[40px] rounded-full" />
+                        <ThemeToggle className="h-10 min-h-[40px] w-10 min-w-[40px]" />
                       </div>
                       <button
                         type="button"
@@ -367,10 +378,10 @@ export default function Home() {
             </>
           ) : (
             <div className="flex items-center gap-2">
-              <ThemeToggle className="retro-nav-button" />
+              <ThemeToggle />
               <button
                 onClick={() => setAuthOpen(true)}
-                className="retro-btn-secondary rounded-full"
+                className="retro-btn-secondary"
               >
                 <User size={16} />
                 登录
@@ -396,11 +407,14 @@ export default function Home() {
       <section className="glass-card w-full max-w-3xl">
         {/* Tab header */}
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
-            <div className="retro-tabbar relative grid grid-cols-2 gap-1" role="tablist" aria-label="选择文件操作类型">
+            <div className="retro-segmented relative grid grid-cols-2 gap-1" role="tablist" aria-label="选择文件操作类型">
             {/* Sliding pill indicator */}
             <motion.div
-              className="absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-xl bg-gradient-to-br from-[#FF8A3D] to-[#e0652a] shadow-[0_2px_16px_rgba(255,138,61,0.35)] will-change-transform"
-              animate={{ x: mode === "send" ? 0 : "calc(100% + 4px)" }}
+              aria-hidden="true"
+              data-testid="home-mode-indicator"
+              className="pointer-events-none absolute inset-y-1 left-1 rounded-xl bg-gradient-to-br from-[#FF8A3D] to-[#e0652a] shadow-[0_2px_16px_rgba(255,138,61,0.35)] will-change-transform"
+              style={{ width: "calc(50% - 0.375rem)" }}
+              animate={{ x: mode === "send" ? 0 : "calc(100% + 0.25rem)" }}
               transition={{ type: "spring", stiffness: 380, damping: 32 }}
             />
 
@@ -410,7 +424,7 @@ export default function Home() {
               aria-selected={mode === "send"}
               aria-controls="send-panel"
               onClick={() => setMode("send")}
-              className="relative z-10 min-h-[56px] rounded-xl px-4 py-2.5 text-center"
+              className="retro-segment-button relative z-10 min-h-[56px] px-4 py-2.5"
             >
               <span
                 className={`type-action flex items-center justify-center gap-2 font-semibold transition-colors duration-200 ${mode === "send" ? "text-white" : "text-gray-600 dark:text-gray-400"}`}
@@ -430,7 +444,7 @@ export default function Home() {
               aria-selected={mode === "receive"}
               aria-controls="receive-panel"
               onClick={() => setMode("receive")}
-              className="relative z-10 min-h-[56px] rounded-xl px-4 py-2.5 text-center"
+              className="retro-segment-button relative z-10 min-h-[56px] px-4 py-2.5"
             >
               <span
                 className={`type-action flex items-center justify-center gap-2 font-semibold transition-colors duration-200 ${mode === "receive" ? "text-white" : "text-gray-600 dark:text-gray-400"}`}
@@ -487,10 +501,10 @@ export default function Home() {
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="type-caption font-semibold text-nyy-900 dark:text-nyy-200">上传 Debug 日志 · {debugEntries.length}</p>
             <div className="flex gap-2">
-              <button onClick={handleCopyDebugLogs} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+              <button onClick={handleCopyDebugLogs} className="retro-text-button min-h-0 px-2 py-1 type-caption">
                 {debugCopied ? "已复制文本" : "复制文本"}
               </button>
-              <button onClick={handleCopyDebugJson} className="type-caption rounded-lg border border-nyy-300 px-2 py-1 text-nyy-800 dark:border-nyy-700 dark:text-nyy-300">
+              <button onClick={handleCopyDebugJson} className="retro-text-button min-h-0 px-2 py-1 type-caption">
                 复制 JSON
               </button>
             </div>
@@ -503,29 +517,27 @@ export default function Home() {
 
       {/* Guest shares management */}
       {!user && guestShares.length > 0 && (
-        <section className="retro-panel mt-6 w-full max-w-3xl overflow-hidden p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="retro-kicker">本设备的临时分享</p>
-              <h2 className="retro-title mt-1 text-lg">刚刚创建的链接都在这里</h2>
-              <p className="type-body-sm mt-1 retro-text">只保存在当前浏览器；复制、查看二维码或撤销都可以在这里完成。</p>
+        <section className="retro-panel mt-5 w-full max-w-3xl overflow-hidden p-3 sm:p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold leading-6 text-[color:var(--yc-text)]">刚刚创建的链接</h2>
+              <p className="mt-0.5 text-sm leading-5 text-[color:var(--yc-text-t)]">本浏览器保留 · {guestShares.length} 个</p>
             </div>
             <button
               type="button"
               onClick={() => setAuthOpen(true)}
-              className="retro-btn-secondary min-h-[40px] shrink-0 px-3 type-caption sm:text-sm sm:leading-5"
+              className="retro-btn-secondary min-h-[34px] shrink-0 px-2.5 text-xs sm:min-h-[36px]"
             >
-              登录后跨设备管理
+              登录后管理
             </button>
           </div>
-          <div className="mt-4 space-y-3">
+          <div className="mt-3 space-y-2">
             {guestShares.map((s) => (
               <GuestShareCard
                 key={s.code}
                 share={s}
                 onCopy={(share) => copyText(share.url)}
                 onOpenDetail={setDetailShare}
-                onRevoke={handleRequestRevokeGuest}
               />
             ))}
           </div>
@@ -538,6 +550,7 @@ export default function Home() {
           share={detailShare}
           open={!!detailShare}
           onClose={() => setDetailShare(null)}
+          onCopy={copyText}
           onDelete={handleDetailRevokeGuest}
           canDelete={detailShare.has_revoke_token}
         />

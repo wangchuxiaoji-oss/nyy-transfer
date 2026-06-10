@@ -12,7 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,9 @@ from app.schemas.share import (
     ShareVerifyRequest,
     ShareVerifyResponse,
 )
-from app.services.doubao_client import DoubaoClientError, get_doubao_client
+from app.schemas.admin import DownloadConfigResponse
+from app.services.doubao_client import DoubaoClientError, DoubaoDownloadUrlResolver
+from app.services.app_config import get_download_config
 from app.utils.security import verify_secret
 
 log = logging.getLogger(__name__)
@@ -82,7 +84,10 @@ def _public_media_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | 
     return result
 
 
-async def _metadata_with_signed_assets(metadata: dict[str, Any] | None, client) -> dict[str, Any] | None:
+async def _metadata_with_signed_assets(
+    metadata: dict[str, Any] | None,
+    resolver: DoubaoDownloadUrlResolver,
+) -> dict[str, Any] | None:
     """为下载响应里的播放 sidecar 签发临时 URL。"""
     if not metadata:
         return metadata
@@ -98,7 +103,7 @@ async def _metadata_with_signed_assets(metadata: dict[str, Any] | None, client) 
         signed = deepcopy(asset)
         store_uri = signed.get("store_uri")
         if isinstance(store_uri, str) and store_uri:
-            signed["download_url"] = await client.get_download_url(store_uri, expire_seconds=86400)
+            signed["download_url"] = await resolver.get_download_url(store_uri, expire_seconds=86400)
             signed.pop("store_uri", None)
         signed_assets.append(signed)
     result["playback_assets"] = signed_assets
@@ -123,6 +128,15 @@ class GuestSharesMineRequest(BaseModel):
     shares: list[GuestShareReference] = Field(default_factory=list, max_length=50)
 
 
+@router.get("/download-config", response_model=DownloadConfigResponse, summary="获取下载行为配置")
+async def get_public_download_config():
+    """分享页读取公开下载行为配置，不包含敏感信息。"""
+    from app.db.session import get_session_factory
+
+    async with get_session_factory()() as session:
+        return DownloadConfigResponse(**await get_download_config(session))
+
+
 async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
     """按短码查 Share + files，不存在 / 已撤销 / 已过期则 404。"""
     stmt = (
@@ -143,73 +157,72 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
 
 async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[ShareFileDownload]:
     """为所有逻辑文件获取临时下载 URL。"""
-    client = None
+    resolver = DoubaoDownloadUrlResolver()
 
-    results: list[ShareFileDownload] = []
-    for logical_file in sorted(logical_files, key=lambda item: item.sort_index):
-        chunks_sorted = sorted(logical_file.files, key=lambda item: item.chunk_index)
-        if not chunks_sorted:
-            continue
+    try:
+        results: list[ShareFileDownload] = []
+        for logical_file in sorted(logical_files, key=lambda item: item.sort_index):
+            chunks_sorted = sorted(logical_file.files, key=lambda item: item.chunk_index)
+            if not chunks_sorted:
+                continue
 
-        if len(chunks_sorted) == 1 and logical_file.chunk_total == 1:
-            chunk = chunks_sorted[0]
-            if chunk.tos_uri.startswith(_EMPTY_URI_PREFIX):
+            if len(chunks_sorted) == 1 and logical_file.chunk_total == 1:
+                chunk = chunks_sorted[0]
+                if chunk.tos_uri.startswith(_EMPTY_URI_PREFIX):
+                    results.append(ShareFileDownload(
+                        file_name=logical_file.original_name,
+                        file_size=logical_file.size,
+                        content_type=logical_file.content_type or "",
+                        is_chunked=False,
+                        download_url=_EMPTY_FILE_DATA_URL,
+                        chunks=[],
+                        media_metadata=logical_file.media_metadata,
+                    ))
+                    continue
+
+                try:
+                    url = await resolver.get_download_url(chunk.tos_uri, expire_seconds=86400)
+                    media_metadata = await _metadata_with_signed_assets(logical_file.media_metadata, resolver)
+                except DoubaoClientError as e:
+                    log.error("get_download_url failed for %s: %s", chunk.tos_uri, e)
+                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
                 results.append(ShareFileDownload(
                     file_name=logical_file.original_name,
                     file_size=logical_file.size,
                     content_type=logical_file.content_type or "",
                     is_chunked=False,
-                    download_url=_EMPTY_FILE_DATA_URL,
+                    download_url=url,
                     chunks=[],
-                    media_metadata=logical_file.media_metadata,
+                    media_metadata=media_metadata,
                 ))
                 continue
 
-            if client is None:
-                client = await get_doubao_client()
-            try:
-                url = await client.get_download_url(chunk.tos_uri, expire_seconds=86400)
-            except DoubaoClientError as e:
-                log.error("get_download_url failed for %s: %s", chunk.tos_uri, e)
-                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
-            media_metadata = await _metadata_with_signed_assets(logical_file.media_metadata, client)
+            chunk_downloads: list[ChunkDownloadInfo] = []
+            for c in chunks_sorted:
+                try:
+                    url = await resolver.get_download_url(c.tos_uri, expire_seconds=86400)
+                except DoubaoClientError as e:
+                    log.error("get_download_url failed for chunk %s: %s", c.tos_uri, e)
+                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
+                chunk_downloads.append(ChunkDownloadInfo(
+                    index=c.chunk_index,
+                    size=c.size,
+                    download_url=url,
+                ))
+
             results.append(ShareFileDownload(
                 file_name=logical_file.original_name,
                 file_size=logical_file.size,
                 content_type=logical_file.content_type or "",
-                is_chunked=False,
-                download_url=url,
-                chunks=[],
-                media_metadata=media_metadata,
-            ))
-            continue
-
-        chunk_downloads: list[ChunkDownloadInfo] = []
-        for c in chunks_sorted:
-            if client is None:
-                client = await get_doubao_client()
-            try:
-                url = await client.get_download_url(c.tos_uri, expire_seconds=86400)
-            except DoubaoClientError as e:
-                log.error("get_download_url failed for chunk %s: %s", c.tos_uri, e)
-                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
-            chunk_downloads.append(ChunkDownloadInfo(
-                index=c.chunk_index,
-                size=c.size,
-                download_url=url,
+                is_chunked=True,
+                download_url="",
+                chunks=chunk_downloads,
+                media_metadata=await _metadata_with_signed_assets(logical_file.media_metadata, resolver),
             ))
 
-        results.append(ShareFileDownload(
-            file_name=logical_file.original_name,
-            file_size=logical_file.size,
-            content_type=logical_file.content_type or "",
-            is_chunked=True,
-            download_url="",
-            chunks=chunk_downloads,
-            media_metadata=await _metadata_with_signed_assets(logical_file.media_metadata, client),
-        ))
-
-    return results
+        return results
+    finally:
+        await resolver.close()
 
 
 def _aggregate_file_info(logical_files: list[ShareLogicalFile]) -> list[ShareFileInfo]:

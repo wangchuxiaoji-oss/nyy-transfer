@@ -877,7 +877,7 @@ export default function Ac3LabPage() {
       <div className="nyy-product-content mx-auto max-w-5xl space-y-6">
         <header className="retro-panel-strong flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
-            <BrandLogo className="h-auto w-32" />
+            <BrandLogo href="/" className="h-auto w-32" />
             <div>
               <h1 className="type-title">AC-3 Frontend Lab</h1>
               <p className="type-body-sm retro-text">源：{code} · Phase 0/1 能力检测与片源解析</p>
@@ -1059,7 +1059,7 @@ export default function Ac3LabPage() {
                 <button
                   onClick={() => runDecodeAndPlaySample(point)}
                   disabled={decodeLoading !== null}
-                  className="min-h-[44px] rounded-xl border border-nyy-300 px-4 text-sm font-medium text-nyy-700 disabled:opacity-50 dark:border-nyy-700 dark:text-nyy-300"
+                  className="retro-btn-secondary min-h-[44px] px-4 text-sm"
                 >
                   试听
                 </button>
@@ -1083,7 +1083,7 @@ export default function Ac3LabPage() {
                   {test.status === "ok" && (
                     <button
                       onClick={() => playDecodedSample(test.targetSec)}
-                      className="retro-btn-secondary mt-2 min-h-[36px] rounded-lg px-3 text-xs"
+                      className="retro-btn-secondary mt-2 min-h-[36px] px-3 text-xs"
                     >
                       播放该样本
                     </button>

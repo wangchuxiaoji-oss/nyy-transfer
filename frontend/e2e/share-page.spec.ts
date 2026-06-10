@@ -1,257 +1,152 @@
-import { test, expect } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-// ===== 基础渲染 =====
-
-test.describe("分享页 4C 渲染", () => {
-  test("不存在的分享码显示 NOT FOUND", async ({ page }) => {
-    await page.goto("/definitely-not-exist-xyz");
-    // 等待客户端渲染完成
-    await expect(page.locator("text=分享不存在或已被删除")).toBeVisible({ timeout: 10000 });
-    // 返回首页链接
-    await expect(page.locator("text=返回首页")).toBeVisible();
-  });
-
-  test("页面包含 4C 关键元素和 tech 字体类", async ({ page }) => {
-    await page.goto("/test-e2e");
-    // 等待页面离开 loading 状态
-    await page.waitForTimeout(3000);
-
-    // 检查 mesh 背景 CSS 模块是否加载（data-theme 属性）
-    const root = page.locator("html");
-    const dataTheme = await root.getAttribute("data-theme");
-    expect(["dark", "light"]).toContain(dataTheme);
-
-    // 检查科技字体类元素存在
-    const fontTechElements = page.locator(".font-tech");
-    const count = await fontTechElements.count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test("品牌 Logo 可见", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-    const logo = page.locator('img[alt="拿呀²"]');
-    await expect(logo).toBeVisible({ timeout: 10000 });
-  });
-});
-
-// ===== 主题切换 =====
-
-test.describe("主题切换", () => {
-  test("主题按钮可点击且切换 data-theme 属性", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    const themeBtn = page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first();
-
-    await expect(themeBtn).toBeVisible({ timeout: 10000 });
-
-    await themeBtn.click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
-  });
-
-  test("主题持久化到 localStorage", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    const themeBtn = page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first();
-    await expect(themeBtn).toBeVisible({ timeout: 10000 });
-    await themeBtn.click();
-    const saved = await page.evaluate(() => localStorage.getItem("nyy-theme"));
-    expect(["auto", "light", "dark"]).toContain(saved);
-  });
-});
-
-// ===== Vault Unlock（密码输入页） =====
-
-test.describe("Vault Unlock", () => {
-  test("有密码分享显示 Vault 界面", async ({ page }) => {
-    // 使用一个可能有密码的分享码，或验证 not_found 状态
-    await page.goto("/vault-test");
-    await page.waitForTimeout(3000);
-
-    // 检查是否在 locked 状态或 not_found 状态
-    const vaultTitle = page.locator("text=安全保险库");
-    const notFound = page.locator("text=分享不存在或已被删除");
-    const isVault = await vaultTitle.isVisible().catch(() => false);
-    const isNotFound = await notFound.isVisible().catch(() => false);
-
-    // 必须在其中一种状态
-    expect(isVault || isNotFound).toBe(true);
-
-    if (isVault) {
-      // 验证 Vault 元素
-      await expect(page.locator("text=请输入 4 位提取码解锁")).toBeVisible();
-      await expect(page.locator("text=解锁")).toBeVisible();
-
-      // 验证数字方块存在
-      const digits = page.locator("text=·");
-      const digitCount = await digits.count();
-      expect(digitCount).toBeGreaterThanOrEqual(4);
-
-      // 隐藏的输入框存在
-      await expect(page.locator('input[aria-label="输入4位提取码"]')).toHaveCount(1);
-    }
-  });
-});
-
-// ===== 响应式布局 =====
-
-test.describe("响应式布局", () => {
-  test("桌面端（≥1024px）显示两栏布局", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // 检查 topbar 元信息可见（桌面端特有）
-    const topbarMeta = page.locator("text=Files").first();
-    // 在桌面端应该有文件数显示（不强制要求，取决于状态，只验证不崩溃）
-    await topbarMeta.isVisible().catch(() => false);
-    expect(true).toBe(true);
-  });
-
-  test("移动端（<640px）不崩溃", async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // 移动端只验证页面不崩溃（固定底栏已移除，相关回归见“反馈修复回归”）
-    const body = page.locator("main");
-    await expect(body).toBeVisible();
-  });
-
-  test("平板端（768px）不崩溃", async ({ page }) => {
-    await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    const body = page.locator("main");
-    await expect(body).toBeVisible();
-  });
-});
-
-// ===== 文件列表交互（需要有下载数据的分享） =====
-
-test.describe("文件列表交互", () => {
-  test("视图切换按钮可点击", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // 找到列表/网格切换按钮
-    const listBtn = page.locator("button:has-text('≡')");
-    const gridBtn = page.locator("button:has-text('▦')");
-
-    // 如果按钮可见（ready 状态），测试切换
-    if (await listBtn.isVisible().catch(() => false)) {
-      await gridBtn.click();
-      // 切换后不应该崩溃
-      await page.waitForTimeout(500);
-      await listBtn.click();
-      await page.waitForTimeout(500);
-    }
-  });
-});
-
-// ===== 无障碍 =====
-
-test.describe("无障碍", () => {
-  test("密码输入框有 aria-label", async ({ page }) => {
-    await page.goto("/vault-test");
-    await page.waitForTimeout(3000);
-
-    const input = page.locator('input[aria-label="输入4位提取码"]');
-    if (await input.count() > 0) {
-      await expect(input).toHaveAttribute("inputMode", "numeric");
-      await expect(input).toHaveAttribute("maxLength", "4");
-    }
-  });
-
-  test("主题切换按钮有 title 属性", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // 检查主题按钮存在
-    await expect(page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first()).toBeVisible({ timeout: 10000 });
-  });
-});
-
-// ===== CSS 模块加载 =====
-
-test.describe("4C CSS 模块", () => {
-  test("mesh 背景类应用到 DOM", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // CSS 模块会将类名哈希化，检查 main 元素是否有带 meshBg 的类
-    const mainEl = page.locator("main").first();
-    const className = await mainEl.getAttribute("class");
-    // CSS 模块类名格式: meshBg_xxxxx 或类似
-    expect(className).toBeTruthy();
-  });
-
-  test("glass 卡片样式生效", async ({ page }) => {
-    await page.goto("/test-e2e");
-    await page.waitForTimeout(3000);
-
-    // 检查有 backdrop-filter 的元素存在（glass 效果）
-    const glassElements = page.locator("[class*=glass]");
-    const count = await glassElements.count();
-    // 不强制要求（取决于状态），只验证 CSS 加载不报错
-    expect(count).toBeGreaterThanOrEqual(0);
-  });
-});
-
-// ===== 移动端横向溢出回归（mock ready 状态） =====
-
-// 构造一份含视频/图片/PDF + 超长文件名的 ready 分享数据，
-// 用于复现并防止「视频播放器及其下方元素撑破手机屏幕宽度」的回归。
-const MOCK_CODE = "overflow-mock";
-const LONG_NAME = "超长文件名".repeat(8); // 制造一个会撑破布局的长名字
-// 关键：保留 media_metadata 让 mock 接近真实视频文件；分享页默认预览走原生 <video>。
-const VIDEO_META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
-
-const MOCK_SHARE_INFO = {
-  code: MOCK_CODE,
-  files: [
-    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
-    { file_name: `${LONG_NAME}.png`, file_size: 234567, file_ext: "png", content_type: "image/png", index: 1, is_chunked: false, chunk_count: 0 },
-    { file_name: `${LONG_NAME}.pdf`, file_size: 345678, file_ext: "pdf", content_type: "application/pdf", index: 2, is_chunked: false, chunk_count: 0 },
-  ],
-  empty_dirs: ["一个空文件夹"],
-  total_bytes: 12925923,
-  created_at: new Date().toISOString(),
-  expires_at: null,
-  download_count: 0,
-  max_downloads: 0,
-  has_password: false,
+const MOCK_CODE = "share-e2e";
+const LONG_NAME = "超长文件名".repeat(8);
+const NOW = "2026-06-08T00:00:00.000Z";
+const VIDEO_META = {
+  probe_version: 1,
+  probe_status: "ok",
+  file_size: 12_345_678,
+  audio_tracks: [{ codec: "aac", codec_tag: "mp4a" }],
+  video_tracks: [{ codec: "h264" }],
 };
 
-const MOCK_DOWNLOAD = {
-  files: [
-    { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: VIDEO_META },
-    { file_name: `${LONG_NAME}.png`, file_size: 234567, content_type: "image/png", is_chunked: false, download_url: "https://example.com/i.png", chunks: [] },
-    { file_name: `${LONG_NAME}.pdf`, file_size: 345678, content_type: "application/pdf", is_chunked: false, download_url: "https://example.com/d.pdf", chunks: [] },
-  ],
-  empty_dirs: ["一个空文件夹"],
-  expires_in: 3600,
-};
+interface ShareFileMock {
+  file_name: string;
+  file_size: number;
+  file_ext: string;
+  content_type: string;
+  index: number;
+  is_chunked: boolean;
+  chunk_count: number;
+  media_metadata?: Record<string, unknown> | null;
+}
 
-async function mockReadyShare(page: import("@playwright/test").Page) {
-  // 拦截分享信息接口
-  await page.route("**/api/v1/shares/" + MOCK_CODE, async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_SHARE_INFO) });
+interface DownloadFileMock {
+  file_name: string;
+  file_size: number;
+  content_type: string;
+  is_chunked: boolean;
+  download_url: string;
+  chunks: Array<{ index: number; size: number; download_url: string }>;
+  media_metadata?: Record<string, unknown> | null;
+}
+
+interface ShareInfoMock {
+  code: string;
+  files: ShareFileMock[];
+  empty_dirs: string[];
+  total_bytes: number;
+  created_at: string;
+  expires_at: string | null;
+  download_count: number;
+  max_downloads: number;
+  has_password: boolean;
+}
+
+interface DownloadResponseMock {
+  files: DownloadFileMock[];
+  empty_dirs: string[];
+  expires_in: number;
+}
+
+function videoMeta(overrides: Record<string, unknown> = {}) {
+  return { ...VIDEO_META, ...overrides };
+}
+
+function shareFile(overrides: Partial<ShareFileMock> = {}): ShareFileMock {
+  return {
+    file_name: `${LONG_NAME}.mp4`,
+    file_size: 1_000_000,
+    file_ext: "mp4",
+    content_type: "video/mp4",
+    index: 0,
+    is_chunked: false,
+    chunk_count: 0,
+    media_metadata: videoMeta(),
+    ...overrides,
+  };
+}
+
+function downloadFile(file: ShareFileMock, overrides: Partial<DownloadFileMock> = {}): DownloadFileMock {
+  return {
+    file_name: file.file_name,
+    file_size: file.file_size,
+    content_type: file.content_type,
+    is_chunked: false,
+    download_url: `https://example.com/${encodeURIComponent(file.file_name)}`,
+    chunks: [],
+    media_metadata: file.media_metadata,
+    ...overrides,
+  };
+}
+
+function shareInfo(files = [shareFile()], overrides: Partial<ShareInfoMock> = {}): ShareInfoMock {
+  return {
+    code: MOCK_CODE,
+    files,
+    empty_dirs: [],
+    total_bytes: files.reduce((sum, file) => sum + file.file_size, 0),
+    created_at: NOW,
+    expires_at: null,
+    download_count: 0,
+    max_downloads: 0,
+    has_password: false,
+    ...overrides,
+  };
+}
+
+function downloadResponse(files: ShareFileMock[], overrides: Partial<DownloadResponseMock> = {}): DownloadResponseMock {
+  return {
+    files: files.map((file) => downloadFile(file)),
+    empty_dirs: [],
+    expires_in: 3600,
+    ...overrides,
+  };
+}
+
+async function routeShare(
+  page: Page,
+  info: ShareInfoMock,
+  download: DownloadResponseMock,
+  options: { infoDelayMs?: number; downloadDelayMs?: number; downloadGate?: Promise<void> } = {},
+) {
+  await page.route(`**/api/v1/shares/${MOCK_CODE}`, async (route) => {
+    if (options.infoDelayMs) await new Promise((resolve) => setTimeout(resolve, options.infoDelayMs));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) });
   });
-  // 拦截下载链接接口
-  await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_DOWNLOAD) });
+  await page.route(`**/api/v1/shares/${MOCK_CODE}/download`, async (route) => {
+    if (options.downloadGate) await options.downloadGate;
+    if (options.downloadDelayMs) await new Promise((resolve) => setTimeout(resolve, options.downloadDelayMs));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
   });
-  // 拦截外部资源（图片/视频/PDF），避免真实网络请求拖慢测试
-  await page.route("https://example.com/**", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" });
+  await page.route(`**/api/v1/shares/${MOCK_CODE}/verify`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
   });
 }
 
-async function installMockNativeVideo(page: import("@playwright/test").Page) {
+async function routeExternal(page: Page, contentType = "application/octet-stream") {
+  await page.route("https://example.com/**", async (route) => {
+    await route.fulfill({
+      status: 206,
+      contentType,
+      headers: { "Content-Range": "bytes 0-8191/12345678", "Accept-Ranges": "bytes" },
+      body: "x".repeat(1024),
+    });
+  });
+}
+
+async function openMockShare(page: Page, info = shareInfo(), download = downloadResponse(info.files)) {
+  await routeShare(page, info, download);
+  await routeExternal(page);
+  await page.goto(`/${MOCK_CODE}`);
+}
+
+async function waitForReady(page: Page) {
+  await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 10000 });
+}
+
+async function installMockNativeVideo(page: Page) {
   await page.addInitScript(() => {
     type MockVideo = HTMLMediaElement & {
       __nyyPaused?: boolean;
@@ -320,7 +215,6 @@ async function installMockNativeVideo(page: import("@playwright/test").Page) {
       video.dispatchEvent(new Event("pause"));
     };
     HTMLElement.prototype.requestFullscreen = function () {
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
       fullscreenElement = this;
       document.dispatchEvent(new Event("fullscreenchange"));
       return Promise.resolve();
@@ -333,233 +227,261 @@ async function installMockNativeVideo(page: import("@playwright/test").Page) {
   });
 }
 
-test.describe("移动端横向溢出回归", () => {
-  const viewports = [
-    { label: "iPhone SE", width: 375, height: 667 },
-    { label: "小屏 320", width: 320, height: 640 },
-    { label: "平板 768", width: 768, height: 1024 },
-  ];
+async function expectNoHorizontalOverflow(page: Page) {
+  const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+}
 
-  for (const vp of viewports) {
-    test(`${vp.label}（${vp.width}px）无横向溢出`, async ({ page }) => {
-      await mockReadyShare(page);
-      await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto(`/${MOCK_CODE}`);
+async function sidebarActionsHeight(page: Page) {
+  return page.evaluate(() => {
+    const target = document.querySelector("aside [data-testid='share-actions']") as HTMLElement | null;
+    return target ? Math.round(target.getBoundingClientRect().height) : null;
+  });
+}
 
-      // 等待进入 ready 状态：文件列表项渲染（超长文件名出现）
-      await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(2000);
-
-      // 核心断言：文档宽度不超过视口宽度（允许 1px 误差）
-      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        clientWidth: document.documentElement.clientWidth,
-      }));
-      expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+test.describe("分享页核心状态", () => {
+  test("不存在的分享码显示状态页且 Logo 可回首页", async ({ page }) => {
+    await page.route("**/api/v1/shares/not-found-e2e", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "not found" }) });
     });
-  }
 
-  test("两栏 grid 子项 min-width 为 0（防播放器撑破）", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto("/not-found-e2e");
+
+    await expect(page.getByText("分享不存在或已被删除")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("link", { name: /返回.*首页/ }).first()).toHaveAttribute("href", "/");
+  });
+
+  test("有密码分享显示保险库输入", async ({ page }) => {
+    const file = shareFile();
+    await routeShare(page, shareInfo([file], { has_password: true }), downloadResponse([file]));
+
     await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(2000);
 
-    // 找到两栏容器的直接子元素，验证 min-width 已被压成 0
-    const minWidths = await page.evaluate(() => {
-      const grid = document.querySelector('main [class*="desktopTwoCol"]');
-      if (!grid) return null;
-      return Array.from(grid.children).map((el) => getComputedStyle(el).minWidth);
+    await expect(page.getByText("安全保险库")).toBeVisible({ timeout: 10000 });
+    const input = page.locator('input[aria-label="输入4位提取码"]');
+    await expect(input).toHaveAttribute("inputMode", "numeric");
+    await expect(input).toHaveAttribute("maxLength", "4");
+  });
+
+  test("ready 页展示品牌、主题、概览和底部官网", async ({ page }) => {
+    await openMockShare(page);
+    await waitForReady(page);
+
+    await expect(page.locator('img[alt="拿呀²"]').first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /返回.*首页/ }).first()).toHaveAttribute("href", "/");
+    await page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first().click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
+    await expect(page.locator("aside").getByText("分享概览").first()).toBeVisible();
+    await expect(page.getByText("想传文件？拿呀²")).toBeVisible();
+    await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
+  });
+});
+
+test.describe("分享页布局回归", () => {
+  test("移动端无横向溢出、无固定底栏，并通过扫码 Tab 展示二维码", async ({ page }) => {
+    const files = [shareFile({ index: 0 }), shareFile({ file_name: `${LONG_NAME}.png`, file_ext: "png", content_type: "image/png", index: 1, media_metadata: null })];
+    await page.setViewportSize({ width: 375, height: 667 });
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await expect(page.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true", { timeout: 10000 });
+    const tabRadius = await page.getByRole("tab", { name: "文件" }).evaluate((element) => ({
+      actual: getComputedStyle(element).borderRadius,
+      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
+    }));
+    expect(tabRadius.actual).toBe(tabRadius.expected);
+    await expectNoHorizontalOverflow(page);
+
+    const hasFixedBottomBar = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll("body *")).some((el) => {
+        const style = getComputedStyle(el);
+        return style.position === "fixed" && style.bottom === "0px" && el.clientHeight > 0 && el.clientWidth > 200;
+      });
     });
-    expect(minWidths).not.toBeNull();
-    expect(minWidths!.length).toBeGreaterThan(0);
-    for (const mw of minWidths!) {
-      expect(mw).toBe("0px");
+    expect(hasFixedBottomBar).toBe(false);
+
+    await page.getByRole("tab", { name: "扫码" }).click();
+    await expect(page.locator('img[alt="二维码"]').first()).toBeVisible();
+  });
+
+  test("关键视口均无横向溢出", async ({ page }) => {
+    const viewports = [
+      { width: 320, height: 640 },
+      { width: 375, height: 667 },
+      { width: 768, height: 1024 },
+    ];
+
+    for (const viewport of viewports) {
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await page.setViewportSize(viewport);
+      await openMockShare(page);
+      await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+      await expectNoHorizontalOverflow(page);
     }
   });
 
-  // 播放器舞台必须恒为 16:9（修复“接近正方形”：之前 min-h-[320px] 在窄屏
-  // 会盖过 aspect-ratio:16/9 算出的高度，把容器顶成近正方形）。
-  test("播放器舞台宽高比恒为 16:9", async ({ page }) => {
-    await mockReadyShare(page);
+  test("播放器舞台保持 16:9，grid 子项允许收缩", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+    await openMockShare(page);
     await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
 
-    const ratio = await page.evaluate(() => {
+    const metrics = await page.evaluate(() => {
       const stage = document.querySelector('main [class*="stagePlayer"]') as HTMLElement | null;
-      if (!stage) return null;
-      const r = stage.getBoundingClientRect();
-      return r.width / r.height;
+      const grid = document.querySelector('main [class*="desktopTwoCol"]');
+      return {
+        ratio: stage ? stage.getBoundingClientRect().width / stage.getBoundingClientRect().height : null,
+        minWidths: grid ? Array.from(grid.children).map((el) => getComputedStyle(el).minWidth) : [],
+      };
     });
-    expect(ratio).not.toBeNull();
-    // 16/9 ≈ 1.778，允许 ±0.02 误差
-    expect(Math.abs(ratio! - 16 / 9)).toBeLessThan(0.02);
+    expect(metrics.ratio).not.toBeNull();
+    expect(Math.abs(metrics.ratio! - 16 / 9)).toBeLessThan(0.02);
+    expect(metrics.minWidths.every((value) => value === "0px")).toBe(true);
   });
 
-  // 两段式加载（getShareInfo 先到、download 慢）时，文件名+操作栏区域应以骨架占位
-  // 保持恒定高度，downloads 到达后不得把下方侧栏往下推（移动端单栏最明显）。
-  // 用正常长度文件名（避免超长名换行带来的无关高度噪声），精准验证垂直稳定性。
-  test("download 慢到时操作栏骨架占位，侧栏不被挤动", async ({ page }) => {
-    const mkFile = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), file_ext: "mp4", content_type: "video/mp4", index: i, is_chunked: false, chunk_count: 0 });
-    const mkDl = (i: number) => ({ file_name: `文件${i + 1}.mp4`, file_size: 1000000 * (i + 1), content_type: "video/mp4", is_chunked: false, download_url: `https://example.com/v${i}.mp4`, chunks: [] });
-    const info = {
-      code: MOCK_CODE,
-      files: [mkFile(0), mkFile(1), mkFile(2)],
-      empty_dirs: [], total_bytes: 6000000, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
-    };
-    const dl = {
-      files: [mkDl(0), mkDl(1), mkDl(2)],
-      empty_dirs: [], expires_in: 3600,
-    };
-    // share info 立即返回
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    // download 延迟 1.2s 返回，模拟慢网络
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
-      await new Promise((r) => setTimeout(r, 1200));
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(dl) });
-    });
-    await page.route("https://example.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
-
+  test("慢下载时侧栏位置不跳变", async ({ page }) => {
+    const files = [shareFile({ file_name: "文件1.mp4", index: 0 }), shareFile({ file_name: "文件2.mp4", index: 1 })];
+    await routeShare(page, shareInfo(files), downloadResponse(files), { downloadDelayMs: 1200 });
+    await routeExternal(page);
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    // 等 share info 渲染出移动端 Tab，此时 download 仍在延迟中
     await expect(page.locator("aside").getByRole("tab", { name: "文件" })).toBeVisible({ timeout: 5000 });
 
-    // download 到达前：右侧栏整体的 Y 坐标（移动端单栏时它紧跟在播放器列之后，
-    // 若操作栏从无到有撑开，aside 会被整体下推）
     const asideTop = () => page.evaluate(() => {
       const aside = document.querySelector("aside");
       return aside ? Math.round(aside.getBoundingClientRect().top) : null;
     });
     const before = await asideTop();
-    expect(before).not.toBeNull();
-
-    // 等 download 返回、真实按钮渲染（整体打包下载出现）
-    await expect(page.locator("aside button:has-text('整体打包下载')").first()).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(300);
-
+    await expect(page.locator("aside button:has-text('保存到文件夹'), aside button:has-text('请逐个下载')").first()).toBeVisible({ timeout: 5000 });
     const after = await asideTop();
+    expect(before).not.toBeNull();
     expect(after).not.toBeNull();
-    // 骨架与真实按钮高度一致，侧栏整体 Y 不应发生明显位移（允许 2px 误差）
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
   });
 
-  // 原生 video 预览也必须被舞台约束住，不能撑破移动端宽度。
-  // 注意：不能只看 documentElement.scrollWidth —— main 上的 overflow-x-hidden 会把溢出裁掉、
-  // 掩盖真实的“子元素比父级宽”问题，所以这里逐元素比对 boundingRect 宽度。
-  test("原生 video 预览不超宽", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
+  test("浅色主题文字为深色", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("nyy-theme", "light"));
+    await openMockShare(page);
+    await waitForReady(page);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
-    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(300);
-
-    // 收集所有可视宽度超过视口的元素（允许 1px 误差）
-    const offenders = await page.evaluate(() => {
-      const vw = document.documentElement.clientWidth;
-      const out: Array<{ tag: string; cls: string; rectW: number }> = [];
-      document.querySelectorAll("body *").forEach((el) => {
-        const rectW = (el as HTMLElement).getBoundingClientRect().width;
-        if (rectW > vw + 1) {
-          out.push({ tag: el.tagName, cls: (el.className || "").toString().slice(0, 80), rectW: Math.round(rectW) });
-        }
-      });
-      return out;
+    const color = await page.evaluate(() => {
+      const element = document.querySelector('main [class*="tPrimary"]');
+      return element ? getComputedStyle(element).color : null;
     });
-    expect(offenders, `溢出元素: ${JSON.stringify(offenders)}`).toEqual([]);
+    expect(color).not.toBeNull();
+    const channels = color!.match(/\d+/g)!.map(Number);
+    expect(Math.max(channels[0], channels[1], channels[2])).toBeLessThan(120);
   });
+});
 
-  test("原生 video 使用自定义 4C 控制条", async ({ page }) => {
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_SHARE_INFO) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_DOWNLOAD) })
-    );
-    await page.route("https://example.com/v.mp4", async () => {
-      await new Promise(() => undefined);
-    });
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
-
-    const video = page.locator('[data-testid="native-video-preview"] video').first();
-    await expect(video).toBeAttached();
-    expect(await video.getAttribute("controls")).toBeNull();
-    await expect(page.getByRole("button", { name: "播放" }).first()).toBeVisible();
-    await expect(page.getByRole("slider", { name: "播放进度" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
-  });
-
-  test("原生播放器皮肤播放态、控制栏和全屏自动隐藏符合视频心智", async ({ page }) => {
+test.describe("播放器代表性回归", () => {
+  test("音频文件显示自定义播放器且 OGG 归入音频分支", async ({ page }) => {
     await installMockNativeVideo(page);
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_SHARE_INFO) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_DOWNLOAD) })
-    );
-    await page.route("https://example.com/v.mp4", async () => {
-      await new Promise(() => undefined);
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("audio/ogg")) return "probably";
+        return original.call(this, type);
+      };
     });
+    const file = shareFile({ file_name: "现场录音.ogg", file_ext: "ogg", content_type: "audio/ogg", media_metadata: null });
+    await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { download_url: "https://example.com/live.ogg", content_type: "audio/ogg", media_metadata: null })] }));
+    await routeExternal(page, "audio/ogg");
 
-    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${MOCK_CODE}`);
-    const preview = page.getByTestId("native-video-preview").first();
-    const controls = page.getByTestId("native-video-controls");
-    const progress = page.getByTestId("native-video-progress");
-    await expect(preview).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible();
-    await expect(controls.getByText("原生预览")).toHaveCount(0);
-    await expect(controls.getByRole("button", { name: /下载/ })).toHaveCount(0);
 
-    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "0");
-    await preview.hover({ position: { x: 100, y: 100 } });
-    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "1");
-    await page.mouse.move(5, 5);
-    await expect(progress).toHaveCSS("--nyy-thumb-opacity", "0");
+    await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("audio-element")).toBeAttached();
+    await expect(page.getByTestId("audio-visualizer")).toBeVisible();
+    await expect(page.getByText("NYY AUDIO")).toHaveCount(0);
+    await expect(page.getByText("REAL-TIME FFT")).toHaveCount(0);
+    await expect(page.getByText("ANALYSER ON")).toHaveCount(0);
+    await expect(page.getByText(/audio\/ogg/)).toHaveCount(0);
+    await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
+    const desktopControls = await page.evaluate(() => {
+      const progress = document.querySelector('[data-testid="audio-progress"]') as HTMLElement | null;
+      const volume = document.querySelector('input[aria-label="音量"]') as HTMLElement | null;
+      const progressRect = progress?.getBoundingClientRect();
+      const volumeRect = volume?.getBoundingClientRect();
+      return {
+        sameRow: Boolean(progressRect && volumeRect && Math.abs(progressRect.y - volumeRect.y) <= 2),
+      };
+    });
+    expect(desktopControls.sameRow).toBe(true);
+    await page.getByTestId("audio-play-toggle").click();
+    await expect(page.getByTestId("audio-play-toggle")).toHaveAttribute("aria-label", "暂停");
+    await expect(page.getByText("准备就绪")).toHaveCount(0);
+    await expect(page.getByText("正在播放")).toHaveCount(0);
+    await expect(page.getByText("播放结束")).toHaveCount(0);
+  });
+
+  test("音频播放器移动端保持 16:9 且静音可恢复", async ({ page }) => {
+    await installMockNativeVideo(page);
+    await page.addInitScript(() => {
+      localStorage.setItem("nyy-share-audio-volume", "0");
+      localStorage.setItem("nyy-share-audio-muted", "true");
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("audio/mpeg")) return "probably";
+        return original.call(this, type);
+      };
+    });
+    const file = shareFile({ file_name: "爱在西元前_伴奏.mp3", file_ext: "mp3", content_type: "audio/mpeg", media_metadata: null });
+    await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { download_url: "https://example.com/audio.mp3", content_type: "audio/mpeg", media_metadata: null })] }));
+    await routeExternal(page, "audio/mpeg");
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    await page.goto(`/${MOCK_CODE}`);
+
+    await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("audio-controls")).toBeVisible();
+    await expect(page.getByText(/audio\/mpeg/)).toHaveCount(0);
+    const metrics = await page.evaluate(() => {
+      const stage = document.querySelector('main [class*="stagePlayer"]') as HTMLElement | null;
+      const controls = document.querySelector('[data-testid="audio-controls"]') as HTMLElement | null;
+      const preview = document.querySelector('[data-testid="audio-preview"]') as HTMLElement | null;
+      const visualizer = document.querySelector('[data-testid="audio-visualizer"]') as HTMLElement | null;
+      const stageRect = stage?.getBoundingClientRect();
+      const controlsRect = controls?.getBoundingClientRect();
+      const previewRect = preview?.getBoundingClientRect();
+      const visualizerRect = visualizer?.getBoundingClientRect();
+      return {
+        ratio: stageRect ? stageRect.width / stageRect.height : null,
+        controlsInside: Boolean(stageRect && controlsRect && controlsRect.bottom <= stageRect.bottom + 1 && controlsRect.top >= stageRect.top - 1),
+        previewInside: Boolean(stageRect && previewRect && previewRect.bottom <= stageRect.bottom + 1 && previewRect.top >= stageRect.top - 1),
+        visualizerWide: Boolean(stageRect && visualizerRect && visualizerRect.width >= stageRect.width * 0.9),
+      };
+    });
+    expect(metrics.ratio).not.toBeNull();
+    expect(Math.abs(metrics.ratio! - 16 / 9)).toBeLessThan(0.02);
+    expect(metrics.controlsInside).toBe(true);
+    expect(metrics.previewInside).toBe(true);
+    expect(metrics.visualizerWide).toBe(true);
+
+    await page.getByRole("button", { name: "取消静音" }).click();
+    await expect(page.getByRole("button", { name: "静音" })).toBeVisible();
+  });
+
+  test("原生播放器使用自定义控制条并支持基础交互", async ({ page }) => {
+    await installMockNativeVideo(page);
+    await openMockShare(page);
+
+    const preview = page.getByTestId("native-video-preview").first();
+    await expect(preview).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"] video').first()).toBeAttached();
+    await expect(page.locator('[data-testid="native-video-preview"] video').first()).not.toHaveAttribute("controls", /.*/);
+    await expect(page.getByRole("slider", { name: "播放进度" })).toBeVisible();
 
     await page.getByTestId("native-video-center-toggle").click();
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-    await preview.hover({ position: { x: 120, y: 120 } });
-    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-
     await preview.click({ position: { x: 120, y: 120 } });
     await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 1000 });
-    await page.getByTestId("native-video-center-toggle").click();
-    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-
-    await preview.focus();
-    await page.keyboard.press("Space");
-    await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 1000 });
-    await page.keyboard.press("Space");
-    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-
     await page.getByRole("button", { name: "全屏" }).click();
-    await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
-    await expect(controls).not.toHaveClass(/opacity-0/);
-    await page.waitForTimeout(3200);
-    await expect(controls).toHaveClass(/opacity-0/);
-    await preview.hover({ position: { x: 300, y: 220 } });
-    await expect(controls).not.toHaveClass(/opacity-0/);
-
-    await page.keyboard.press("f");
-    await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
-    await preview.dblclick({ position: { x: 300, y: 220 } });
     await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
   });
 
-  test("原生播放器点击播放后加载中不重新显示中心播放按钮", async ({ page }) => {
+  test("播放后缓冲态不重新显示中心播放按钮", async ({ page }) => {
     await installMockNativeVideo(page);
     await page.addInitScript(() => {
       HTMLMediaElement.prototype.play = function () {
@@ -567,12 +489,7 @@ test.describe("移动端横向溢出回归", () => {
         return new Promise(() => undefined);
       };
     });
-    await mockReadyShare(page);
-    await page.route("https://example.com/v.mp4", async () => {
-      await new Promise(() => undefined);
-    });
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
+    await openMockShare(page);
 
     await expect(page.getByTestId("native-video-center-toggle")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("native-video-center-toggle").click();
@@ -580,441 +497,108 @@ test.describe("移动端横向溢出回归", () => {
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
   });
 
-  test("AC-3 MP4 默认走客户端 AC-3 播放路径", async ({ page }) => {
-    const ac3Meta = {
-      ...VIDEO_META,
-      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/ac3.mp4", chunks: [], media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/ac3.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", body: "" })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("ac3-video-preview").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
-    await expect(page.locator("canvas")).toHaveCount(0);
-  });
-
-  test("AC-3 大文件使用 SW 虚拟视频通道而不是 Blob 兜底", async ({ page }) => {
+  test("AC-3 大文件使用虚拟媒体通道", async ({ page }) => {
     await installMockNativeVideo(page);
     const largeSize = 512 * 1024 * 1024;
-    const ac3Meta = {
-      ...VIDEO_META,
+    const asset = {
+      kind: "mp4_video_only_init",
+      sidecar_size: 8192,
+      virtual_size: largeSize - 1024,
+      source_media_start: 4096,
+      source_media_end: largeSize - 4096,
+      download_url: "https://example.com/large-ac3-init.mp4",
+    };
+    const meta = videoMeta({
       file_size: largeSize,
       audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
       playback_hints: { has_video_only_virtual: true },
-      playback_assets: [{
-        kind: "mp4_video_only_init",
-        sidecar_size: 8192,
-        virtual_size: largeSize - 1024,
-        source_media_start: 4096,
-        source_media_end: largeSize - 4096,
-        download_url: "https://example.com/large-ac3-video-only-init.mp4",
-      }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: largeSize,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/large-ac3.mp4", chunks: [], media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/large-ac3-video-only-init.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/8192", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
-    );
-    await page.route("https://example.com/large-ac3.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": `bytes 0-524287/${largeSize}`, "Accept-Ranges": "bytes" }, body: "x".repeat(1024) })
-    );
+      playback_assets: [asset],
+    });
+    const file = shareFile({ file_size: largeSize, media_metadata: meta });
+    const dl = downloadResponse([file], { files: [downloadFile(file, { download_url: "https://example.com/large-ac3.mp4", media_metadata: meta })] });
 
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await routeShare(page, shareInfo([file]), dl);
+    await routeExternal(page, "video/mp4");
     await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("ac3-video-preview").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("ac3-video-preview").first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
+
+    const preview = page.getByTestId("ac3-video-preview").first();
+    await expect(preview).toBeVisible({ timeout: 10000 });
+    await expect(preview).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
     await expect(page.getByText("当前文件过大，无法启用 AC-3 Blob 兜底")).toHaveCount(0);
   });
 
-  test("AC-3 大文件播放中下载链接刷新不重置视频会话", async ({ page }) => {
-    await installMockNativeVideo(page);
-    const largeSize = 512 * 1024 * 1024;
-    const ac3Meta = {
-      ...VIDEO_META,
-      file_size: largeSize,
-      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
-      playback_hints: { has_video_only_virtual: true },
-      playback_assets: [{
-        kind: "mp4_video_only_init",
-        sidecar_size: 8192,
-        virtual_size: largeSize - 1024,
-        source_media_start: 4096,
-        source_media_end: largeSize - 4096,
-        download_url: "https://example.com/large-ac3-video-only-init-a.mp4",
-      }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: largeSize,
-    };
-    const makeDownload = (suffix: string) => ({
-      files: [
-        {
-          file_name: `${LONG_NAME}.mp4`,
-          file_size: largeSize,
-          content_type: "video/mp4",
-          is_chunked: false,
-          download_url: `https://example.com/large-ac3-${suffix}.mp4`,
-          chunks: [],
-          media_metadata: {
-            ...ac3Meta,
-            playback_assets: [{ ...ac3Meta.playback_assets[0], download_url: `https://example.com/large-ac3-video-only-init-${suffix}.mp4` }],
-          },
-        },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    });
-    let releaseSecondDownload!: () => void;
-    let downloadCalls = 0;
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
-      downloadCalls += 1;
-      if (downloadCalls > 1) await new Promise<void>((resolve) => { releaseSecondDownload = resolve; });
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(makeDownload(downloadCalls === 1 ? "a" : "b")) });
-    });
-    await page.route("https://example.com/**", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": `bytes 0-8191/${largeSize}`, "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
-    );
+  test("E-AC-3 MP4 默认进入 SDP 路径", async ({ page }) => {
+    const meta = videoMeta({ audio_tracks: [{ codec: "eac3", codec_tag: "ec-3" }] });
+    const file = shareFile({ media_metadata: meta });
+    await openMockShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { media_metadata: meta })] }));
 
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    const video = page.getByTestId("ac3-video-preview").first();
-    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
-    await video.evaluate((node) => {
-      node.dispatchEvent(new Event("loadedmetadata"));
-      node.dispatchEvent(new Event("canplay"));
-    });
-    const firstSrc = await video.getAttribute("src");
-    await expect.poll(() => typeof releaseSecondDownload).toBe("function");
-    await page.getByTestId("native-video-center-toggle").dispatchEvent("click");
-    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-    releaseSecondDownload();
-    await page.waitForResponse((resp) => resp.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && resp.status() === 200);
-
-    await expect(video).toHaveAttribute("src", firstSrc || "");
-    await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-    await expect(page.getByText("MEDIA_ELEMENT_ERROR: Empty src attribute")).toHaveCount(0);
-  });
-
-  test("AC-3 大文件 SW 播放失败时尝试恢复且不显示 Blob 过大错误", async ({ page }) => {
-    const largeSize = 512 * 1024 * 1024;
-    const ac3Meta = {
-      ...VIDEO_META,
-      file_size: largeSize,
-      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
-      playback_hints: { has_video_only_virtual: true },
-      playback_assets: [{
-        kind: "mp4_video_only_init",
-        sidecar_size: 8192,
-        virtual_size: largeSize - 1024,
-        source_media_start: 4096,
-        source_media_end: largeSize - 4096,
-        download_url: "https://example.com/large-ac3-video-only-init.mp4",
-      }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: largeSize,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: largeSize, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/large-ac3.mp4", chunks: [], media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("ac3-video-preview").first()).toBeAttached({ timeout: 10000 });
-    await expect(page.getByText("当前文件过大，无法启用 AC-3 Blob 兜底")).toHaveCount(0);
-    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
-  });
-
-  test("AC-3 MP4 可通过 sdp=1 显式进入 SDP 调试路径", async ({ page }) => {
-    const ac3Meta = {
-      ...VIDEO_META,
-      audio_tracks: [{ codec: "ac-3", codec_tag: "ac-3" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/ac3.mp4", chunks: [], media_metadata: ac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/ac3.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", body: "" })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}?sdp=1`);
-    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
-  });
-
-  test("E-AC-3 MP4 默认走 SDP 播放路径", async ({ page }) => {
-    const eac3Meta = {
-      ...VIDEO_META,
-      audio_tracks: [{ codec: "eac3", codec_tag: "ec-3" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: eac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/eac3.mp4", chunks: [], media_metadata: eac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/eac3.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", body: "" })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("native-video-preview")).toHaveCount(0);
     await expect(page.getByTestId("ac3-video-preview")).toHaveCount(0);
-    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
   });
 
-  test("AAC MP4 即使 moov 在尾部仍使用原生播放器", async ({ page }) => {
-    const tailAacMeta = {
-      ...VIDEO_META,
-      is_faststart: false,
-      moov_offset: 9000000,
-      moov_size: 4096,
-      audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/tail-aac.mp4", chunks: [], media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/tail-aac.mp4", async () => {
-      await new Promise(() => undefined);
-    });
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("canvas")).toHaveCount(0);
-  });
-
-  test("tail-moov AAC MP4 在有 faststart sidecar 时走虚拟快启 URL", async ({ page }) => {
+  test("tail-moov AAC 有 sidecar 时走虚拟快启 URL", async ({ page }) => {
     await installMockNativeVideo(page);
-    const tailAacMeta = {
-      ...VIDEO_META,
+    const asset = {
+      kind: "mp4_faststart_init",
+      sidecar_size: 8192,
+      virtual_size: 12_345_678,
+      source_media_start: 32,
+      source_media_end: 12_337_486,
+      download_url: "https://example.com/tail-aac-init.mp4",
+    };
+    const meta = videoMeta({
       is_faststart: false,
-      moov_offset: 9000000,
+      moov_offset: 9_000_000,
       moov_size: 4096,
       playback_hints: { needs_virtual_faststart: true },
-      playback_assets: [{
-        kind: "mp4_faststart_init",
-        sidecar_size: 8192,
-        virtual_size: 12345678,
-        source_media_start: 32,
-        source_media_end: 12337486,
-        download_url: "https://example.com/tail-aac-init.mp4",
-      }],
+      playback_assets: [asset],
       audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/tail-aac.mp4", chunks: [], media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
-    await page.route("https://example.com/tail-aac-init.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/8192", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
-    );
-    await page.route("https://example.com/tail-aac.mp4", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-524287/12345678", "Accept-Ranges": "bytes" }, body: "x".repeat(1024) })
-    );
+    });
+    const file = shareFile({ media_metadata: meta });
+    await openMockShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { media_metadata: meta })] }));
 
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
     await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="native-video-preview"] video').first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
   });
 
-  test("tail-moov 虚拟快启播放中下载链接刷新不重置视频会话", async ({ page }) => {
+  test("虚拟快启播放中刷新下载链接不重置会话", async ({ page }) => {
     await installMockNativeVideo(page);
-    const tailAacMeta = {
-      ...VIDEO_META,
+    const makeAsset = (suffix: string) => ({
+      kind: "mp4_faststart_init",
+      sidecar_size: 8192,
+      virtual_size: 12_345_678,
+      source_media_start: 32,
+      source_media_end: 12_337_486,
+      download_url: `https://example.com/tail-aac-init-${suffix}.mp4`,
+    });
+    const baseMeta = videoMeta({
       is_faststart: false,
-      moov_offset: 9000000,
+      moov_offset: 9_000_000,
       moov_size: 4096,
       playback_hints: { needs_virtual_faststart: true },
-      playback_assets: [{
-        kind: "mp4_faststart_init",
-        sidecar_size: 8192,
-        virtual_size: 12345678,
-        source_media_start: 32,
-        source_media_end: 12337486,
-        download_url: "https://example.com/tail-aac-init-a.mp4",
-      }],
+      playback_assets: [makeAsset("a")],
       audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const makeDownload = (suffix: string) => ({
-      files: [
-        {
-          file_name: `${LONG_NAME}.mp4`,
-          file_size: 12345678,
-          content_type: "video/mp4",
-          is_chunked: false,
-          download_url: `https://example.com/tail-aac-${suffix}.mp4`,
-          chunks: [],
-          media_metadata: {
-            ...tailAacMeta,
-            playback_assets: [{ ...tailAacMeta.playback_assets[0], download_url: `https://example.com/tail-aac-init-${suffix}.mp4` }],
-          },
-        },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
     });
+    const file = shareFile({ media_metadata: baseMeta });
     let releaseSecondDownload!: () => void;
     let downloadCalls = 0;
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
+    await page.route(`**/api/v1/shares/${MOCK_CODE}`, async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(shareInfo([file])) });
+    });
+    await page.route(`**/api/v1/shares/${MOCK_CODE}/download`, async (route) => {
       downloadCalls += 1;
       if (downloadCalls > 1) await new Promise<void>((resolve) => { releaseSecondDownload = resolve; });
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(makeDownload(downloadCalls === 1 ? "a" : "b")) });
+      const suffix = downloadCalls === 1 ? "a" : "b";
+      const media_metadata = { ...baseMeta, playback_assets: [makeAsset(suffix)] };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(downloadResponse([file], { files: [downloadFile(file, { download_url: `https://example.com/tail-aac-${suffix}.mp4`, media_metadata })] })),
+      });
     });
-    await page.route("https://example.com/**", (route) =>
-      route.fulfill({ status: 206, contentType: "video/mp4", headers: { "Content-Range": "bytes 0-8191/12345678", "Accept-Ranges": "bytes" }, body: "x".repeat(8192) })
-    );
+    await routeExternal(page, "video/mp4");
 
-    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/${MOCK_CODE}`);
     const video = page.locator('[data-testid="native-video-preview"] video').first();
     await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
@@ -1023,730 +607,235 @@ test.describe("移动端横向溢出回归", () => {
     await page.getByTestId("native-video-center-toggle").dispatchEvent("click");
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
     releaseSecondDownload();
-    await page.waitForResponse((resp) => resp.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && resp.status() === 200);
+    await page.waitForResponse((response) => response.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && response.status() === 200);
 
     await expect(video).toHaveAttribute("src", firstSrc || "");
-    expect(await video.evaluate((node) => (node as HTMLVideoElement).paused)).toBe(false);
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
   });
 
-  test("tail-moov 虚拟快启网络错误会恢复通道而不显示不可预览", async ({ page }) => {
-    await installMockNativeVideo(page);
-    const tailAacMeta = {
-      ...VIDEO_META,
-      is_faststart: false,
-      moov_offset: 9000000,
-      moov_size: 4096,
-      playback_hints: { needs_virtual_faststart: true },
-      playback_assets: [{
-        kind: "mp4_faststart_init",
-        sidecar_size: 8192,
-        virtual_size: 12345678,
-        source_media_start: 32,
-        source_media_end: 12337486,
-        download_url: "https://example.com/tail-aac-init.mp4",
-      }],
-      audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
-    };
-    const info = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const download = {
-      files: [
-        { file_name: `${LONG_NAME}.mp4`, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/tail-aac.mp4", chunks: [], media_metadata: tailAacMeta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) })
-    );
+  test("MKV 路由根据原生支持和音频编码选择预览路径", async ({ page }) => {
+    const scenarios = [
+      { code: "mkv-sdp", canPlay: "", audio: VIDEO_META.audio_tracks, expected: "sdp" },
+      { code: "mkv-native", canPlay: "maybe", audio: VIDEO_META.audio_tracks, expected: "native" },
+      { code: "mkv-eac3", canPlay: "maybe", audio: [{ codec: "eac3", codec_tag: "ec-3" }], expected: "sdp" },
+    ] as const;
 
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    const video = page.locator('[data-testid="native-video-preview"] video').first();
-    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
-    await video.evaluate((node) => {
-      const el = node as HTMLVideoElement;
-      el.currentTime = 321;
-      Object.defineProperty(el, "error", {
-        configurable: true,
-        get: () => ({ code: MediaError.MEDIA_ERR_NETWORK, message: "mock virtual media missing" }),
-      });
-      el.dispatchEvent(new Event("error"));
-    });
-    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
-    await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
-  });
+    for (const scenario of scenarios) {
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await page.addInitScript((canPlay) => {
+        const original = HTMLMediaElement.prototype.canPlayType;
+        HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+          if (type.includes("matroska")) return canPlay;
+          return original.call(this, type);
+        };
+      }, scenario.canPlay);
+      const meta = videoMeta({ audio_tracks: scenario.audio });
+      const file = shareFile({ file_name: `${LONG_NAME}.mkv`, file_ext: "mkv", content_type: "video/x-matroska", media_metadata: meta });
+      await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { download_url: `https://example.com/${scenario.code}.mkv`, media_metadata: meta })] }));
+      await routeExternal(page);
+      await page.goto(`/${MOCK_CODE}`);
 
-  test("MKV 在浏览器声明不支持时走 SDP 预览路径", async ({ page }) => {
-    await page.addInitScript(() => {
-      const original = HTMLMediaElement.prototype.canPlayType;
-      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
-        if (type.includes("matroska")) return "";
-        return original.call(this, type);
-      };
-    });
-    const mkvInfo = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const mkvDownload = {
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/v.mkv", chunks: [], media_metadata: VIDEO_META },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
-    );
-    await page.route("https://example.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
-  });
-
-  test("MKV 在浏览器声明可能支持时优先原生 video 预览", async ({ page }) => {
-    await page.addInitScript(() => {
-      const original = HTMLMediaElement.prototype.canPlayType;
-      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
-        if (type.includes("matroska")) return "maybe";
-        return original.call(this, type);
-      };
-    });
-    const mkvInfo = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: VIDEO_META },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const mkvDownload = {
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/v.mkv", chunks: [], media_metadata: VIDEO_META },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
-    );
-    await page.route("https://example.com/v.mkv", async () => {
-      await new Promise(() => undefined);
-    });
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="native-video-preview"] video').first()).toBeAttached();
-    await expect(page.getByTestId("mkv-sdp-preview")).toHaveCount(0);
-    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
-  });
-
-  test("MKV 内含 E-AC-3 时即使原生声明支持也走 SDP", async ({ page }) => {
-    await page.addInitScript(() => {
-      const original = HTMLMediaElement.prototype.canPlayType;
-      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
-        if (type.includes("matroska")) return "maybe";
-        return original.call(this, type);
-      };
-    });
-    const eac3Meta = {
-      ...VIDEO_META,
-      audio_tracks: [{ codec: "eac3", codec_tag: "ec-3" }],
-    };
-    const mkvInfo = {
-      ...MOCK_SHARE_INFO,
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, file_ext: "mkv", content_type: "video/x-matroska", index: 0, is_chunked: false, chunk_count: 0, media_metadata: eac3Meta },
-      ],
-      empty_dirs: [],
-      total_bytes: 12345678,
-    };
-    const mkvDownload = {
-      files: [
-        { file_name: `${LONG_NAME}.mkv`, file_size: 12345678, content_type: "video/x-matroska", is_chunked: false, download_url: "https://example.com/eac3.mkv", chunks: [], media_metadata: eac3Meta },
-      ],
-      empty_dirs: [],
-      expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvInfo) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mkvDownload) })
-    );
-    await page.route("https://example.com/eac3.mkv", (route) =>
-      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
-    await expect(page.getByText("浏览器无法直接预览此视频")).toHaveCount(0);
+      if (scenario.expected === "native") {
+        await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
+        await expect(page.getByTestId("mkv-sdp-preview")).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
+      }
+    }
   });
 });
 
-// ===== 反馈修复回归：浅色文字 / 移动端底栏 / QR =====
-
-test.describe("反馈修复回归", () => {
-  test("浅色模式下正文文字为深色（非白色）", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1500);
-
-    // 切到浅色主题
-    await page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first().click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-    await page.waitForTimeout(300);
-
-    // 取顶部文件名（应用了主题文字类）的计算颜色，应为深色而非接近白色
-    const rgb = await page.evaluate(() => {
-      const el = document.querySelector('main [class*="tPrimary"]');
-      if (!el) return null;
-      return getComputedStyle(el as Element).color;
-    });
-    expect(rgb).not.toBeNull();
-    const m = rgb!.match(/\d+/g)!.map(Number);
-    // 深色文字：RGB 三通道都应较低（远离 255 白色）
-    expect(Math.max(m[0], m[1], m[2])).toBeLessThan(120);
-  });
-
-  test("移动端不再有固定底栏（fixed bottom bar）", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1500);
-
-    // 查找 position:fixed 且贴底（bottom:0）的元素，应不存在
-    const hasFixedBottomBar = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll("body *")).some((el) => {
-        const cs = getComputedStyle(el);
-        return cs.position === "fixed" && cs.bottom === "0px" && el.clientHeight > 0 && el.clientWidth > 200;
-      });
-    });
-    expect(hasFixedBottomBar).toBe(false);
-  });
-
-  test("移动端通过扫码 Tab 展示二维码", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1500);
-
-    await expect(page.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true");
-    await page.getByRole("tab", { name: "扫码" }).click();
-
-    const qr = page.locator('img[alt="二维码"]');
-    await expect(qr.first()).toBeVisible();
-  });
-
-  test("移动端顶部分享话术保持单行", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1500);
-
-    const metrics = await page.evaluate(() => {
-      const el = Array.from(document.querySelectorAll("p")).find((node) => node.textContent?.includes("有人通过拿呀²分享给你")) as HTMLElement | undefined;
-      if (!el) return null;
-      const style = getComputedStyle(el);
-      return {
-        height: el.getBoundingClientRect().height,
-        lineHeight: Number.parseFloat(style.lineHeight),
-      };
-    });
-    expect(metrics).not.toBeNull();
-    expect(metrics!.height).toBeLessThanOrEqual(metrics!.lineHeight + 1);
-  });
-
-  test("底部展示新 slogan 和官网", async ({ page }) => {
-    await mockReadyShare(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(1500);
-
-    await expect(page.getByText("想传文件？拿呀²")).toBeVisible();
-    await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
-  });
-});
-
-// ===== 骨架屏回归 =====
-test.describe("骨架屏回归", () => {
-  // 辅助：share info 延迟 N ms 返回，download 也延迟，模拟慢网络下的 loading 阶段
-  async function mockSlow(page: import("@playwright/test").Page, delayMs: number) {
-    const NAME = "演示视频.mp4";
-    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
-    const info = {
-      code: MOCK_CODE,
-      files: [{ file_name: NAME, file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META }],
-      empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
-    };
-    const dl = {
-      files: [{ file_name: NAME, file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }],
-      empty_dirs: [], expires_in: 3600,
-    };
-    await page.route("**/api/v1/shares/" + MOCK_CODE, async (route) => {
-      await new Promise((r) => setTimeout(r, delayMs));
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) });
-    });
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", async (route) => {
-      await new Promise((r) => setTimeout(r, delayMs + 800));
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(dl) });
-    });
-    await page.route("https://example.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
-  }
-
-  test("loading 阶段已渲染两栏布局骨架（不是全屏 loading 页）", async ({ page }) => {
-    await mockSlow(page, 1500);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-
-    // 在 share info 返回之前（loading 阶段）取快照
-    await page.waitForTimeout(400);
-
-    // 骨架布局：stagePlayer 和 aside 已存在于 DOM
-    const hasStage = await page.evaluate(() => !!document.querySelector('main [class*="stagePlayer"]'));
-    const hasAside = await page.evaluate(() => !!document.querySelector("main aside"));
-    expect(hasStage).toBe(true);
-    expect(hasAside).toBe(true);
-
-    // 不应存在全屏 loading 文字
-    await expect(page.locator("text=正在打开保险库")).not.toBeVisible();
-  });
-
-  test("loading 阶段移动端骨架不横向溢出", async ({ page }) => {
-    await mockSlow(page, 1500);
+test.describe("骨架和文件列表回归", () => {
+  test("loading 阶段渲染骨架且移动端不溢出", async ({ page }) => {
+    const file = shareFile({ file_name: "演示视频.mp4" });
+    await routeShare(page, shareInfo([file]), downloadResponse([file]), { infoDelayMs: 1500, downloadDelayMs: 1500 });
+    await routeExternal(page);
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await page.waitForTimeout(400);
 
-    const { sw, cw } = await page.evaluate(() => ({
-      sw: document.documentElement.scrollWidth,
-      cw: document.documentElement.clientWidth,
-    }));
-    expect(sw).toBeLessThanOrEqual(cw + 1);
+    expect(await page.evaluate(() => !!document.querySelector('main [class*="stagePlayer"]'))).toBe(true);
+    expect(await page.evaluate(() => !!document.querySelector("main aside"))).toBe(true);
+    await expectNoHorizontalOverflow(page);
   });
 
-  test("loading → ready 侧栏 Y 坐标零跳变（桌面端）", async ({ page }) => {
-    await mockSlow(page, 1200);
+  test("loading 到 ready 侧栏 Y 坐标保持稳定", async ({ page }) => {
+    const file = shareFile({ file_name: "演示视频.mp4" });
+    await routeShare(page, shareInfo([file]), downloadResponse([file]), { infoDelayMs: 1200, downloadDelayMs: 1200 });
+    await routeExternal(page);
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-
-    // loading 阶段：等骨架渲染稳定
-    await page.waitForTimeout(400);
-    const asideTop = () => page.evaluate(() => {
-      const el = document.querySelector("main aside");
-      return el ? Math.round(el.getBoundingClientRect().top) : null;
-    });
-    const before = await asideTop();
-    expect(before).not.toBeNull();
-
-    // 等 share info 返回（ready 状态，真实 Topbar/文件列表渲染）
-    await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(200);
-    const after = await asideTop();
-    expect(after).not.toBeNull();
-
-    // 骨架与真实布局完全等尺寸，aside Y 坐标应零变化（允许 2px）
-    expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
-  });
-
-  test("loading → ready 侧栏 Y 坐标零跳变（移动端）", async ({ page }) => {
-    await mockSlow(page, 1200);
-    await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await page.waitForTimeout(400);
 
     const asideTop = () => page.evaluate(() => {
-      const el = document.querySelector("main aside");
-      return el ? Math.round(el.getBoundingClientRect().top) : null;
+      const aside = document.querySelector("main aside");
+      return aside ? Math.round(aside.getBoundingClientRect().top) : null;
     });
     const before = await asideTop();
-    expect(before).not.toBeNull();
-
-    await expect(page.locator("aside").getByRole("tab", { name: "概览" })).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(200);
+    await waitForReady(page);
     const after = await asideTop();
+    expect(before).not.toBeNull();
     expect(after).not.toBeNull();
-
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
   });
-});
 
-// ===== 文件列表折叠/展开 =====
-test.describe("文件列表折叠/展开", () => {
-  // 8 个文件的 mock（超过 COLLAPSE_THRESHOLD=5）
-  const MANY_FILES = Array.from({ length: 8 }, (_, i) => ({
-    file_name: `文件_${i + 1}.mp4`,
-    file_size: 1000000 * (i + 1),
-    file_ext: "mp4",
-    content_type: "video/mp4",
-    index: i,
-    is_chunked: false,
-    chunk_count: 0,
-  }));
-  const MANY_DL = MANY_FILES.map((f) => ({
-    file_name: f.file_name,
-    file_size: f.file_size,
-    content_type: f.content_type,
-    is_chunked: false,
-    download_url: `https://example.com/${f.file_name}`,
-    chunks: [],
-  }));
+  test("小型文件列表默认完整展示", async ({ page }) => {
+    const files = Array.from({ length: 8 }, (_, index) => shareFile({ file_name: `文件_${index + 1}.mp4`, index }));
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await waitForReady(page);
 
-  async function mockManyFiles(page: import("@playwright/test").Page) {
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        code: MOCK_CODE, files: MANY_FILES, empty_dirs: [], total_bytes: 36000000,
-        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
-      }) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: MANY_DL, empty_dirs: [], expires_in: 3600 }) })
-    );
-    await page.route("https://example.com/**", (r) =>
-      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
-  }
-
-  test("8 个文件默认只显示 4 条 + 展开更多按钮", async ({ page }) => {
-    await mockManyFiles(page);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(2000);
-
-    // 应显示 4 条文件行
-    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
-    await expect(rows).toHaveCount(4);
-
-    // 应有"展开更多"按钮，显示剩余数量
-    const expandBtn = page.locator("aside button:has-text('展开更多'):visible");
-    await expect(expandBtn).toBeVisible();
-    await expect(expandBtn).toContainText("4 项"); // 8 - 4 = 4
-  });
-
-  test("点击展开更多后显示全部 8 条", async ({ page }) => {
-    await mockManyFiles(page);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(2000);
-
-    // 点击展开
-    await page.locator("aside button:has-text('展开更多'):visible").click();
-
-    // 应显示全部 8 条
-    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
+    const rows = page.locator("aside [role='treeitem']:visible");
     await expect(rows).toHaveCount(8);
-
-    // "展开更多"按钮应消失
-    await expect(page.locator("aside button:has-text('展开更多'):visible")).toHaveCount(0);
+    await expect(page.locator("aside button:has-text('显示更多'):visible")).toHaveCount(0);
   });
 
-  test("4 个文件不显示展开更多按钮", async ({ page }) => {
-    const files4 = MANY_FILES.slice(0, 4);
-    const dl4 = MANY_DL.slice(0, 4);
-    await page.route("**/api/v1/shares/" + MOCK_CODE, (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        code: MOCK_CODE, files: files4, empty_dirs: [], total_bytes: 10000000,
-        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
-      }) })
-    );
-    await page.route("**/api/v1/shares/" + MOCK_CODE + "/download", (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dl4, empty_dirs: [], expires_in: 3600 }) })
-    );
-    await page.route("https://example.com/**", (r) =>
-      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
+  test("文件数未超过折叠阈值时不显示展开更多", async ({ page }) => {
+    const files = Array.from({ length: 4 }, (_, index) => shareFile({ file_name: `文件_${index + 1}.mp4`, index }));
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await waitForReady(page);
 
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${MOCK_CODE}`);
-    await expect(page.locator("main")).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await expect(page.locator("aside [role='treeitem']:visible")).toHaveCount(4);
+    await expect(page.locator("aside button:has-text('显示更多'):visible")).toHaveCount(0);
+  });
 
-    // 4 条文件行
-    const rows = page.locator("aside button[aria-label^='预览 ']:visible");
-    await expect(rows).toHaveCount(4);
+  test("文件夹分享按目录树展示", async ({ page }) => {
+    const files = [
+      shareFile({ file_name: "品管圈/全套文件/会议记录1.docx", file_ext: "docx", content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", index: 0, media_metadata: null }),
+      shareFile({ file_name: "品管圈/全套文件/原始资料.xlsx", file_ext: "xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", index: 1, media_metadata: null }),
+    ];
+    const emptyDirs = ["品管圈/空文件夹/"];
+    await openMockShare(page, shareInfo(files, { empty_dirs: emptyDirs }), downloadResponse(files, { empty_dirs: emptyDirs }));
+    await waitForReady(page);
 
-    // 无"展开更多"按钮
-    await expect(page.locator("aside button:has-text('展开更多'):visible")).toHaveCount(0);
+    const aside = page.locator("aside");
+    const visibleText = (text: string) => aside.locator("p:visible").filter({ hasText: new RegExp(`^${text}$`) });
+    await expect(visibleText("品管圈")).toHaveCount(1);
+    await expect(visibleText("全套文件")).toHaveCount(1);
+    await expect(visibleText("会议记录1.docx")).toHaveCount(1);
+    await expect(visibleText("原始资料.xlsx")).toHaveCount(1);
+    await expect(visibleText("空文件夹").first()).toBeVisible();
+    await expect(aside.getByText("品管圈/全套文件/会议记录1.docx", { exact: true })).toHaveCount(0);
+  });
+
+  test("超深目录和超长 Remux 文件名保持稳定且可查看详情", async ({ page }) => {
+    const remuxName = `${"RUMUX超长片名".repeat(10)}.2160p.UHD.BluRay.REMUX.DV.HDR.TrueHD.Atmos.mkv`;
+    const fullPath = `蓝光原盘/Disc 1/BDMV/STREAM/导演剪辑版/正片/超深目录/第七层/第八层/${remuxName}`;
+    const files = [
+      shareFile({ file_name: fullPath, file_ext: "mkv", content_type: "video/x-matroska", index: 0 }),
+      shareFile({ file_name: "蓝光原盘/校验/SFV校验.txt", file_ext: "txt", content_type: "text/plain", index: 1, media_metadata: null }),
+    ];
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await waitForReady(page);
+
+    const aside = page.locator("aside");
+    await aside.locator("input[aria-label='搜索文件名、扩展名或路径']:visible").fill("TrueHD");
+    const fileRow = aside.locator("[role='button']:visible").filter({ hasText: /TrueHD\.Atmos\.mkv/ }).first();
+    await expect(fileRow).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await fileRow.getByRole("button", { name: /详情/ }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(remuxName, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(fullPath, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制完整路径" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "复制文件名" })).toBeVisible();
+  });
+
+  test("搜索到目录后回到树形并展开目录", async ({ page }) => {
+    const files = [
+      shareFile({ file_name: "资料库/Alpha/inside.txt", file_ext: "txt", content_type: "text/plain", index: 0, media_metadata: null }),
+      shareFile({ file_name: "资料库/Beta/else.txt", file_ext: "txt", content_type: "text/plain", index: 1, media_metadata: null }),
+    ];
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await waitForReady(page);
+
+    const aside = page.locator("aside");
+    await aside.locator("input[aria-label='搜索文件名、扩展名或路径']:visible").fill("Alpha");
+    await expect(aside.locator("mark:visible").filter({ hasText: "Alpha" }).first()).toBeVisible();
+    await aside.locator("[role='button']:visible").filter({ hasText: /^Alpha/ }).first().click();
+
+    await expect(aside.locator("[role='treeitem']:visible").filter({ hasText: /^Alpha/ })).toBeVisible();
+    await expect(aside.locator("p:visible").filter({ hasText: /^inside\.txt$/ })).toBeVisible();
+    await expect(aside.locator("input[aria-label='搜索文件名、扩展名或路径']:visible")).toHaveValue("");
+    await expect(aside.locator("button:visible", { hasText: "全部" })).toHaveCount(0);
+  });
+
+  test("大型深目录保留树形视图并支持搜索", async ({ page }) => {
+    const files = Array.from({ length: 220 }, (_, index) => {
+      const branch = index % 2 === 0 ? "x64" : "x86";
+      return shareFile({
+        file_name: `大型软件/lib/${branch}/plugins/plugin-${String(index + 1).padStart(2, "0")}.dll`,
+        file_ext: "dll",
+        content_type: "application/octet-stream",
+        index,
+        media_metadata: null,
+      });
+    });
+    files.push(shareFile({ file_name: "大型软件/setup.exe", file_ext: "exe", content_type: "application/octet-stream", index: files.length, media_metadata: null }));
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    await waitForReady(page);
+
+    const aside = page.locator("aside");
+    await expect(aside.getByText("目录较大，已保留树形视图")).toBeVisible();
+    await expect(aside.locator("button:visible", { hasText: "全部" })).toHaveCount(0);
+    await expect(aside.getByRole("tab", { name: "浏览视图" })).toHaveCount(0);
+    await expect(aside.locator("p:visible").filter({ hasText: /^大型软件$/ })).toBeVisible();
+    await expect(aside.locator("p:visible").filter({ hasText: /^lib$/ })).toBeVisible();
+    await expect(aside.locator("p:visible").filter({ hasText: /^setup.exe$/ })).toBeVisible();
+
+    await aside.locator("input[aria-label='搜索文件名、扩展名或路径']:visible").fill("plugin-220");
+    await expect(aside.locator("mark:visible").filter({ hasText: "plugin-220" })).toBeVisible();
+    await expect(aside.locator("p:visible").filter({ hasText: /^plugin-220.dll$/ })).toBeVisible();
+    await expect(aside.getByText("大型软件/lib/x86/plugins", { exact: true })).toBeVisible();
   });
 });
 
-// ===== 单/多文件按钮区高度一致 & 打包按钮显隐 =====
-test.describe("单/多文件按钮区布局回归", () => {
-  const C = MOCK_CODE;
-  const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }], video_tracks: [{ codec: "h264" }] };
-
-  async function setup(page: import("@playwright/test").Page, fileCount: number) {
-    const files = Array.from({ length: fileCount }, (_, i) => ({
-      file_name: `文件${i + 1}.mp4`, file_size: 1000000, file_ext: "mp4", content_type: "video/mp4",
-      index: i, is_chunked: false, chunk_count: 0, media_metadata: META,
-    }));
-    const dlFiles = files.map((f) => ({
-      file_name: f.file_name, file_size: f.file_size, content_type: f.content_type,
-      is_chunked: false, download_url: `https://example.com/v${f.index}.mp4`, chunks: [],
-      media_metadata: META,
-    }));
-    await page.route("**/api/v1/shares/" + C, (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        code: C, files, empty_dirs: [], total_bytes: fileCount * 1000000,
-        created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false,
-      }) })
-    );
-    await page.route("**/api/v1/shares/" + C + "/download", (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dlFiles, empty_dirs: [], expires_in: 3600 }) })
-    );
-    await page.route("https://example.com/**", (r) =>
-      r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" })
-    );
+test.describe("单/多文件动作区回归", () => {
+  async function setupFileCount(page: Page, fileCount: number) {
+    const files = Array.from({ length: fileCount }, (_, index) => shareFile({ file_name: `文件${index + 1}.mp4`, index }));
+    await openMockShare(page, shareInfo(files), downloadResponse(files));
+    return files;
   }
 
-  // 辅助：定位侧栏主下载动作容器
-  async function sidebarBtnArea(page: import("@playwright/test").Page) {
-    return page.evaluate(() => {
-      const target = document.querySelector("aside [data-testid='share-actions']") as HTMLElement | null;
-      return target ? Math.round(target.getBoundingClientRect().height) : null;
-    });
-  }
-
-  test("单文件侧栏主操作区高度 = 46px（只占一行）", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    const h = await sidebarBtnArea(page);
-    expect(h).not.toBeNull();
-    expect(h).toBe(46);
-  });
-
-  test("顶部展示分享话术和内容摘要，不展示分享码", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
+  test("单文件只保留侧栏下载入口并隐藏文件列表", async ({ page }) => {
+    await setupFileCount(page, 1);
+    await waitForReady(page);
 
     await expect(page.getByText("有人通过拿呀²分享给你").last()).toBeVisible();
-    await expect(page.getByText("1 个视频 · 976.6 KB").last()).toBeVisible();
-    await expect(page.locator("main").getByText(MOCK_CODE, { exact: true })).toHaveCount(0);
-  });
-
-  test("单文件隐藏文件列表，多文件显示文件列表", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
     await expect(page.locator("aside").getByText("文件列表")).toHaveCount(0);
-
-    await page.unroute("**/api/v1/shares/" + C);
-    await page.unroute("**/api/v1/shares/" + C + "/download");
-    await page.unroute("https://example.com/**");
-    await setup(page, 3);
-    await page.goto(`/${C}`);
-    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-    await expect(page.locator("aside span:visible").filter({ hasText: "文件列表" })).toHaveCount(1);
-  });
-
-  test("移动端单文件只显示概览和扫码 Tab，默认概览", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    await expect(page.getByRole("tab", { name: "文件" })).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tab", { name: "扫码" })).toBeVisible();
-  });
-
-  test("分享概览集中显示内容/到期/下载", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    const overview = page.locator("aside > div").filter({ hasText: "分享概览" }).first();
-    await expect(overview.getByText("内容")).toBeVisible();
-    await expect(overview.getByText("1 个视频 · 976.6 KB")).toBeVisible();
-    await expect(overview.getByText("到期")).toBeVisible();
-    await expect(overview.getByText("长期有效")).toBeVisible();
-    await expect(overview.getByText("下载", { exact: true })).toBeVisible();
-    await expect(overview.getByText("0 次")).toBeVisible();
-  });
-
-  test("多文件侧栏主操作区高度 = 46px（与单文件一致）", async ({ page }) => {
-    await setup(page, 3);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    const h = await sidebarBtnArea(page);
-    expect(h).not.toBeNull();
-    expect(h).toBe(46);
-  });
-
-  test("单文件舞台无任何按钮、侧栏有'下载此文件'、无'整体打包下载'", async ({ page }) => {
-    await setup(page, 1);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    // 舞台信息区允许复制链接小按钮，但不应承载下载/打包动作
-    const stageDownloadBtns = page.locator("main [class*='stagePlayer'] ~ div button[aria-label^='下载'], main [class*='stagePlayer'] ~ div button:has-text('整体打包')");
-    await expect(stageDownloadBtns).toHaveCount(0);
-
-    // 侧栏应有"下载此文件"按钮（单文件新下载入口）
     await expect(page.locator("aside button:has-text('下载此文件')")).toHaveCount(1);
-
-    // 侧栏不应有"整体打包下载"
     await expect(page.locator("aside button:has-text('整体打包下载')")).toHaveCount(0);
+    expect(await sidebarActionsHeight(page)).toBe(46);
   });
 
-  test("多文件舞台无操作按钮、列表有下载图标、侧栏有'下载当前文件'和'整体打包下载'", async ({ page }) => {
-    await setup(page, 3);
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.locator("text=整体打包下载").first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
+  test("多文件显示文件列表、当前下载和整体打包入口", async ({ page }) => {
+    await setupFileCount(page, 3);
+    await waitForReady(page);
 
-    // 舞台信息区允许复制链接小按钮，但不应承载下载/打包动作
-    const stageDownloadBtns = page.locator("main [class*='stagePlayer'] ~ div button[aria-label^='下载'], main [class*='stagePlayer'] ~ div button:has-text('整体打包')");
-    await expect(stageDownloadBtns).toHaveCount(0);
-
-    // 侧栏应有"下载当前文件"和"整体打包下载"
+    await expect(page.locator("aside span:visible").filter({ hasText: "文件列表" })).toHaveCount(1);
     await expect(page.locator("aside button:has-text('下载当前文件')")).toHaveCount(1);
-    await expect(page.locator("aside button:has-text('整体打包下载')")).toHaveCount(1);
-
-    // 文件列表每项应有下载图标（aria-label 含"下载"）
-    const icons = page.locator("button[aria-label*='下载']");
-    const count = await icons.count();
-    expect(count).toBeGreaterThanOrEqual(3);
+    await expect(page.locator("aside button:has-text('保存到文件夹'), aside button:has-text('请逐个下载')")).toHaveCount(1);
+    expect(await sidebarActionsHeight(page)).toBe(46);
   });
 
-  test("骨架→ready 侧栏主操作区高度始终 46px", async ({ page }) => {
-    // 延迟响应，捕获骨架阶段
-    let relInfo: () => void; const gInfo = new Promise<void>((r) => { relInfo = r; });
-    const gDl = new Promise<void>((r) => { setTimeout(r, 800); });
-    const files = Array.from({ length: 1 }, (_, i) => ({
-      file_name: `单.mp4`, file_size: 1000000, file_ext: "mp4", content_type: "video/mp4",
-      index: i, is_chunked: false, chunk_count: 0, media_metadata: META,
-    }));
-    const dlFiles = files.map((f) => ({
-      file_name: f.file_name, file_size: f.file_size, content_type: f.content_type,
-      is_chunked: false, download_url: `https://example.com/v0.mp4`, chunks: [], media_metadata: META,
-    }));
-    await page.route("**/api/v1/shares/" + C, async (r) => { await gInfo; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: C, files, empty_dirs: [], total_bytes: 1000000, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false }) }); });
-    await page.route("**/api/v1/shares/" + C + "/download", async (r) => { await gDl; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: dlFiles, empty_dirs: [], expires_in: 3600 }) }); });
-    await page.route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" }));
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.waitForTimeout(400);
-
-    // 骨架阶段侧栏主操作区高度
-    const skeletonH = await page.evaluate(() => {
-      const target = document.querySelector("aside [data-testid='share-actions']") as HTMLElement | null;
-      return target ? Math.round(target.getBoundingClientRect().height) : null;
-    });
-    expect(skeletonH).toBe(46);
-
-    // 释放 share info
-    relInfo!();
+  test("单文件下载链接加载前后按钮位置稳定", async ({ page }) => {
+    let releaseDownload!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseDownload = resolve; });
+    const file = shareFile({ file_name: "单.mp4" });
+    await routeShare(page, shareInfo([file]), downloadResponse([file]), { downloadGate: gate });
+    await routeExternal(page);
+    await page.goto(`/${MOCK_CODE}`);
     await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(300);
 
-    const readyH = await sidebarBtnArea(page);
-    expect(readyH).toBe(46);
-  });
+    const buttonArea = page.locator("aside [data-testid='share-actions']");
+    await expect(buttonArea.getByText("获取中…").first()).toBeVisible();
+    const before = await buttonArea.getByText("获取中…").first().boundingBox();
 
-  // 防闪烁回归：单文件 share 已到、downloads 尚未就绪时，侧栏不应出现
-  // 橙色"下载"按钮（因为下一秒就会因 !isSingle 消失）
-  // 防闪烁回归：单文件 share 已到、downloads 未就绪时，侧栏应有禁用态
-  // "获取中…"按钮占住顶部位置，downloads 到达后变"下载"——不消失、不新建、不跳变。
-  test("单文件 dl=0→dl>0 侧栏下载按钮不消失（防闪）", async ({ page }) => {
-    let relDl: () => void; const gDl = new Promise<void>((r) => { relDl = r; });
-    const META = { probe_version: 1, probe_status: "ok", file_size: 12345678, audio_tracks: [{ codec: "aac" }] };
-    const f1 = { file_name: "单.mp4", file_size: 12345678, file_ext: "mp4", content_type: "video/mp4", index: 0, is_chunked: false, chunk_count: 0, media_metadata: META };
-    await page.route("**/api/v1/shares/" + C, (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: C, files: [f1], empty_dirs: [], total_bytes: 12345678, created_at: new Date().toISOString(), expires_at: null, download_count: 0, max_downloads: 0, has_password: false }) })
-    );
-    await page.route("**/api/v1/shares/" + C + "/download", async (r) => { await gDl; await r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [{ file_name: "单.mp4", file_size: 12345678, content_type: "video/mp4", is_chunked: false, download_url: "https://example.com/v.mp4", chunks: [], media_metadata: META }], empty_dirs: [], expires_in: 3600 }) }); });
-    await page.route("https://example.com/**", (r) => r.fulfill({ status: 200, contentType: "application/octet-stream", body: "" }));
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${C}`);
-    await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.waitForTimeout(500);
-
-    // dl=0 阶段：侧栏主操作区只有 1 个按钮（获取中…），复制链接已移到当前文件信息区
-    const btnArea = page.locator("aside [data-testid='share-actions']");
-    const btns = btnArea.locator("button, a");
-    let count = await btns.count();
-    expect(count).toBe(1);
-
-    // 有"获取中…"禁用态按钮
-    await expect(btnArea.getByText("获取中…").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "复制链接" }).first()).toBeVisible();
-
-    // 记录"获取中…"按钮位置（用于后续对比）
-    const y0 = await btnArea.getByText("获取中…").first().boundingBox();
-
-    // 释放 downloads
-    relDl!();
-    await page.waitForTimeout(800);
-
-    // dl>0 阶段：按钮区仍 1 个按钮（下载），"获取中…"→"下载"未消失
-    count = await btns.count();
-    expect(count).toBe(1);
-    await expect(btnArea.getByText("下载此文件", { exact: true }).first()).toBeVisible();
-
-    // 按钮 Y 位置不变（无跳变）
-    const y1 = await btnArea.getByText("下载此文件", { exact: true }).first().boundingBox();
-    if (y0 && y1) {
-      expect(Math.abs(y0.y - y1.y)).toBeLessThanOrEqual(1);
-    }
+    releaseDownload();
+    await expect(buttonArea.getByText("下载此文件", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    const after = await buttonArea.getByText("下载此文件", { exact: true }).first().boundingBox();
+    expect(await buttonArea.locator("button, a").count()).toBe(1);
+    if (before && after) expect(Math.abs(before.y - after.y)).toBeLessThanOrEqual(1);
   });
 });

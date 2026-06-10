@@ -252,10 +252,8 @@ async def test_my_inbox_status_filters_and_file_download_permission(client):
     denied = await client.get(f"/api/v1/file-requests/my/files/{file_id}/download", headers=other_headers)
     assert denied.status_code == 404
 
-    with patch("app.api.v1.file_requests.get_doubao_client", new_callable=AsyncMock) as mock_get:
-        mock_client = AsyncMock()
-        mock_client.get_download_url.return_value = "https://download.test/inbox-file"
-        mock_get.return_value = mock_client
+    with patch("app.api.v1.file_requests.get_doubao_download_url", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = "https://download.test/inbox-file"
         allowed = await client.get(f"/api/v1/file-requests/my/files/{file_id}/download", headers=headers)
 
     assert allowed.status_code == 200

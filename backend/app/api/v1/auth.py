@@ -153,7 +153,10 @@ class UserInfoResponse(BaseModel):
     id: str
     email: str
     plan: str
+    is_admin: bool
     email_verified: bool
+    disabled: bool = False
+    deleted: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -168,7 +171,10 @@ def _user_info(user: User) -> UserInfoResponse:
         id=str(user.id),
         email=user.email,
         plan=user.plan,
+        is_admin=user.is_admin,
         email_verified=user.email_verified_at is not None,
+        disabled=user.disabled_at is not None,
+        deleted=user.deleted_at is not None,
     )
 
 
@@ -382,6 +388,22 @@ async def login(
         )
         raise HTTPException(401, "邮箱或密码错误")
 
+    if user.deleted_at is not None:
+        await log_auth_event(
+            db, event_type="login_failed", success=False,
+            user_id=user.id, email=body.email, ip=ip, user_agent=ua,
+            reason="user_deleted",
+        )
+        raise HTTPException(403, "账号已删除")
+
+    if user.disabled_at is not None:
+        await log_auth_event(
+            db, event_type="login_failed", success=False,
+            user_id=user.id, email=body.email, ip=ip, user_agent=ua,
+            reason="user_disabled",
+        )
+        raise HTTPException(403, "账号已禁用")
+
     if not user.email_verified_at:
         await record_login_failure(redis, body.email, ip)
         await log_auth_event(
@@ -472,6 +494,11 @@ async def refresh_token(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(401, "用户不存在")
+    if user.deleted_at is not None or user.disabled_at is not None:
+        await revoke_user_sessions(db, user.id)
+        await db.commit()
+        _delete_refresh_cookie(response)
+        raise HTTPException(403, "账号已删除" if user.deleted_at is not None else "账号已禁用")
 
     access_token = create_access_token(user_id, user.email)
 
@@ -620,5 +647,9 @@ async def get_me(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(401, "用户不存在")
+    if user.deleted_at is not None:
+        raise HTTPException(403, "账号已删除")
+    if user.disabled_at is not None:
+        raise HTTPException(403, "账号已禁用")
 
     return _user_info(user)

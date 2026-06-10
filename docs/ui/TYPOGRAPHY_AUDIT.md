@@ -37,7 +37,7 @@
 | `src/components/toast-provider.tsx` | done |
 | `src/components/pagination.tsx` | done |
 | `src/components/empty-state.tsx` | done |
-| `src/app/nyy-console/page.tsx` | done |
+| `src/app/admin/page.tsx` | done |
 
 `npx tsc --noEmit` 通过，零错误。
 

@@ -30,7 +30,7 @@ export function Pagination({ page, total, pageSize, onPageChange, className }: P
           type="button"
           onClick={() => goTo(page - 1)}
           disabled={page <= 1}
-          className="type-action inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-orange-200 dark:border-gray-700 bg-white dark:bg-card px-3 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+          className="retro-btn-secondary min-h-[40px] px-3 type-action"
         >
           <ChevronLeft className="h-4 w-4" /> 上一页
         </button>
@@ -38,7 +38,7 @@ export function Pagination({ page, total, pageSize, onPageChange, className }: P
           type="button"
           onClick={() => goTo(page + 1)}
           disabled={page >= totalPages}
-          className="type-action inline-flex min-h-[44px] items-center gap-1 rounded-xl border border-orange-200 dark:border-gray-700 bg-white dark:bg-card px-3 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+          className="retro-btn-secondary min-h-[40px] px-3 type-action"
         >
           下一页 <ChevronRight className="h-4 w-4" />
         </button>

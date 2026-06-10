@@ -1,5 +1,6 @@
 import { authFetch } from "./auth";
 import { createHttpError, isHttpStatusError } from "./errors";
+import type { DownloadConfig } from "./smart-download";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const GUEST_SHARES_STORAGE_KEY = "nyy_guest_shares";
@@ -287,6 +288,11 @@ export async function verifyShare(code: string, password: string): Promise<Share
 export async function downloadShare(code: string): Promise<ShareDownloadResponse> {
   const res = await fetch(`${API_BASE}/api/v1/shares/${code}/download`);
   return handleResponse(res, "获取下载链接失败");
+}
+
+export async function getPublicDownloadConfig(): Promise<DownloadConfig> {
+  const res = await fetch(`${API_BASE}/api/v1/shares/download-config`);
+  return handleResponse(res, "获取下载配置失败");
 }
 
 export async function reportShare(code: string, reason: string, detail = ""): Promise<{ message: string }> {

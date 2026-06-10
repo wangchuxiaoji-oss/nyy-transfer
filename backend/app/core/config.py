@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     doubao_file_station_base_url: str = "http://127.0.0.1:9190"
     doubao_file_station_api_key: str = "sk-local"
     doubao_session_file: str | None = None
+    doubao_download_fallback_session_files: str = ""
+    doubao_auto_verify_enabled: bool = True
+    doubao_auto_verify_startup_delay_seconds: int = 30
+    doubao_auto_verify_heartbeat_interval_seconds: int = 600
+    doubao_auto_verify_probe_interval_seconds: int = 1800
+    doubao_auto_verify_failure_notify_interval_seconds: int = 21600
+
+    # Bark 推送，建议填写完整地址：https://api.day.app/<key>
+    bark_push_url: str = ""
 
     # Captcha
     hcaptcha_site_key: str = ""

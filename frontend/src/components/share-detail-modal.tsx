@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, FileText, Clock, Download, Trash2, Link2, Folder } from "lucide-react";
+import { X, FileText, Clock, Download, Trash2, Link2, Folder, ExternalLink } from "lucide-react";
 import QRCode from "qrcode";
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { getShareInfo, type ShareInfo, type GuestShareInfo } from "@/lib/api";
 
 function formatBytes(bytes: number): string {
@@ -28,17 +29,22 @@ interface Props {
   share: GuestShareInfo;
   open: boolean;
   onClose: () => void;
+  onCopy: (text: string) => Promise<void> | void;
   onDelete: (code: string) => void;
   canDelete: boolean;
 }
 
-export function ShareDetailModal({ share, open, onClose, onDelete, canDelete }: Props) {
+export function ShareDetailModal({ share, open, onClose, onCopy, onDelete, canDelete }: Props) {
   const [detail, setDetail] = useState<ShareInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [qrUrl, setQrUrl] = useState("");
 
   const shareUrl = share.url || `${typeof window !== "undefined" ? window.location.origin : ""}/${share.code}`;
+
+  const copyShareUrl = async () => {
+    await onCopy(shareUrl);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -66,8 +72,8 @@ export function ShareDetailModal({ share, open, onClose, onDelete, canDelete }: 
           <h3 className="retro-title text-lg">
             分享详情
           </h3>
-          <button onClick={onClose} className="retro-btn-secondary min-h-0 rounded-lg p-1.5 transition-colors">
-            <X className="w-4 h-4 text-gray-500" />
+          <button type="button" onClick={onClose} aria-label="关闭分享详情" className="retro-close-button">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -93,9 +99,16 @@ export function ShareDetailModal({ share, open, onClose, onDelete, canDelete }: 
               {/* Meta + URL */}
               <div className="flex-1 min-w-0 space-y-3 w-full">
                 {/* Share URL */}
-                <div className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
+                <div className="retro-card flex items-center gap-2 rounded-control px-3 py-2">
                   <Link2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                   <span className="type-body-sm text-orange-600 dark:text-orange-400 truncate font-mono">{shareUrl}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <CopyLinkButton onCopy={copyShareUrl} className="retro-btn-secondary min-h-[38px] px-3 text-sm" />
+                  <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3 text-sm">
+                    <ExternalLink className="h-4 w-4" />打开分享
+                  </a>
                 </div>
 
                 {/* Meta info */}
@@ -120,14 +133,14 @@ export function ShareDetailModal({ share, open, onClose, onDelete, canDelete }: 
             {/* File list */}
             <div className="space-y-2 max-h-40 overflow-y-auto">
               {detail.empty_dirs.map((dir) => (
-                <div key={dir} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
+                <div key={dir} className="retro-card flex items-center gap-2 rounded-control px-3 py-2">
                   <Folder className="w-4 h-4 text-gray-400 shrink-0" />
                   <span className="type-file-name flex-1 truncate retro-text">{dir}</span>
                   <span className="type-file-meta shrink-0 retro-muted">空文件夹</span>
                 </div>
               ))}
               {detail.files.map((f, i) => (
-                <div key={i} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
+                <div key={i} className="retro-card flex items-center gap-2 rounded-control px-3 py-2">
                   <FileText className="w-4 h-4 text-gray-400 shrink-0" />
                   <span className="type-file-name flex-1 truncate retro-text">{f.file_name}</span>
                   <span className="type-file-meta shrink-0 retro-muted">{formatBytes(f.file_size)}</span>
@@ -144,7 +157,7 @@ export function ShareDetailModal({ share, open, onClose, onDelete, canDelete }: 
             <button
               onClick={() => onDelete(share.code)}
               disabled={!canDelete}
-              className="type-action w-full mt-2 flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="retro-action-button retro-action-danger mt-2 w-full px-4 py-2.5 type-action"
             >
               <Trash2 className="w-4 h-4" />
               {canDelete ? "撤销此分享" : "无法撤销（缺少令牌）"}

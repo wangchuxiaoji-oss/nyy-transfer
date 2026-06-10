@@ -20,7 +20,7 @@
 - 入口：拖拽 / 粘贴 / 移动端拍照选相册 / CLI / API
 - 多文件 / 文件夹拖拽：前端 client-zip 流式打包成单个分享，不落 VPS 盘
 - 单文件硬限制：v1 = 1 GiB（实测 TOS 单 PUT 上限），超出友好提示
-- v1.5：前端 `File.slice` 切片成 ≤1 GiB 子分片，多 TOS URI 并行直传，下载用 StreamSaver 流式拼接，全程不走 VPS
+- v1.5：前端 `File.slice` 切片成 ≤1 GiB 子分片，多 TOS URI 并行直传，下载用 File System Access + 64MB Range 本地写盘，全程不走 VPS
 - 进度 / 速度 / 剩余时间显示
 - 断点续传：IndexedDB 缓存进度，刷新页面续传
 - 失败重试：单片指数退避，最多 5 次
@@ -81,7 +81,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 
 - 栈：Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui + Framer Motion
 - i18n：next-intl
-- 关键库：StreamSaver.js（流式下载）/ client-zip（流式打包）/ hCaptcha
+- 关键能力：File System Access（本地分段写盘）/ client-zip（流式打包）/ hCaptcha
 - 管理后台：Next.js 自建，路由 `/admin/*`，仅管理员账号可见
 
 ## 9. 后端 / 架构
@@ -138,7 +138,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 - **Week 5 风控+运维**：abuse.ch hash 黑名单 / 举报入口 / IP 日志 / Prometheus + Grafana + Loki + Sentry / pg_dump / URI 健康巡检
 - **Week 6 前端打磨+i18n**：暖橘色品牌视觉收口 / 中英双语 / 移动端 / 管理后台 / 协议文案 / Logo 终稿
 - **Week 7 商业化+灰度**：爱发电跳转 + 手动激活 / Pro 配额逻辑 / 自定义短码 / 内测 10–20 人
-- **Week 8 v1.5 多分片+上线**：File.slice 切片 / 多 URI 并行直传 / StreamSaver 流式拼接 / 失败续传 IndexedDB / 公开上线 / V2EX、少数派、X、小红书冷启动
+- **Week 8 v1.5 多分片+上线**：File.slice 切片 / 多 URI 并行直传 / File System Access 本地分段写盘 / 失败续传 IndexedDB / 公开上线 / V2EX、少数派、X、小红书冷启动
 
 ### 13.1 版本路线图补充
 

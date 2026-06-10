@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ChevronDown, Copy, ExternalLink, Inbox, Lock, Plus, Settings } from "lucide-react";
+import { ChevronDown, ExternalLink, Inbox, Lock, Plus, Settings } from "lucide-react";
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { createFileRequest } from "@/lib/auth";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -22,7 +23,6 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
   const [maxBytesUnit, setMaxBytesUnit] = useState<"MB" | "GB">("MB");
   const [result, setResult] = useState<{ code: string; url: string } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
   const displayUrl = result ? `${window.location.origin}/r/${result.code}` : "";
@@ -58,9 +58,7 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
 
   function copyLink() {
     if (!displayUrl) return;
-    navigator.clipboard.writeText(displayUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    return navigator.clipboard.writeText(displayUrl);
   }
 
   const content = (
@@ -126,11 +124,11 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
                 <label className="block">
                   <span className="type-label retro-text">最大文件数</span>
                   <input type="number" min={1} max={100} value={maxFiles} onChange={(e) => setMaxFiles(Math.max(1, Math.min(100, Number(e.target.value))))}
-                    className="retro-input type-body-sm mt-1 min-h-[40px] w-full rounded-lg px-3" />
+                    className="retro-input type-body-sm mt-1 min-h-[40px] w-full px-3" />
                 </label>
                 <label className="block">
                   <span className="type-label retro-text">总容量上限</span>
-                  <div className="retro-input mt-1 flex min-h-[40px] overflow-hidden rounded-lg p-0 focus-within:border-nyy-600">
+                  <div className="retro-input mt-1 flex min-h-[40px] overflow-hidden p-0 focus-within:border-nyy-600">
                     <input type="number" min={1} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
                       className="type-body-sm min-h-[40px] min-w-0 flex-1 bg-transparent px-3 outline-none" />
                     <select value={maxBytesUnit} onChange={(e) => setMaxBytesUnit(e.target.value as "MB" | "GB")}
@@ -155,10 +153,8 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
                 <p className="type-body-sm mt-1 retro-text">把这个链接发给对方，对方上传的文件会进入你的账号。</p>
                 <code className="retro-input type-body mt-3 block truncate select-all px-2 py-1.5">{displayUrl}</code>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button onClick={copyLink} className="retro-btn-secondary min-h-[44px] rounded-lg px-3">
-                    <Copy className="h-3.5 w-3.5" /> {copied ? "已复制" : "复制链接"}
-                  </button>
-                  <a href={`/r/${result.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] rounded-lg px-3">
+                  <CopyLinkButton onCopy={copyLink} className="retro-btn-secondary min-h-[44px] px-3" iconClassName="h-3.5 w-3.5" />
+                  <a href={`/r/${result.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] px-3">
                     <ExternalLink className="h-3.5 w-3.5" /> 打开看看
                   </a>
                 </div>

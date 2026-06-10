@@ -20,7 +20,7 @@ self.addEventListener("message", (event) => {
     debugClientIds.delete(event.source.id);
     event.ports?.[0]?.postMessage({ ok: true });
   } else if (data.type === "NYY_CLAIM_CLIENTS") {
-    event.waitUntil(self.clients.claim().then(() => {
+    event.waitUntil(self.skipWaiting().then(() => self.clients.claim()).then(() => {
       event.ports?.[0]?.postMessage({ ok: true });
     }).catch((err) => {
       event.ports?.[0]?.postMessage({ ok: false, error: err?.message || "clients.claim failed" });

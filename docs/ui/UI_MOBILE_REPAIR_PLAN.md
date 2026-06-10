@@ -48,7 +48,7 @@
 
 ## Chrome MCP 移动端评审清单
 
-- 页面：`/`、登录弹窗、上传更多选项、`/:code` 分享页、`/r/:code` 收件页、`/my`、`/nyy-console`。
+- 页面：`/`、登录弹窗、上传更多选项、`/:code` 分享页、`/r/:code` 收件页、`/my`、`/admin`。
 - 自动检查：横向滚动、触控尺寸、未命名按钮、未关联 label 的表单控件、dialog 语义、alert/live region。
 - Lighthouse：移动端 Accessibility 目标无失败项，SEO 基础文件通过，Agentic Browsing 基础文件通过。
 - 记录移动端 snapshot 和关键流程结果。
@@ -60,7 +60,7 @@
 - 上传分享：上传小文件，设置提取码/过期时间，生成链接，确认复制反馈。
 - 分享下载：打开分享页，验证提取码错误/正确反馈，确认下载、二维码、举报入口可触控。
 - 收文件：登录用户创建收件链接，访客上下文打开 `/r/:code` 上传小文件，创建者在 `/my` 查看收到文件。
-- Admin：移动端登录 `/nyy-console`，检查统计卡、举报队列、邮件记录、配额表单、封禁列表。
+- Admin：移动端登录 `/admin`，检查统计卡、举报队列、邮件记录、配额表单、封禁列表。
 - 清理：记录本轮分享码和收件码，测试后清理或复用后端 E2E cleanup 逻辑。
 
 ## 验证命令
@@ -96,7 +96,7 @@
 ### 已确认决策
 
 - `/my`：桌面和移动都做成 `tab + search + pagination`。
-- `/nyy-console`：桌面端 `table-first`，移动端 `card-first`。
+- `/admin`：桌面端 `table-first`，移动端 `card-first`。
 - 文件请求高级参数开放：`max_files` 和 `max_bytes` 放进“高级设置”，默认折叠。
 - 全局统一 toast。
 - 继续只用 Chrome MCP + 后端 E2E，不新增 Playwright。
@@ -111,7 +111,7 @@
 | 我的页面 `/my` | 变成“个人工作台”：顶部 tab、搜索、筛选、分页、URL 同步状态；下面分“分享 / 文件请求 / 收到的文件”。 |
 | 分享页 `/[code]` | 移动端加固定底部 action bar；主动作突出下载，复制和举报保持次级；保留二维码和文件摘要。 |
 | 收文件页 `/r/[code]` | 维持三步式流程：验证访问码、选择文件、提交完成；高级设置保持折叠；成功后给明确下一步。 |
-| Admin `/nyy-console` | 桌面端表格优先，支持搜索、筛选、排序、分页；移动端改卡片堆叠，保持可操作性。 |
+| Admin `/admin` | 桌面端表格优先，支持搜索、筛选、排序、分页；移动端改卡片堆叠，保持可操作性。 |
 | 全局 | 统一 toast、skeleton、错误恢复、确认对话框、空状态、reduced-motion。 |
 
 ### 页面级方案
@@ -148,7 +148,7 @@
 - 成功提交后要清楚说明“文件已提交”，并给下一步路径。
 - 这页的移动端必须保证提交按钮始终可见，不被键盘或小屏挤掉。
 
-#### Admin `/nyy-console`
+#### Admin `/admin`
 
 - 桌面端改成表格优先。
 - 表格列建议：
@@ -257,7 +257,7 @@
 ### 页面
 
 - 更新 `src/app/my/page.tsx`：重构为个人工作台，tab/search/filter/pagination/empty state/toast/confirm dialog。
-- 更新 `src/app/nyy-console/page.tsx`：桌面表格优先、移动卡片优先、搜索筛选排序分页、toast、confirm dialog。
+- 更新 `src/app/admin/page.tsx`：桌面表格优先、移动卡片优先、搜索筛选排序分页、toast、confirm dialog。
 - 更新 `src/components/file-request-creator.tsx`：高级设置开放 `max_files` 和 `max_bytes`，默认折叠。
 - 更新 `src/app/[code]/page.tsx`：移动端底部 action bar，复制/下载/举报反馈统一走 toast。
 - 更新 `src/app/r/[code]/page.tsx`：移动端底部提交 action bar，成功后提供继续上传/返回首页路径。

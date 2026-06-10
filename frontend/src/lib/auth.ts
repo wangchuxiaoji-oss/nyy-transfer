@@ -130,7 +130,10 @@ export interface UserInfo {
   id: string;
   email: string;
   plan: string;
+  is_admin: boolean;
   email_verified: boolean;
+  disabled?: boolean;
+  deleted?: boolean;
 }
 
 export { API_BASE };

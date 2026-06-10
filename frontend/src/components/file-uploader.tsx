@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
-  Upload, CheckCircle2, AlertCircle, FileIcon, Copy, Lock, Clock,
-  X, RotateCcw, Files, Download, Folder,
+  Upload, CheckCircle2, AlertCircle, FileIcon, Lock, Clock,
+  X, RotateCcw, Files, Download, Folder, ExternalLink,
 } from "lucide-react";
 import QRCode from "qrcode";
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { cn } from "@/lib/utils";
 import { computeCRC32 } from "@/lib/crc32";
 import { uploadInit, uploadCommit, multipartInit, multipartMerge, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata, type MultipartInitResponse } from "@/lib/api";
@@ -96,7 +97,6 @@ export function FileUploader({
   const [result, setResult] = useState<UploadResult | null>(null);
   const [resultPhase, setResultPhase] = useState<"check" | "card">("check");
   const [dragOver, setDragOver] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [qrUrl, setQrUrl] = useState<string>("");
   const [quota, setQuota] = useState<QuotaInfo | null>(null);
   const [password, setPassword] = useState("");
@@ -146,7 +146,6 @@ export function FileUploader({
     setFolderWarning("");
     setResult(null);
     setResultPhase("check");
-    setCopied(false);
     setQrUrl("");
     setResumeMessage("");
     setUploadMetrics({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
@@ -1100,8 +1099,6 @@ export function FileUploader({
       document.execCommand("copy");
       document.body.removeChild(ta);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const formatSize = (bytes: number) => {
@@ -1137,6 +1134,12 @@ export function FileUploader({
   const totalItemCount = files.length + emptyDirs.length;
   const visibleFiles = showAllFiles ? files : files.slice(0, 5);
   const visibleEmptyDirs = showAllFiles ? emptyDirs : emptyDirs.slice(0, Math.max(0, 5 - visibleFiles.length));
+  const resultShareUrl = result?.shareUrl || "";
+  const resultSummary = [
+    `${result?.fileCount ?? files.length} 个文件`,
+    emptyDirs.length > 0 ? `${emptyDirs.length} 个空文件夹` : "",
+    formatSize(totalSize),
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="w-full">
@@ -1149,9 +1152,7 @@ export function FileUploader({
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={cn(
-          "retro-card relative p-8",
-          "transition-all duration-200 ease-out",
-          "flex flex-col items-center justify-center gap-3 min-h-[120px] sm:min-h-[180px]",
+          "retro-file-dropzone relative p-8",
           dragOver ? cn("bg-nyy-50 dark:bg-nyy-900/20 ring-2 ring-nyy-400/50 dark:ring-nyy-500/40", !shouldReduceMotion && "scale-[1.01]")
             : overall === "error" ? "bg-red-50/60 dark:bg-red-900/10"
             : "hover:bg-gray-50/80 dark:hover:bg-white/[0.02]"
@@ -1178,10 +1179,10 @@ export function FileUploader({
         </p>
 
         {overall === "idle" && totalItemCount === 0 && (
-          <div className="retro-tabbar inline-flex items-center gap-1">
+          <div className="retro-segmented inline-flex items-center gap-1">
               <button
                 onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
-                className="btn-primary rounded-lg"
+                className="btn-primary"
               >
                 选择文件
               </button>
@@ -1190,9 +1191,9 @@ export function FileUploader({
                 disabled={!supportsDirectoryPicker}
                 title={supportsDirectoryPicker ? "选择文件夹" : "当前浏览器无法保留空文件夹结构，请使用 Chrome / Edge 桌面端"}
                 className={cn(
-                  "type-action hidden sm:inline-flex items-center min-h-[44px] rounded-lg px-4 transition-all active:scale-[0.97]",
+                  "retro-segment-button hidden min-h-[44px] px-4 active:scale-[0.97] sm:inline-flex",
                   supportsDirectoryPicker
-                    ? "retro-text hover:text-nyy-500"
+                    ? ""
                     : "cursor-not-allowed text-gray-300 dark:text-gray-600"
                 )}
               >
@@ -1280,77 +1281,89 @@ export function FileUploader({
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3, delay: 0.4 }}
             >
-              {/* Header row */}
-              <div className="flex items-center justify-between mb-3">
-                <span className="type-label pl-6 retro-text">
-                  上传完成 · {result?.fileCount} 个文件{emptyDirs.length > 0 ? ` · ${emptyDirs.length} 个空文件夹` : ""}
-                </span>
-                {password && (
-                  <span className="type-caption text-nyy-600 flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> 提取码: {password}
-                  </span>
-                )}
-              </div>
-              {/* File list */}
-              {totalItemCount > 0 && (
-                <div className="mb-3 space-y-1.5">
-                  {visibleFiles.map((entry) => (
-                    <div key={entry.id} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
-                      <FileIcon className="w-4 h-4 text-gray-400 shrink-0" />
-                      <span className="type-file-name flex-1 truncate retro-text">{entry.uploadName}</span>
-                      <span className="type-file-meta shrink-0 retro-muted">{formatSize(entry.file.size)}</span>
+              <div className="space-y-3">
+                <div className="flex flex-col gap-2 pl-7 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="type-body-strong text-green-700 dark:text-green-300">上传完成</p>
+                    <p className="type-body-sm mt-0.5 retro-muted">{resultSummary}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {password && (
+                      <span className="type-caption inline-flex w-fit items-center gap-1 rounded-full border border-nyy-300/60 bg-nyy-50 px-2 py-1 text-nyy-700 dark:border-nyy-500/30 dark:bg-nyy-500/10 dark:text-nyy-300">
+                        <Lock className="w-3 h-3" /> 提取码 {password}
+                      </span>
+                    )}
+                    <button onClick={reset} className="retro-btn-secondary min-h-[34px] px-3 text-xs">继续上传</button>
+                  </div>
+                </div>
+
+                <div className={cn("grid gap-4 border-t border-white/10 pt-4", qrUrl && "lg:grid-cols-[minmax(0,1fr)_8.5rem] lg:items-start")}>
+                  <div className="min-w-0 space-y-3">
+                    <div>
+                      <p className="type-label retro-text">分享内容</p>
                     </div>
-                  ))}
-                  {visibleEmptyDirs.map((dir) => (
-                    <div key={dir} className="retro-card flex items-center gap-2 rounded-lg px-3 py-2">
-                      <Folder className="w-4 h-4 text-gray-400 shrink-0" />
-                      <span className="type-file-name flex-1 truncate retro-text">{dir}</span>
-                      <span className="type-file-meta shrink-0 retro-muted">空文件夹</span>
+                    {totalItemCount > 0 && (
+                      <div className="space-y-1.5">
+                        {visibleFiles.map((entry) => (
+                          <div key={entry.id} className="grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3 rounded-control border border-white/10 bg-white/5 px-3 py-2 dark:bg-black/10">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <FileIcon className="w-4 h-4 text-gray-400 shrink-0" />
+                              <span className="type-file-name truncate retro-text">{entry.uploadName}</span>
+                            </span>
+                            <span className="type-file-meta justify-self-end retro-muted">{formatSize(entry.file.size)}</span>
+                          </div>
+                        ))}
+                        {visibleEmptyDirs.map((dir) => (
+                          <div key={dir} className="grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3 rounded-control border border-white/10 bg-white/5 px-3 py-2 dark:bg-black/10">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Folder className="w-4 h-4 text-gray-400 shrink-0" />
+                              <span className="type-file-name truncate retro-text">{dir}</span>
+                            </span>
+                            <span className="type-file-meta justify-self-end retro-muted">空文件夹</span>
+                          </div>
+                        ))}
+                        {!showAllFiles && totalItemCount > 5 && (
+                          <button
+                            onClick={() => setShowAllFiles(true)}
+                            className="retro-text-button ml-auto min-h-0 py-1 pr-1"
+                          >
+                            显示全部
+                          </button>
+                        )}
+                        {showAllFiles && totalItemCount > 5 && (
+                          <button
+                            onClick={() => setShowAllFiles(false)}
+                            className="retro-text-button ml-auto min-h-0 py-1 pr-1"
+                          >
+                            收起
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid gap-2 border-t border-white/10 pt-3 sm:grid-cols-[minmax(0,1fr)_8.25rem_5.5rem] sm:items-center">
+                      <code className="block truncate select-all rounded-control border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-orange-600 dark:bg-black/10 dark:text-orange-300">
+                        {resultShareUrl}
+                      </code>
+                      <CopyLinkButton
+                        onCopy={copyLink}
+                        className="btn-primary min-h-[40px] w-full px-3"
+                        iconClassName="w-4 h-4"
+                        copiedDuration={2000}
+                      />
+                      <a href={resultShareUrl || "#"} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[40px] w-full px-3">
+                        <ExternalLink className="h-4 w-4" />打开
+                      </a>
                     </div>
-                  ))}
-                  {!showAllFiles && totalItemCount > 5 && (
-                    <button
-                      onClick={() => setShowAllFiles(true)}
-                      className="type-action w-full py-1 text-gray-500 dark:text-gray-400 hover:text-nyy-600 dark:hover:text-nyy-400 transition-colors"
-                    >
-                      显示全部 {totalItemCount} 项
-                    </button>
-                  )}
-                  {showAllFiles && totalItemCount > 5 && (
-                    <button
-                      onClick={() => setShowAllFiles(false)}
-                      className="type-action w-full py-1 text-gray-500 dark:text-gray-400 hover:text-nyy-600 dark:hover:text-nyy-400 transition-colors"
-                    >
-                      收起
-                    </button>
+                  </div>
+
+                  {qrUrl && (
+                    <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 rounded-control border border-white/10 bg-white/5 p-2 dark:bg-black/10 lg:grid-cols-1 lg:justify-items-center lg:self-start">
+                      <img src={qrUrl} alt="分享二维码" className="h-20 w-20 rounded-lg bg-white p-1 lg:h-24 lg:w-24" />
+                      <span className="type-caption retro-muted lg:text-center">扫码访问</span>
+                    </div>
                   )}
                 </div>
-              )}
-              {/* Link + QR row */}
-              <div className="flex flex-col sm:flex-row sm:gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <code className="retro-input type-body flex-1 truncate select-all px-3 py-2">
-                      {result?.shareUrl}
-                    </code>
-                    <button
-                      onClick={copyLink}
-                      className={cn(
-                        "btn-primary flex items-center gap-1 px-3 py-2",
-                        copied && "!bg-none !bg-green-100 !text-green-700 !shadow-none"
-                      )}
-                    >
-                      <Copy className="w-4 h-4" />
-                      {copied ? "已复制" : "复制"}
-                    </button>
-                  </div>
-                  <button onClick={reset} className="retro-btn-secondary mt-3 min-h-[36px] rounded-lg px-3">继续上传</button>
-                </div>
-                {qrUrl && (
-                  <div className="flex justify-center sm:justify-end pt-3 sm:pt-0 sm:items-center shrink-0">
-                    <img src={qrUrl} alt="分享二维码" className="w-24 h-24 sm:w-28 sm:h-28 rounded-lg" />
-                  </div>
-                )}
               </div>
             </motion.div>
           )}
@@ -1392,7 +1405,7 @@ export function FileUploader({
           {overall === "uploading" && (
             <button
               onClick={() => void cancelUpload()}
-              className="type-action mt-3 min-h-[40px] rounded-xl border border-red-200 px-4 text-red-600 transition-all hover:bg-red-50 dark:border-red-800/50 dark:text-red-400 dark:hover:bg-red-900/20"
+              className="retro-action-button retro-action-danger mt-3 min-h-[40px] px-4 type-action"
             >
               取消上传
             </button>
@@ -1433,8 +1446,8 @@ export function FileUploader({
                 </div>
               </div>
               {isIdle && (
-                <button onClick={() => removeFile(entry.id)} aria-label={`移除 ${entry.uploadName}`} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-white/10">
-                  <X className="w-3 h-3 text-gray-400" />
+                <button onClick={() => removeFile(entry.id)} aria-label={`移除 ${entry.uploadName}`} className="retro-icon-button h-11 w-11 text-gray-400">
+                  <X className="w-3 h-3" />
                 </button>
               )}
             </div>
@@ -1447,8 +1460,8 @@ export function FileUploader({
                 <span className="type-file-meta text-gray-400">空文件夹</span>
               </div>
               {isIdle && (
-                <button onClick={() => setEmptyDirs((prev) => prev.filter((item) => item !== dir))} aria-label={`移除 ${dir}`} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-white/10">
-                  <X className="w-3 h-3 text-gray-400" />
+                <button onClick={() => setEmptyDirs((prev) => prev.filter((item) => item !== dir))} aria-label={`移除 ${dir}`} className="retro-icon-button h-11 w-11 text-gray-400">
+                  <X className="w-3 h-3" />
                 </button>
               )}
             </div>
@@ -1456,15 +1469,15 @@ export function FileUploader({
           {!showAllFiles && totalItemCount > 5 && (
             <button
               onClick={() => setShowAllFiles(true)}
-              className="type-action w-full py-1.5 text-gray-500 dark:text-gray-400 hover:text-nyy-600 dark:hover:text-nyy-400 transition-colors"
+              className="retro-text-button min-h-0 w-full py-1.5"
             >
-              查看全部 {totalItemCount} 项
+              查看全部
             </button>
           )}
           {showAllFiles && totalItemCount > 5 && (
             <button
               onClick={() => setShowAllFiles(false)}
-              className="type-action w-full py-1.5 text-gray-500 dark:text-gray-400 hover:text-nyy-600 dark:hover:text-nyy-400 transition-colors"
+              className="retro-text-button min-h-0 w-full py-1.5"
             >
               收起
             </button>
@@ -1535,7 +1548,7 @@ export function FileUploader({
                 placeholder="留空不设密码"
                 value={password}
                 onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                className="retro-input type-body-sm h-9 min-h-0 max-w-[160px] flex-1 rounded-lg px-3"
+                className="retro-input type-body-sm h-9 min-h-0 max-w-[160px] flex-1 px-3"
               />
             </div>
             <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.04]" />
@@ -1628,7 +1641,7 @@ export function FileUploader({
       {overall === "error" && (
         <div role="alert" className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 dark:border-red-800/40 bg-red-50 dark:bg-red-900/20 p-3">
           <span className="type-body-sm text-red-700 dark:text-red-400">{error}</span>
-          <button onClick={() => void startUpload()} className="type-action flex min-h-[44px] items-center gap-1 rounded-lg px-2 text-nyy-800 dark:text-nyy-400 hover:underline">
+          <button onClick={() => void startUpload()} className="retro-text-button px-2 text-nyy-800 dark:text-nyy-400">
             <RotateCcw className="w-3 h-3" /> 重试
           </button>
         </div>

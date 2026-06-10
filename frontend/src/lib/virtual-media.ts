@@ -2,16 +2,19 @@ import type { PlaybackAsset, ShareFileDownload } from "./api";
 import type { DebugLogFn } from "./debug";
 
 const VIDEO_ONLY_BLOB_FALLBACK_MAX_BYTES = 96 * 1024 * 1024;
+const VIRTUAL_MEDIA_SW_VERSION = "20260609-native-download-ascii-header";
 
 function getSwUrl(): string {
   if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sw") === "legacy") {
-    return "/nyy-virtual-media-sw-legacy.js";
+    return `/nyy-virtual-media-sw-legacy.js?v=${VIRTUAL_MEDIA_SW_VERSION}`;
   }
-  return "/nyy-virtual-media-sw.js";
+  return `/nyy-virtual-media-sw.js?v=${VIRTUAL_MEDIA_SW_VERSION}`;
 }
 
 function workerMatchesCurrentMode(worker: ServiceWorker): boolean {
-  return new URL(worker.scriptURL).pathname === getSwUrl();
+  const actual = new URL(worker.scriptURL);
+  const expected = new URL(getSwUrl(), window.location.origin);
+  return actual.pathname === expected.pathname && actual.search === expected.search;
 }
 
 function hasExpectedController(): boolean {
@@ -57,12 +60,13 @@ async function ensureVirtualMediaServiceWorker(): Promise<ServiceWorkerRegistrat
   if (!("serviceWorker" in navigator)) throw new Error("当前浏览器不支持 Service Worker");
   const swUrl = getSwUrl();
   const registration = await navigator.serviceWorker.register(swUrl, { scope: "/" });
-  await registration.update().catch(() => {});
+  const updatedRegistration = await registration.update().catch(() => registration);
   await navigator.serviceWorker.ready;
 
+  await requestWorkerClaim(updatedRegistration.waiting).catch(() => {});
+  await requestWorkerClaim(updatedRegistration.active).catch(() => {});
+
   if (!hasExpectedController()) {
-    await requestWorkerClaim(registration.active).catch(() => {});
-    await requestWorkerClaim(registration.waiting).catch(() => {});
     await waitForExpectedController(8000);
   }
 

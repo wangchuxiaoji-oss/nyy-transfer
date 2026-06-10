@@ -55,7 +55,7 @@ Playwright 本地默认不自动启动服务；设置 `PLAYWRIGHT_WEB_SERVER=1` 
 | `/{code}` | `src/app/[code]/page.tsx` | 分享落地页 / 下载页 |
 | `/r/{code}` | `src/app/r/[code]/page.tsx` | 文件请求上传页 |
 | `/my` | `src/app/my/page.tsx` | 我的工作台 |
-| `/nyy-console` | `src/app/nyy-console/page.tsx` | 管理后台 |
+| `/admin` | `src/app/admin/page.tsx` | 管理后台 |
 
 ## 关键组件
 

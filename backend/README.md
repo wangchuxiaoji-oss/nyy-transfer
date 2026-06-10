@@ -148,6 +148,11 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `SECRET_KEY` | 至少 32 字节 | 应用密钥 |
 | `JWT_SECRET` | 至少 32 字节 | JWT 密钥 |
 | `DOUBAO_SESSION_FILE` | `/data/nyy/backend/.doubao_session.json` | 豆包会话文件 |
+| `DOUBAO_AUTO_VERIFY_ENABLED` | `true` | 是否启动豆包 A/B Session 自动验证 |
+| `DOUBAO_AUTO_VERIFY_HEARTBEAT_INTERVAL_SECONDS` | `600` | 豆包登录心跳间隔 |
+| `DOUBAO_AUTO_VERIFY_PROBE_INTERVAL_SECONDS` | `1800` | 豆包上传授权探活间隔 |
+| `DOUBAO_AUTO_VERIFY_FAILURE_NOTIFY_INTERVAL_SECONDS` | `21600` | 同一失败 Bark 重复推送最小间隔 |
+| `BARK_PUSH_URL` | `https://api.day.app/<key>` | Bark 完整推送地址，留空则只写日志 |
 | `SMTP_HOST` | `127.0.0.1` | 邮件发送 SMTP |
 | `SMTP_PORT` | `25` | 邮件发送 SMTP 端口 |
 | `EMAIL_FROM` | `noreply@nyy.app` | 邮件发件人 |
@@ -256,11 +261,11 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 
 ### 6.6 管理后台
 
-文件：`backend/app/api/v1/admin.py`、`frontend/src/app/nyy-console/page.tsx`
+文件：`backend/app/api/v1/admin.py`、`frontend/src/app/admin/page.tsx`
 
 能力：
 
-- 管理员登录后进入运营后台。
+- `admin@nyy.app` 登录后进入 `/admin` 运营后台。
 - 统计面板：分享、用户、举报、邮件等概览。
 - 分享列表：查看、封禁、解封。
 - 用户列表。
@@ -435,7 +440,7 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `src/app/[code]/page.tsx` | 分享落地页 / 下载页 |
 | `src/app/r/[code]/page.tsx` | 文件请求访客上传页 |
 | `src/app/my/page.tsx` | 我的工作台 |
-| `src/app/nyy-console/page.tsx` | 管理后台 |
+| `src/app/admin/page.tsx` | 管理后台 |
 | `src/components/file-uploader.tsx` | 核心上传组件 |
 | `src/components/file-request-creator.tsx` | 文件请求创建组件 |
 | `src/components/auth-modal.tsx` | 登录 / 注册 Modal |
@@ -566,7 +571,19 @@ const responses = await Promise.all(files.map(async (f) => ({
 const blob = await downloadZip(responses).blob();
 ```
 
-### 12.6 上传完成勾勾动效
+### 12.6 大文件下载边界
+
+豆包下载直链由第三方 CDN 返回，当前无法附加 `Content-Disposition: attachment`。浏览器也不会稳定尊重跨域 `<a download>`，所以“零后端带宽”和“强制保存远程大文件”不能同时保证。
+
+当前策略：
+
+- 默认增强下载：`/admin?tab=download` 可关闭 `smart_download_enabled`，关闭后非分片文件回到豆包原始链接。
+- 默认适用所有单文件类型：视频、音频、PDF、图片和其他普通附件都走增强下载；后台可按类型关闭。
+- 支持 File System Access 的浏览器：让用户选择保存位置，再按 64MB `Range` 分段读取豆包直链并写入本地文件，不走后端带宽。
+- 其他浏览器：不再尝试 StreamSaver / Blob 兜底，非分片文件直接打开豆包原始链接。
+- 分片文件：没有单个原始链接；支持 File System Access 的浏览器可本地顺序拼接，其他浏览器提示使用支持本地写盘的浏览器。
+
+### 12.7 上传完成勾勾动效
 
 为避免拼接跳动，当前实现只保留一个勾勾 DOM 元素：
 

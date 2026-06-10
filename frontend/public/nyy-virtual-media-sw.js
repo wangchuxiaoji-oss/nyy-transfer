@@ -31,7 +31,7 @@ self.addEventListener("message", (event) => {
     debugClientIds.delete(event.source.id);
     event.ports?.[0]?.postMessage({ ok: true });
   } else if (data.type === "NYY_CLAIM_CLIENTS") {
-    event.waitUntil(self.clients.claim().then(() => {
+    event.waitUntil(self.skipWaiting().then(() => self.clients.claim()).then(() => {
       event.ports?.[0]?.postMessage({ ok: true });
     }).catch((err) => {
       event.ports?.[0]?.postMessage({ ok: false, error: err?.message || "clients.claim failed" });
@@ -59,8 +59,10 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (!url.pathname.startsWith("/__nyy_virtual_media__/")) return;
-  event.respondWith(handleVirtualMediaRequest(event.request, url, event.clientId || null));
+  if (url.pathname.startsWith("/__nyy_virtual_media__/")) {
+    event.respondWith(handleVirtualMediaRequest(event.request, url, event.clientId || null));
+    return;
+  }
 });
 
 function normalizeFile(file, id) {

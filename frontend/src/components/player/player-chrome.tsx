@@ -516,7 +516,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
           height: 0.875rem;
           width: 0.875rem;
           appearance: none;
-          border-radius: 9999px;
+          border-radius: var(--radius-pill);
           background: #fff;
           box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.35);
           opacity: var(--nyy-thumb-opacity, 0);
@@ -526,7 +526,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
           height: 0.875rem;
           width: 0.875rem;
           border: 0;
-          border-radius: 9999px;
+          border-radius: var(--radius-pill);
           background: #fff;
           box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.35);
           opacity: var(--nyy-thumb-opacity, 0);

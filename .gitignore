@@ -4,6 +4,7 @@
 !.env.example
 *.session.json
 .doubao_session.json
+.doubao_session*.json*
 
 # Runtime data / local volumes
 pgdata/

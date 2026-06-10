@@ -59,4 +59,7 @@ class UserInfoResponse(BaseModel):
     id: str
     email: str
     plan: str
+    is_admin: bool
     email_verified: bool
+    disabled: bool = False
+    deleted: bool = False

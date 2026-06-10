@@ -5,7 +5,7 @@
 ## 目标
 
 - 保持当前产品气质，不改成重型后台或通用模板风格。
-- 把 `/my`、`/nyy-console`、分享页、收文件页做成更清晰、更可运营、更适合深链访问的工作流。
+- 把 `/my`、`/admin`、分享页、收文件页做成更清晰、更可运营、更适合深链访问的工作流。
 - 继续满足 `ui-ux-pro-max` 的核心要求：可访问性、44px 触控、渐进披露、深链状态、reduced-motion、无横向滚动、统一图标体系。
 - 继续只用 Chrome MCP + 后端 E2E 做验证，不新增 Playwright 或 Cypress。
 
@@ -14,7 +14,7 @@
 | 项目 | 决策 |
 | --- | --- |
 | `/my` | 桌面和移动都做成 `tab + search + pagination` 的个人工作台。 |
-| `/nyy-console` | 桌面端 `table-first`，移动端 `card-first`。 |
+| `/admin` | 桌面端 `table-first`，移动端 `card-first`。 |
 | 文件请求高级设置 | 暴露 `max_files` 和 `max_bytes`，默认折叠。 |
 | 全局反馈 | 统一 toast、empty state、skeleton、confirm dialog。 |
 | 测试方式 | 继续使用 Chrome MCP + 后端 E2E，不引入新前端测试框架。 |
@@ -29,7 +29,7 @@
 | 我的页面 `/my` | 变成个人工作台：顶部 tab、搜索、筛选、分页、URL 同步状态。 |
 | 分享页 `/[code]` | 移动端加固定底部 action bar，下载为主，复制和举报为次级。 |
 | 收文件页 `/r/[code]` | 保持三步式流程，访问码、选择文件、提交完成；高级设置折叠。 |
-| Admin `/nyy-console` | 桌面表格优先，移动卡片优先，支持搜索、筛选、排序、分页。 |
+| Admin `/admin` | 桌面表格优先，移动卡片优先，支持搜索、筛选、排序、分页。 |
 
 ## 页面级方案
 
@@ -64,7 +64,7 @@
 - 提交成功后要明确告知已完成，并提供下一步路径。
 - 移动端提交按钮必须始终可见，不能被键盘或小屏挤掉。
 
-### Admin `/nyy-console`
+### Admin `/admin`
 
 - 桌面端以表格为主，保证密度和效率。
 - 表格支持搜索、筛选、排序、分页。
@@ -93,7 +93,7 @@
 ### 前端页面
 
 - `src/app/my/page.tsx`：重构为个人工作台。
-- `src/app/nyy-console/page.tsx`：桌面表格优先、移动卡片优先。
+- `src/app/admin/page.tsx`：桌面表格优先、移动卡片优先。
 - `src/components/file-request-creator.tsx`：开放 `max_files` 和 `max_bytes` 高级设置。
 - `src/app/[code]/page.tsx`：移动端底部 action bar，复制、下载、举报统一反馈。
 - `src/app/r/[code]/page.tsx`：移动端底部提交 action bar，成功后给继续上传或返回首页路径。

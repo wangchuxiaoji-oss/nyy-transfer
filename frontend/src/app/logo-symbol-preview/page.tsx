@@ -59,7 +59,7 @@ type Candidate = typeof originalCandidate;
 
 function CandidateCard({ candidate, priority = false }: { candidate: Candidate; priority?: boolean }) {
   return (
-    <article className="overflow-hidden rounded-[2rem] border border-white/70 bg-white/62 shadow-[0_22px_70px_rgba(111,58,16,0.13)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.055]">
+    <article className="overflow-hidden rounded-shell border border-white/70 bg-white/62 shadow-[0_22px_70px_rgba(111,58,16,0.13)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.055]">
       <div className="grid grid-cols-2">
         <div className="grid aspect-square place-items-center bg-[#fff5e4] p-7 dark:bg-[#1a100a]">
           <Image src={candidate.src} alt={candidate.label} width={1024} height={1024} className="h-full w-full object-contain" priority={priority} />
@@ -96,7 +96,7 @@ export default function LogoSymbolPreviewPage() {
     <main className="min-h-dvh overflow-hidden bg-[#fff7ec] px-4 py-10 text-[#3c1c07] dark:bg-[#110905] dark:text-[#fff4df]">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(255,180,77,0.34),transparent_30%),radial-gradient(circle_at_82%_20%,rgba(255,122,36,0.18),transparent_26%),linear-gradient(135deg,rgba(255,255,255,0.58),transparent_45%)] dark:bg-[radial-gradient(circle_at_18%_12%,rgba(255,142,61,0.18),transparent_30%),radial-gradient(circle_at_82%_20%,rgba(255,210,121,0.12),transparent_26%)]" />
       <section className="relative mx-auto max-w-6xl">
-        <div className="rounded-[2rem] border border-white/70 bg-white/58 p-5 shadow-[0_30px_90px_rgba(130,70,18,0.16)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06] sm:p-8">
+        <div className="rounded-shell border border-white/70 bg-white/58 p-5 shadow-[0_30px_90px_rgba(130,70,18,0.16)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/[0.06] sm:p-8">
           <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.28em] text-[#d66a1d]">Nayy Symbol Lab · Original Prompt Draws</p>
@@ -105,7 +105,7 @@ export default function LogoSymbolPreviewPage() {
                 这里清理为只展示原版 #03 Hug Envelope，以及使用原版 #03 完整 prompt 重新生成的 6 张抽卡。没有追加五指、写实或其它新风格要求。
               </p>
             </div>
-            <div className="rounded-[1.5rem] border border-[#f4c37b]/60 bg-[#fffaf2]/80 p-5 dark:border-white/10 dark:bg-black/20">
+            <div className="rounded-panel border border-[#f4c37b]/60 bg-[#fffaf2]/80 p-5 dark:border-white/10 dark:bg-black/20">
               <p className="text-xs font-black uppercase tracking-[0.22em] text-[#c1601c]">Current Wordmark</p>
               <Image src="/logo-main.webp?v=20260607-malt-logo" alt="当前拿呀呀字标" width={460} height={254} className="mt-3 h-auto w-full object-contain" priority />
             </div>

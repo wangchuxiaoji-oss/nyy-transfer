@@ -19,10 +19,21 @@ import {
 import { getErrorMessage } from "@/lib/errors";
 import { useToast } from "@/components/toast-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { EmptyState } from "@/components/empty-state";
 import { ListSkeleton } from "@/components/skeleton";
 import { Pagination } from "@/components/pagination";
-import { formatSize } from "@/lib/utils";
+import { cn, formatSize } from "@/lib/utils";
+import { getPublicDownloadConfig, type ShareFileDownload } from "@/lib/api";
+import {
+  defaultDownloadConfig,
+  downloadFilesToDirectoryHandle,
+  downloadSmart,
+  pickDownloadDirectory,
+  supportsDirectoryPicker,
+  type DownloadConfig,
+  type SmartDownloadProgress,
+} from "@/lib/smart-download";
 
 type Tab = "shares" | "inbox";
 type StatusFilter = "all" | "active" | "expired" | "revoked";
@@ -96,6 +107,18 @@ function downloadClass(count: number, max: number): string {
   return "border-nyy-500/25 bg-nyy-500/10 text-nyy-500";
 }
 
+function formatSpeed(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "计算中";
+  return `${formatSize(bytesPerSecond)}/s`;
+}
+
+function downloadPercent(progress: SmartDownloadProgress): string {
+  const percent = Math.min(100, Math.max(0, (progress.downloadedBytes / Math.max(1, progress.totalBytes)) * 100));
+  if (percent > 0 && percent < 1) return `${Math.max(0.1, percent).toFixed(1)}%`;
+  if (percent < 10) return `${percent.toFixed(1)}%`;
+  return `${Math.floor(percent)}%`;
+}
+
 export default function MyPage() {
   return <Suspense fallback={<div className="nyy-product-shell type-body flex items-center justify-center retro-text">加载中...</div>}><MyWorkbenchPage /></Suspense>;
 }
@@ -137,7 +160,12 @@ function MyWorkbenchPage() {
   const [confirmTarget, setConfirmTarget] = useState<{ type: "share" | "inbox"; code: string } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [downloadingGroup, setDownloadingGroup] = useState<string | null>(null);
+  const [downloadConfig, setDownloadConfig] = useState<DownloadConfig>(() => defaultDownloadConfig());
+  const [directoryDownloadSupported, setDirectoryDownloadSupported] = useState(false);
+  const [receivedDownloadProgress, setReceivedDownloadProgress] = useState<SmartDownloadProgress | null>(null);
+  const [receivedDownloadName, setReceivedDownloadName] = useState("");
   const loadSeqRef = useRef(0);
+  const downloadAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +178,28 @@ function MyWorkbenchPage() {
       });
     return () => { cancelled = true; };
   }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPublicDownloadConfig()
+      .then((config) => { if (!cancelled) setDownloadConfig(config); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    setDirectoryDownloadSupported(supportsDirectoryPicker());
+  }, []);
+
+  useEffect(() => {
+    if (!downloadConfig.leave_warning_enabled || !receivedDownloadProgress) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [downloadConfig.leave_warning_enabled, receivedDownloadProgress]);
 
   const setQuery = useCallback(
     (patch: Record<string, string | number | null>) => {
@@ -325,15 +375,37 @@ function MyWorkbenchPage() {
   };
 
   const handleDownloadReceived = async (file: MyRequestFileItem) => {
+    downloadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    downloadAbortRef.current = abortController;
+    setReceivedDownloadName(file.file_name);
+    setReceivedDownloadProgress(null);
     try {
       const { download_url } = await getRequestFileDownload(file.id);
-      const link = document.createElement("a");
-      link.href = download_url;
-      link.download = file.file_name;
-      link.rel = "noopener";
-      link.click();
+      const downloadFile: ShareFileDownload = {
+        file_name: file.file_name,
+        file_size: file.file_size,
+        content_type: "",
+        is_chunked: false,
+        download_url,
+        chunks: [],
+      };
+      await downloadSmart(downloadFile, {
+        config: downloadConfig,
+        signal: abortController.signal,
+        onProgress: setReceivedDownloadProgress,
+        onUnsupported: (message) => showToast({ title: message, type: "warning", duration: 6000 }),
+      });
     } catch (error) {
-      showToast({ title: getErrorMessage(error), type: "error" });
+      if (error instanceof DOMException && error.name === "AbortError") {
+        showToast({ title: "下载已取消", type: "info" });
+      } else {
+        showToast({ title: getErrorMessage(error), type: "error" });
+      }
+    } finally {
+      if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
+      setReceivedDownloadProgress(null);
+      setReceivedDownloadName("");
     }
   };
 
@@ -342,27 +414,65 @@ function MyWorkbenchPage() {
       showToast({ title: "这个收件链接还没有文件", type: "info" });
       return;
     }
+    if (!downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled || !directoryDownloadSupported) {
+      showToast({
+        title: !downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled
+          ? "批量保存到文件夹已关闭，请逐个下载文件。"
+          : "当前浏览器不支持批量保存到文件夹，请逐个下载文件。",
+        type: "warning",
+        duration: 8000,
+      });
+      return;
+    }
+    let directory;
+    try {
+      directory = await pickDownloadDirectory();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      showToast({ title: getErrorMessage(error, "无法选择保存文件夹"), type: "error" });
+      return;
+    }
+    downloadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    downloadAbortRef.current = abortController;
+    setReceivedDownloadName(group.title || "批量保存");
+    setReceivedDownloadProgress(null);
     setDownloadingGroup(group.code);
     try {
-      const { downloadZip } = await import("client-zip");
-      const entries = await Promise.all(group.files.map(async (file) => {
+      const files = await Promise.all(group.files.map(async (file) => {
         const { download_url } = await getRequestFileDownload(file.id);
-        const response = await fetch(download_url);
-        if (!response.ok) throw new Error(`${file.file_name} 下载失败（${response.status}）`);
-        return { name: file.file_name, input: response };
+        return {
+          file_name: file.file_name,
+          file_size: file.file_size,
+          content_type: "",
+          is_chunked: false,
+          download_url,
+          chunks: [],
+        } satisfies ShareFileDownload;
       }));
-      const blob = await downloadZip(entries).blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${group.code}-收件箱.zip`;
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      await downloadFilesToDirectoryHandle(directory, files, {
+        config: downloadConfig,
+        signal: abortController.signal,
+        onFileStart: (file) => setReceivedDownloadName(file.file_name),
+        onProgress: setReceivedDownloadProgress,
+      });
+      showToast({ title: "文件已保存到所选文件夹", type: "success" });
     } catch (error) {
-      showToast({ title: getErrorMessage(error, "打包下载失败"), type: "error" });
+      if (error instanceof DOMException && error.name === "AbortError") {
+        showToast({ title: "下载已取消", type: "info" });
+      } else {
+        showToast({ title: getErrorMessage(error, "批量保存失败"), type: "error" });
+      }
     } finally {
+      if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
       setDownloadingGroup(null);
+      setReceivedDownloadProgress(null);
+      setReceivedDownloadName("");
     }
+  };
+
+  const handleCancelReceivedDownload = () => {
+    downloadAbortRef.current?.abort();
   };
 
   const tabs: { key: Tab; label: string }[] = [
@@ -370,13 +480,20 @@ function MyWorkbenchPage() {
     { key: "inbox", label: "收件箱" },
   ];
   const totalForTab = activeTab === "shares" ? sharesTotal : inboxTotal;
+  const receivedDownloadRatio = receivedDownloadProgress
+    ? Math.min(1, Math.max(0, receivedDownloadProgress.downloadedBytes / Math.max(1, receivedDownloadProgress.totalBytes)))
+    : 0;
+  const receivedDownloadTitle = receivedDownloadProgress?.currentFileName || receivedDownloadName || "正在保存文件";
+  const receivedDownloadBatchLabel = receivedDownloadProgress?.totalFiles && receivedDownloadProgress.totalFiles > 1
+    ? `第 ${receivedDownloadProgress.currentFileIndex || 1} / ${receivedDownloadProgress.totalFiles} 个`
+    : "保存到本地";
 
   return (
     <main className="nyy-product-shell px-4 py-6 sm:px-6 lg:px-8">
       <div className="nyy-product-content mx-auto max-w-5xl">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <button onClick={() => router.push("/")} className="retro-btn-secondary min-h-0 rounded-full p-2" aria-label="返回首页">
+            <button onClick={() => router.push("/")} className="retro-icon-button h-11 w-11" aria-label="返回首页">
               <ArrowLeft className="h-5 w-5" />
             </button>
             <div>
@@ -391,12 +508,14 @@ function MyWorkbenchPage() {
           )}
         </div>
 
-        <div className="retro-tabbar mb-4 grid grid-cols-2 gap-1">
+        <div className="retro-segmented mb-4 grid grid-cols-2 gap-1" role="tablist" aria-label="工作台栏目">
           {tabs.map((tab) => (
             <button
               key={tab.key}
+              role="tab"
+              aria-selected={activeTab === tab.key}
               onClick={() => setQuery({ tab: tab.key === "shares" ? null : tab.key, q: null, status: null, page: null })}
-              className={`type-action rounded-xl px-3 py-2.5 transition ${activeTab === tab.key ? "retro-tab-active" : "retro-muted hover:text-nyy-500"}`}
+              className="retro-segment-button px-3 py-2.5"
             >
               {tab.label}
             </button>
@@ -515,6 +634,7 @@ function MyWorkbenchPage() {
                 onRevoke={() => { setConfirmTarget({ type: "inbox", code: group.code }); setConfirmOpen(true); }}
                 onDownloadGroup={() => void handleDownloadGroup(group)}
                 onDownloadFile={(file) => void handleDownloadReceived(file)}
+                canBatchSaveToDirectory={downloadConfig.smart_download_enabled && downloadConfig.filesystem_access_enabled && directoryDownloadSupported}
               />
             ))}
           </div>
@@ -541,6 +661,29 @@ function MyWorkbenchPage() {
         onConfirm={handleRevoke}
         onCancel={() => { setConfirmOpen(false); setConfirmTarget(null); }}
       />
+
+      {receivedDownloadProgress && (
+        <div className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-xl overflow-hidden rounded-2xl border border-white/15 bg-white/90 p-3 shadow-2xl shadow-nyy-900/20 backdrop-blur-xl dark:bg-gray-950/90">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="rounded-full bg-nyy-500/10 px-2 py-0.5 type-caption font-medium text-nyy-600 dark:text-nyy-300">{receivedDownloadBatchLabel}</span>
+                <p className="type-body-sm truncate font-semibold retro-text" title={receivedDownloadTitle}>{receivedDownloadTitle}</p>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10" aria-hidden="true">
+                <span className="block h-full rounded-full bg-nyy-500 transition-[width]" style={{ width: `${Math.max(receivedDownloadRatio * 100, receivedDownloadRatio > 0 ? 1.5 : 0)}%` }} />
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 type-caption retro-muted">
+                <span>{formatSize(receivedDownloadProgress.downloadedBytes)} / {formatSize(receivedDownloadProgress.totalBytes)}</span>
+                <span>{downloadPercent(receivedDownloadProgress)} · {formatSpeed(receivedDownloadProgress.bytesPerSecond)}</span>
+              </div>
+            </div>
+            <button type="button" onClick={handleCancelReceivedDownload} className="retro-btn-secondary min-h-[36px] shrink-0 px-3 text-red-500 hover:text-red-500" aria-label="取消下载">
+              <X className="h-4 w-4" />取消
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -634,12 +777,21 @@ interface WorkbenchAction {
   onClick?: () => void;
   disabled?: boolean;
   danger?: boolean;
+  copy?: boolean;
 }
 
 function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
   const [open, setOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const copyTimerRef = useRef<number | null>(null);
   useDropdownDismiss(open, menuRef, () => setOpen(false));
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   return (
     <div ref={menuRef} className="relative">
@@ -655,7 +807,12 @@ function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
       {open && (
         <div role="menu" className="retro-menu absolute right-0 top-full z-30 mt-2 w-44 rounded-2xl p-1">
           {actions.map((action) => {
-            const itemClass = `retro-menu-item type-action ${action.danger ? "retro-menu-item-danger" : ""}`;
+            const copied = copiedKey === action.key;
+            const itemClass = cn(
+              "retro-menu-item type-action border border-transparent",
+              action.danger && "retro-menu-item-danger",
+              copied && "!border-emerald-400/80 !bg-emerald-50 !text-emerald-700 !shadow-[0_0_0_3px_rgba(16,185,129,0.10)] dark:!border-emerald-300/60 dark:!bg-emerald-400/10 dark:!text-emerald-200"
+            );
             if (action.href && !action.disabled) {
               return (
                 <a key={action.key} href={action.href} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setOpen(false)} className={itemClass}>
@@ -671,11 +828,20 @@ function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
                 disabled={action.disabled}
                 onClick={() => {
                   action.onClick?.();
+                  if (action.copy) {
+                    setCopiedKey(action.key);
+                    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+                    copyTimerRef.current = window.setTimeout(() => {
+                      setCopiedKey(null);
+                      setOpen(false);
+                    }, 700);
+                    return;
+                  }
                   setOpen(false);
                 }}
                 className={itemClass}
               >
-                {action.icon}{action.label}
+                {copied ? <Check className="h-4 w-4" /> : action.icon}{copied ? "已复制" : action.label}
               </button>
             );
           })}
@@ -691,7 +857,7 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
   const previewFiles = share.preview_files || [];
   const hiddenFileCount = Math.max(0, share.file_count - previewFiles.length);
   const actions: WorkbenchAction[] = [
-    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy },
+    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy, copy: true },
     { key: "open", label: "打开分享", icon: <ExternalLink className="h-4 w-4" />, href: `/${share.code}` },
   ];
   if (isActive) {
@@ -740,7 +906,7 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
-          <button onClick={onCopy} className="retro-btn-secondary min-h-[38px] px-3" title="复制链接"><Copy className="h-4 w-4" />复制</button>
+          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[38px] px-3" title="复制链接" />
           <a href={`/${share.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3" title="打开分享"><ExternalLink className="h-4 w-4" />打开</a>
           {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3" title="编辑"><Pencil className="h-4 w-4" />编辑</button>}
           {isActive && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500" title="撤销"><Trash2 className="h-4 w-4" />撤销</button>}
@@ -829,22 +995,24 @@ interface InboxGroupCardProps {
   onRevoke: () => void;
   onDownloadGroup: () => void;
   onDownloadFile: (file: MyRequestFileItem) => void;
+  canBatchSaveToDirectory: boolean;
 }
 
-function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, editPassword, editClearPassword, editExtendHours, editMaxFiles, editMaxBytesValue, editMaxBytesUnit, onToggle, onCopy, onEditStart, onEditCancel, onEditSave, onEditTitleChange, onEditPasswordChange, onEditClearPasswordChange, onEditExtendHoursChange, onEditMaxFilesChange, onEditMaxBytesValueChange, onEditMaxBytesUnitChange, onRevoke, onDownloadGroup, onDownloadFile }: InboxGroupCardProps) {
+function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, editPassword, editClearPassword, editExtendHours, editMaxFiles, editMaxBytesValue, editMaxBytesUnit, onToggle, onCopy, onEditStart, onEditCancel, onEditSave, onEditTitleChange, onEditPasswordChange, onEditClearPasswordChange, onEditExtendHoursChange, onEditMaxFilesChange, onEditMaxBytesValueChange, onEditMaxBytesUnitChange, onRevoke, onDownloadGroup, onDownloadFile, canBatchSaveToDirectory }: InboxGroupCardProps) {
   const status = getInboxStatus(group);
   const isActive = status === "active";
   const isRevoked = status === "revoked";
   const fileProgress = group.max_files > 0 ? Math.min(100, (group.file_count / group.max_files) * 100) : 0;
   const bytesProgress = group.max_bytes > 0 ? Math.min(100, (group.total_bytes / group.max_bytes) * 100) : 0;
   const actions: WorkbenchAction[] = [
-    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy },
+    { key: "copy", label: "复制链接", icon: <Copy className="h-4 w-4" />, onClick: onCopy, copy: true },
     { key: "open", label: "打开收件", icon: <ExternalLink className="h-4 w-4" />, href: `/r/${group.code}` },
   ];
   if (isActive) actions.push({ key: "edit", label: "编辑设置", icon: <Pencil className="h-4 w-4" />, onClick: onEditStart });
   if (!isRevoked) actions.push({ key: "revoke", label: "撤销收件", icon: <Trash2 className="h-4 w-4" />, onClick: onRevoke, danger: true });
+  const batchDownloadLabel = canBatchSaveToDirectory ? (downloading ? "保存中" : "保存到文件夹") : "请逐个下载";
   actions.push(
-    { key: "pack", label: downloading ? "打包中" : "打包下载", icon: <Package className="h-4 w-4" />, onClick: onDownloadGroup, disabled: downloading || group.files.length === 0 },
+    { key: "pack", label: batchDownloadLabel, icon: <Package className="h-4 w-4" />, onClick: onDownloadGroup, disabled: downloading || group.files.length === 0 },
     { key: "toggle", label: expanded ? "收起文件" : "展开文件", icon: <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />, onClick: onToggle }
   );
 
@@ -886,11 +1054,11 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
-          <button onClick={onCopy} className="retro-btn-secondary min-h-[38px] px-3"><Copy className="h-4 w-4" />复制</button>
+          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[38px] px-3" />
           <a href={`/r/${group.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3"><ExternalLink className="h-4 w-4" />打开</a>
           {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3"><Pencil className="h-4 w-4" />编辑</button>}
           {!isRevoked && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500"><Trash2 className="h-4 w-4" />撤销</button>}
-          <button onClick={onDownloadGroup} disabled={downloading || group.files.length === 0} className="retro-btn-secondary min-h-[38px] px-3"><Package className="h-4 w-4" />{downloading ? "打包中" : "打包"}</button>
+          <button onClick={onDownloadGroup} disabled={downloading || group.files.length === 0} className="retro-btn-secondary min-h-[38px] px-3"><Package className="h-4 w-4" />{batchDownloadLabel}</button>
           <button onClick={onToggle} className="retro-btn-secondary min-h-[38px] px-3"><ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />{expanded ? "收起" : "展开"}</button>
         </div>
       </div>

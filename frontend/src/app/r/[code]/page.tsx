@@ -79,7 +79,7 @@ export default function FileRequestPage() {
     <main className="nyy-product-shell flex items-center justify-center px-4 py-16">
       <div className="nyy-product-content retro-panel-strong w-full max-w-md p-8">
         <div className="text-center">
-          <BrandLogo className="mx-auto h-auto w-36" priority />
+          <BrandLogo href="/" className="mx-auto h-auto w-36" priority />
           <h1 className="retro-title mt-4 text-lg">{info.title}</h1>
           <p className="type-body-sm mt-1 retro-text">对方正在通过{BRAND_NAME}收文件</p>
         </div>
@@ -89,14 +89,14 @@ export default function FileRequestPage() {
             <label htmlFor={passwordInputId} className="type-label flex items-center gap-1 retro-text"><Lock className="w-4 h-4" /> 需要访问码</label>
             <input id={passwordInputId} value={password} onChange={(e) => { setPassword(e.target.value.replace(/\D/g, "").slice(0, 4)); setError(""); }} maxLength={4} inputMode="numeric" className="retro-input w-full px-4 text-center tracking-[0.5em]" />
             {error && <p role="alert" className="type-caption text-red-700">{error}</p>}
-            <button onClick={handleVerify} className="btn-primary w-full rounded-2xl">继续</button>
+            <button onClick={handleVerify} className="btn-primary w-full">继续</button>
           </div>
         ) : state === "done" ? (
           <div className="type-body mt-8 text-center text-green-600"><CheckCircle2 className="mx-auto h-10 w-10" /><p className="mt-3">文件已提交</p></div>
         ) : (
           <div className="mt-8 space-y-4">
             <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
-            <button onClick={() => inputRef.current?.click()} className="retro-card flex min-h-[140px] w-full flex-col items-center justify-center gap-3 border-dashed hover:border-nyy-400">
+            <button onClick={() => inputRef.current?.click()} className="retro-file-dropzone min-h-[140px]">
               <Upload className="h-9 w-9 text-nyy-400" />
               <span className="type-body-sm text-gray-600 dark:text-gray-400">选择要提交的文件</span>
             </button>
@@ -104,7 +104,7 @@ export default function FileRequestPage() {
               {files.map((f) => <div key={f.name + f.size} className="retro-card flex items-center gap-2 p-2"><FileIcon className="h-4 w-4 retro-muted" /><span className="type-file-name flex-1 truncate retro-text">{f.name}</span><span className="type-file-meta retro-muted">{formatSize(f.size)}</span></div>)}
             </div>
             {error && <p role="alert" className="type-caption flex items-center gap-1 text-red-700 dark:text-red-400"><AlertCircle className="h-3 w-3" />{error}</p>}
-            <button disabled={state === "uploading" || files.length === 0} onClick={startUpload} className="btn-primary w-full rounded-2xl">{state === "uploading" ? "上传中..." : "提交文件"}</button>
+            <button disabled={state === "uploading" || files.length === 0} onClick={startUpload} className="btn-primary w-full">{state === "uploading" ? "上传中..." : "提交文件"}</button>
             <p className="type-body-sm text-center retro-text">剩余 {info.max_files - info.received_files} 个文件 / {formatSize(info.max_bytes - info.received_bytes)}</p>
           </div>
         )}

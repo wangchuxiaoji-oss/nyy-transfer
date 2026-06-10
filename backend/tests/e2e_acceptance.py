@@ -273,7 +273,8 @@ async def run_suite() -> None:
             state.user_headers, user = await login(client, TEST_EMAIL, TEST_PASSWORD)
             state.admin_headers, admin = await login(client, ADMIN_EMAIL, ADMIN_PASSWORD)
             assert user["email"] == TEST_EMAIL
-            assert admin["plan"] == "admin"
+            assert admin["email"] == ADMIN_EMAIL
+            assert admin["is_admin"] is True
             state.test_user_id = user["id"]
             await snapshot_redis_key(state, redis, f"nyy:quota:user:{state.test_user_id}:bytes")
             await snapshot_redis_key(state, redis, f"nyy:quota:guest:{E2E_GUEST_ID}:bytes")
@@ -447,7 +448,7 @@ async def run_suite() -> None:
                 assert response.content == request_files[item["file_name"]]
 
             print("[10] 前端页面路由健康检查")
-            for url in ("/", f"/{multi_code}", f"/r/{request_code}", "/my", "/nyy-console"):
+            for url in ("/", f"/{multi_code}", f"/r/{request_code}", "/my", "/admin"):
                 response = await external.get(f"{FRONTEND}{url}")
                 expect(response, 200, f"frontend {url}")
 

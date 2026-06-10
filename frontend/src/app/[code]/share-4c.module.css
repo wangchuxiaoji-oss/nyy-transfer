@@ -22,7 +22,7 @@
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
-  border-radius: 16px;
+  border-radius: var(--radius-card);
 }
 :global([data-theme="light"]) .glass {
   background: rgba(255,255,255,0.62);
@@ -34,7 +34,7 @@
   background: linear-gradient(135deg, #FF8A3D, #FF3366);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.4);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.5),
     inset 0 -1px 0 rgba(0,0,0,0.3),
@@ -65,7 +65,7 @@
   background: var(--yc-glass, rgba(255,255,255,0.06));
   color: var(--yc-text-s, rgba(255,255,255,0.7));
   border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   backdrop-filter: blur(20px);
   transition: all 0.2s;
   cursor: pointer;
@@ -87,7 +87,7 @@
   height: 80px;
   background: var(--yc-glass, rgba(255,255,255,0.06));
   border: 2px solid var(--yc-border, rgba(255,255,255,0.18));
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -123,22 +123,216 @@
   40%, 80% { transform: translateX(6px); }
 }
 
-/* 音频波形动画 */
-.audioWave {
+/* 音频预览控制台 */
+.audioStage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: clamp(14px, 2.6vw, 30px);
+  background:
+    radial-gradient(circle at 9% 14%, rgba(255,138,61,0.24), transparent 28%),
+    radial-gradient(circle at 72% 6%, rgba(255,51,102,0.14), transparent 30%),
+    radial-gradient(circle at 84% 82%, rgba(88,73,211,0.28), transparent 42%),
+    linear-gradient(135deg, #09040d 0%, #12081b 44%, #080411 100%);
+  color: #fff;
+}
+.audioStage::before {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  background:
+    linear-gradient(112deg, transparent 0 46%, rgba(255,255,255,0.08) 49%, transparent 52% 100%),
+    repeating-linear-gradient(86deg, rgba(255,255,255,0.045) 0 1px, transparent 1px 54px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 38px);
+  opacity: 0.35;
+  transform: rotate(-5deg);
+  pointer-events: none;
+}
+.audioStage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,0.42), transparent 34%, rgba(0,0,0,0.24)),
+    radial-gradient(circle at 50% 105%, rgba(0,0,0,0.62), transparent 58%);
+  pointer-events: none;
+}
+.audioLayout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(10px, 1.7vw, 18px);
+}
+.audioHero {
+  display: block;
+  min-height: 0;
+}
+.audioVisualPanel {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(10px, 1.6vw, 18px);
+}
+.audioTitleRow {
+  display: block;
+  min-width: 0;
+}
+.audioCanvasShell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+.audioCanvasShell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 54px),
+    linear-gradient(90deg, rgba(0,0,0,0.14), transparent 14%, transparent 86%, rgba(0,0,0,0.12));
+  mix-blend-mode: screen;
+  opacity: 0.34;
+  pointer-events: none;
+}
+.audioVisualizerCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.audioControls {
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: clamp(16px, 1.8vw, 22px);
+  background: rgba(5,3,10,0.66);
+  padding: clamp(10px, 1.6vw, 16px);
+  box-shadow: 0 18px 46px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.1);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.audioControlRow {
+  display: grid;
+  grid-template-columns: 36px 3rem minmax(0, 1fr) 3rem auto;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.72);
+  font-variant-numeric: tabular-nums;
+}
+.audioControlButton {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.9);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+  transition: border-color 0.18s, background 0.18s, color 0.18s, transform 0.18s;
+}
+.audioControlButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(255,138,61,0.72);
+  background: rgba(255,138,61,0.22);
+  color: #fff;
+}
+.audioControlButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.audioTimeLabel {
+  white-space: nowrap;
+  text-align: center;
+}
+.audioVolumeGroup {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 40px;
+  gap: 10px;
 }
-.audioWave i {
-  width: 3px;
-  background: var(--yc-accent, #FF8A3D);
-  border-radius: 2px;
-  animation: wave 1.4s ease-in-out infinite;
+.audioRange {
+  width: 100%;
+  height: 6px;
+  cursor: pointer;
+  appearance: none;
+  border-radius: var(--radius-pill);
+  outline: none;
 }
-@keyframes wave {
-  0%, 100% { height: 8px; }
-  50% { height: 36px; }
+.audioRange:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.audioRange::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  appearance: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(255,138,61,0.32), 0 0 18px rgba(255,138,61,0.62);
+}
+.audioRange::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(255,138,61,0.32), 0 0 18px rgba(255,138,61,0.62);
+}
+.audioVolumeRange {
+  width: 88px;
+}
+.audioProgressRange {
+  min-width: 0;
+}
+.audioError {
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
+  background: rgba(0,0,0,0.42);
+  padding: 18px;
+  text-align: center;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+@media (max-width: 640px) {
+  .audioStage {
+    padding: 9px;
+  }
+  .audioLayout {
+    gap: 7px;
+  }
+  .audioHero {
+    display: block;
+  }
+  .audioCanvasShell {
+    min-height: 56px;
+  }
+  .audioControls {
+    border-radius: 14px;
+    padding: 8px;
+  }
+  .audioControlRow {
+    grid-template-columns: 32px 2.35rem minmax(0, 1fr) 2.35rem auto;
+    gap: 6px;
+    font-size: 10px;
+  }
+  .audioControlButton {
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+  }
+  .audioVolumeGroup {
+    gap: 0;
+  }
+  .audioVolumeRange {
+    display: none;
+  }
 }
 
 /* 舞台播放器 */
@@ -147,7 +341,7 @@
   width: 100%;
   max-width: 100%;
   background: #000;
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   overflow: hidden;
   border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
   box-shadow: 0 0 40px rgba(255,138,61,0.18), 0 20px 60px rgba(0,0,0,0.5);
@@ -186,7 +380,7 @@
 .pdfScroll canvas {
   max-width: 100%;
   box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-  border-radius: 4px;
+  border-radius: var(--radius-compact);
 }
 :global([data-theme="light"]) .pdfScroll {
   background: #f5f0ea;
@@ -208,7 +402,7 @@
   margin: 0 auto;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   padding: 22px;
   font-family: ui-monospace, monospace;
   font-size: 13px;
@@ -265,7 +459,7 @@
   width: 92px;
   height: 92px;
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-compact);
   padding: 7px;
   box-shadow: 0 0 20px rgba(255,138,61,0.3);
 }
@@ -274,6 +468,255 @@
 }
 .qrBox i[data-on] {
   background: #0A0418;
+}
+
+/* 下载任务浮层：始终贴在视口内，避免长文件列表把进度条挤出屏幕 */
+.downloadHud {
+  position: fixed;
+  left: max(30px, env(safe-area-inset-left));
+  bottom: max(26px, env(safe-area-inset-bottom));
+  z-index: 45;
+  width: min(620px, calc(100vw - 60px));
+  padding: 10px 12px;
+  overflow: hidden;
+  pointer-events: auto;
+  background:
+    radial-gradient(circle at 8% 18%, rgba(255, 180, 88, 0.28), transparent 30%),
+    radial-gradient(circle at 92% 0%, rgba(255, 70, 104, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(73, 38, 22, 0.78), rgba(45, 23, 31, 0.84)),
+    var(--yc-glass, rgba(255,255,255,0.08));
+  border: 1px solid rgba(255, 221, 188, 0.28);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -8px 26px rgba(255, 138, 61, 0.06),
+    0 14px 44px rgba(0,0,0,0.44),
+    0 0 28px rgba(255,138,61,0.12);
+  backdrop-filter: blur(22px) saturate(1.16);
+  -webkit-backdrop-filter: blur(22px) saturate(1.16);
+  animation: download-hud-in 0.28s cubic-bezier(.2,.8,.2,1) both;
+}
+.downloadHud::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,238,218,0.66), transparent);
+}
+.downloadHud::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  border-radius: 17px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.14), transparent 28%, rgba(255,138,61,0.06) 70%, transparent);
+  mix-blend-mode: screen;
+}
+.downloadHudComplete {
+  border-color: rgba(132, 255, 195, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -8px 26px rgba(34, 197, 94, 0.08),
+    0 14px 44px rgba(0,0,0,0.44),
+    0 0 28px rgba(34,197,94,0.12);
+}
+.downloadHudVeil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(115deg, transparent 0 42%, rgba(255,255,255,0.22) 48%, transparent 54% 100%),
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.42), transparent 1px);
+  background-size: 260% 100%, 12px 12px;
+  animation: download-gleam 5.8s ease-in-out infinite;
+}
+.downloadStatusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.downloadStatusPill {
+  color: rgba(255,244,231,0.8);
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.downloadProgressTrack {
+  position: relative;
+  height: 7px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.10);
+  box-shadow:
+    inset 0 1px 3px rgba(0,0,0,0.34),
+    inset 0 0 0 1px rgba(255,255,255,0.05);
+}
+.downloadProgressFill {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff6d3a, #ff9f43 46%, #ffd08a 100%);
+  box-shadow:
+    0 0 24px rgba(255,138,61,0.58),
+    inset 0 1px 0 rgba(255,255,255,0.5);
+  transition: width 0.32s cubic-bezier(.2,.8,.2,1);
+}
+.downloadProgressFill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.52), transparent);
+  transform: translateX(-60%);
+  animation: download-stripe 1.8s ease-in-out infinite;
+}
+.downloadProgressFillComplete {
+  background: linear-gradient(90deg, #22c55e, #5eead4);
+  box-shadow:
+    0 0 22px rgba(34,197,94,0.42),
+    inset 0 1px 0 rgba(255,255,255,0.48);
+}
+.downloadSideRail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 82px;
+  min-width: 82px;
+  min-height: 50px;
+  justify-self: end;
+  border-radius: 13px;
+  padding: 6px 9px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  cursor: pointer;
+  overflow: hidden;
+  appearance: none;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+.downloadMetrics {
+  width: 100%;
+  min-width: 58px;
+  text-align: right;
+  transition: opacity 0.16s ease, transform 0.18s ease;
+}
+.downloadMetrics span {
+  display: block;
+  color: var(--yc-text-t, rgba(255,255,255,0.45));
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.downloadMetrics strong {
+  display: block;
+  color: #ffb05c;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 15px;
+  line-height: 1.1;
+}
+.downloadCancelLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transition: opacity 0.16s ease, transform 0.18s ease;
+}
+.downloadSideRail:hover,
+.downloadSideRailArmed,
+.downloadSideRail:focus-visible {
+  background: linear-gradient(135deg, rgba(255, 71, 87, 0.95), rgba(255, 120, 72, 0.92));
+  border-color: rgba(255, 202, 190, 0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.24),
+    0 0 0 4px rgba(255, 71, 87, 0.14),
+    0 0 28px rgba(255, 71, 87, 0.42),
+    0 8px 20px rgba(255, 71, 87, 0.22);
+}
+.downloadSideRail:hover .downloadMetrics,
+.downloadSideRailArmed .downloadMetrics,
+.downloadSideRail:focus-visible .downloadMetrics {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.96);
+}
+.downloadSideRail:hover .downloadCancelLabel,
+.downloadSideRailArmed .downloadCancelLabel,
+.downloadSideRail:focus-visible .downloadCancelLabel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+:global([data-theme="light"]) .downloadHud {
+  background:
+    radial-gradient(circle at 8% 18%, rgba(255, 180, 88, 0.24), transparent 30%),
+    radial-gradient(circle at 92% 0%, rgba(255, 70, 104, 0.10), transparent 34%),
+    linear-gradient(135deg, rgba(255, 244, 234, 0.86), rgba(255, 232, 218, 0.9)),
+    rgba(255,255,255,0.82);
+  border-color: rgba(10,4,24,0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    0 18px 62px rgba(80,44,20,0.18),
+    0 0 34px rgba(255,138,61,0.18);
+}
+:global([data-theme="light"]) .downloadStatusPill,
+:global([data-theme="light"]) .downloadSideRail {
+  background: rgba(255,255,255,0.56);
+  border-color: rgba(10,4,24,0.08);
+}
+:global([data-theme="light"]) .downloadStatusPill {
+  color: rgba(66,36,20,0.72);
+}
+:global([data-theme="light"]) .downloadProgressTrack {
+  background: rgba(72,40,18,0.1);
+}
+@keyframes download-hud-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes download-gleam {
+  0%, 55% { background-position: 130% 0, 0 0; }
+  100% { background-position: -90% 0, 0 0; }
+}
+@keyframes download-stripe {
+  0% { transform: translateX(-80%); opacity: 0; }
+  35% { opacity: 0.65; }
+  100% { transform: translateX(80%); opacity: 0; }
+}
+@media (max-width: 639px) {
+  .downloadHud {
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 12px;
+    width: auto;
+    padding: 10px;
+    border-radius: 18px;
+  }
+  .downloadSideRail {
+    width: 82px;
+    min-width: 82px;
+    justify-content: flex-end;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .downloadHud,
+  .downloadHudVeil,
+  .downloadProgressFill::after { animation: none; }
 }
 
 /* 主题变量在 globals.css 中定义（:root[data-theme] 不能在 CSS Module 中使用） */
@@ -349,7 +792,7 @@
   position: relative;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: var(--radius-compact);
 }
 .skel::after {
   content: "";
