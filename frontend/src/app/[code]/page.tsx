@@ -1178,6 +1178,7 @@ export default function SharePage() {
   const [reportReason, setReportReason] = useState("");
   const [downloadState, setDownloadState] = useState<DownloadLinksState>("idle");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("files");
+  const [previewErrorKey, setPreviewErrorKey] = useState<string | null>(null);
 
   const downloadAbortRef = useRef<AbortController | null>(null);
 
@@ -1185,7 +1186,7 @@ export default function SharePage() {
 
   const FooterSlogan = () => (
     <p className={`mt-16 mb-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
-      {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">{BRAND_DOMAIN}</a>
+      {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="inline-flex min-h-[44px] items-center text-nyy-300 transition-colors hover:text-nyy-200">{BRAND_DOMAIN}</a>
     </p>
   );
 
@@ -1462,6 +1463,8 @@ export default function SharePage() {
   // ===== 选中文件预览 =====
   const selectedFile = downloads.length > 0 ? downloads[Math.min(selectedIdx, downloads.length - 1)] : null;
   const selectedType = selectedFile ? classifyFile(selectedFile.file_name) : "other";
+  const selectedPreviewKey = selectedFile ? `${selectedFile.file_name}:${selectedFile.download_url || ""}` : "";
+  const previewLoadFailed = Boolean(selectedPreviewKey && previewErrorKey === selectedPreviewKey);
   // 选中文件的“元信息”：share.files 在第一阶段（getShareInfo）就有 file_name/file_size，
   // 据此让文件名+操作栏区域提前以恒定高度渲染，避免 downloads 后到时把布局挤开。
   const selectedMeta = share && share.files.length > 0 ? share.files[Math.min(selectedIdx, share.files.length - 1)] : null;
@@ -1479,6 +1482,10 @@ export default function SharePage() {
   const downloadHintLabel = downloadTaskState === "completed" ? "可以关闭此提示" : `${downloadBatchLabel}预计剩余 ${downloadEtaLabel}`;
   const showDownloadHud = Boolean(downloadProgress && downloadProgressFile && downloadTaskState !== "idle");
   const downloadActionLabel = downloadTaskState === "completed" ? "关闭" : "取消下载";
+  useEffect(() => {
+    if (selectedPreviewKey && previewErrorKey === selectedPreviewKey) return;
+    setPreviewErrorKey(null);
+  }, [previewErrorKey, selectedPreviewKey]);
   const handleDownloadRailAction = () => {
     if (downloadTaskState === "completed") {
       handleDismissDownloadHud();
@@ -1607,7 +1614,7 @@ export default function SharePage() {
       <StatusPage>
         <AlertCircle className={`w-12 h-12 ${s.tMuted}`} />
         <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>分享不存在或已被删除</p>
-        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">返回首页</a>
+        <a href="/" className="inline-flex min-h-[44px] items-center font-tech text-xs tracking-widest text-nyy-400 underline hover:text-nyy-300">返回首页</a>
       </StatusPage>
     );
   }
@@ -1617,7 +1624,7 @@ export default function SharePage() {
       <StatusPage>
         <Clock className={`w-12 h-12 ${s.tMuted}`} />
         <p className={`font-tech text-sm tracking-widest ${s.tSecondary}`}>分享已过期</p>
-        <a href="/" className="font-tech text-xs tracking-widest text-nyy-400 hover:text-nyy-300 underline">返回首页</a>
+        <a href="/" className="inline-flex min-h-[44px] items-center font-tech text-xs tracking-widest text-nyy-400 underline hover:text-nyy-300">返回首页</a>
       </StatusPage>
     );
   }
@@ -1681,7 +1688,7 @@ export default function SharePage() {
 
         {/* 底部品牌 */}
         <p className={`mt-8 text-center font-tech text-[10px] tracking-[0.12em] ${s.tFaint}`}>
-          {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="text-nyy-300 hover:text-nyy-200 transition-colors">{BRAND_DOMAIN}</a>
+          {BRAND_SLOGAN_SHORT} · <a href="https://nyy.app" className="inline-flex min-h-[44px] items-center text-nyy-300 transition-colors hover:text-nyy-200">{BRAND_DOMAIN}</a>
         </p>
       </main>
     );
@@ -1753,6 +1760,23 @@ export default function SharePage() {
     </div>
   );
 
+  const renderPreviewFallback = (message: string) => (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-white/15 bg-white/6 shadow-[0_0_28px_rgba(255,138,61,0.18)]">
+        <Download className="h-7 w-7 text-yc-accent" />
+      </div>
+      <div className="max-w-sm">
+        <p className={`break-words font-tech text-sm font-bold tracking-widest ${s.tSecondary}`}>{selectedFile?.file_name || "文件预览不可用"}</p>
+        <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>{message}</p>
+      </div>
+      {selectedFile && (
+        <button type="button" onClick={() => { void downloadOneFile(selectedFile); }} className={`${s.glowBtn} min-h-[44px] px-4 py-3 font-tech text-xs tracking-widest`}>
+          下载查看
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <main className={`nyy-product-shell ${s.tPrimary}`}>
       <div className="nyy-product-content max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
@@ -1806,10 +1830,12 @@ export default function SharePage() {
                     )
                   )}
                   {/* 图片 */}
-                  {!downloadPreviewSuspended && selectedType === "image" && isSafeUrl(selectedFile.download_url) && (
+                  {!downloadPreviewSuspended && selectedType === "image" && (
                     <div className={s.imageStage}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={selectedFile.download_url} alt={selectedFile.file_name} className="max-w-full max-h-full object-contain rounded-lg" />
+                      {isSafeUrl(selectedFile.download_url) && !previewLoadFailed ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={selectedFile.download_url} alt={selectedFile.file_name} onError={() => setPreviewErrorKey(selectedPreviewKey)} className="max-w-full max-h-full object-contain rounded-lg" />
+                      ) : renderPreviewFallback("图片预览加载失败，可能是链接已过期或浏览器无法读取该资源。")}
                     </div>
                   )}
                   {/* PDF */}
@@ -1870,7 +1896,7 @@ export default function SharePage() {
                   <CopyLinkButton
                     onCopy={handleCopyLink}
                     iconOnly
-                    className="retro-icon-button h-9 w-9"
+                    className="retro-icon-button h-11 w-11"
                     iconClassName="w-4 h-4"
                     title="复制链接"
                   />
@@ -1980,8 +2006,8 @@ export default function SharePage() {
 
             {/* 底部操作（举报 / 首页保持低调） */}
             <div className={`flex items-center justify-center gap-5 text-xs ${s.tMuted}`}>
-              <button onClick={() => setReportOpen(true)} disabled={reported} className="retro-text-button retro-text-button-danger min-h-0 px-2 py-1 text-xs"><Flag className="w-3 h-3" /> {reported ? "已举报" : "举报"}</button>
-              <a href="/" className="hover:text-yc-accent transition-colors">返回首页</a>
+              <button onClick={() => setReportOpen(true)} disabled={reported} className="retro-text-button retro-text-button-danger min-h-[44px] px-2 py-1 text-xs"><Flag className="w-3 h-3" /> {reported ? "已举报" : "举报"}</button>
+              <a href="/" className="inline-flex min-h-[44px] items-center transition-colors hover:text-yc-accent">返回首页</a>
             </div>
           </aside>
         </div>
@@ -2042,8 +2068,8 @@ export default function SharePage() {
             <button type="button" onClick={() => setReportOpen(false)} aria-label="关闭举报弹窗" className="retro-close-button absolute right-4 top-4"><X className="h-4 w-4" /></button>
             <h3 className={`font-tech text-sm tracking-widest font-bold mb-2 ${s.tPrimary}`}>举报分享</h3>
             <p className={`text-xs ${s.tMuted} mb-4`}>请选择举报原因。</p>
-            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)}
-              className={`w-full bg-white/6 border border-white/10 rounded-lg px-3 py-2.5 text-sm ${s.tPrimary} focus:outline-none focus:border-yc-accent mb-4`}>
+            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} aria-label="选择举报原因"
+              className={`mb-4 min-h-[44px] w-full rounded-lg border border-white/10 bg-white/6 px-3 py-2.5 text-sm ${s.tPrimary} focus:border-yc-accent focus:outline-none`}>
               <option value="" className="text-black">选择原因…</option>
               <option value="侵权内容" className="text-black">侵权内容</option>
               <option value="恶意软件" className="text-black">恶意软件</option>
@@ -2051,7 +2077,7 @@ export default function SharePage() {
               <option value="其他" className="text-black">其他</option>
             </select>
             <button onClick={handleReport} disabled={!reportReason}
-              className={`${s.glowBtn} w-full py-3 font-tech text-xs tracking-widest`}>
+              className={`${s.glowBtn} min-h-[44px] w-full py-3 font-tech text-xs tracking-widest`}>
               提交举报
             </button>
           </div>

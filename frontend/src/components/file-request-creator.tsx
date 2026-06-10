@@ -124,13 +124,13 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
                 <label className="block">
                   <span className="type-label retro-text">最大文件数</span>
                   <input type="number" min={1} max={100} value={maxFiles} onChange={(e) => setMaxFiles(Math.max(1, Math.min(100, Number(e.target.value))))}
-                    className="retro-input type-body-sm mt-1 min-h-[40px] w-full px-3" />
+                    className="retro-input type-body-sm mt-1 min-h-[44px] w-full px-3" />
                 </label>
                 <label className="block">
                   <span className="type-label retro-text">总容量上限</span>
-                  <div className="retro-input mt-1 flex min-h-[40px] overflow-hidden p-0 focus-within:border-nyy-600">
+                  <div className="retro-input mt-1 flex min-h-[44px] overflow-hidden p-0 focus-within:border-nyy-600">
                     <input type="number" min={1} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
-                      className="type-body-sm min-h-[40px] min-w-0 flex-1 bg-transparent px-3 outline-none" />
+                      className="type-body-sm min-h-[44px] min-w-0 flex-1 bg-transparent px-3 outline-none" />
                     <select value={maxBytesUnit} onChange={(e) => setMaxBytesUnit(e.target.value as "MB" | "GB")}
                       className="type-caption border-l border-white/10 bg-transparent px-2 retro-text outline-none">
                       <option value="MB">MB</option>

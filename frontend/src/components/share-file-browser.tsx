@@ -193,6 +193,7 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState<string | null>(null);
   const [detailNode, setDetailNode] = useState<ShareTreeNode | null>(null);
   const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const treeRef = useRef<HTMLDivElement | null>(null);
 
   const sortedRoots = useMemo(() => sortShareTreeNodes(model.roots, sortMode), [model.roots, sortMode]);
@@ -200,12 +201,14 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
   const visibleRows = useMemo(() => flattenVisibleShareTree(sortedRoots, expandedPaths), [expandedPaths, sortedRoots]);
   const searchResults = useMemo(() => searchShareTree(sortedRoots, query, 500), [query, sortedRoots]);
   const hasQuery = query.trim().length > 0;
+  const showFilters = variant === "desktop" || mobileFiltersOpen || hasQuery;
 
   useEffect(() => {
     setExpandedPaths(getInitialExpandedPaths(model, detectedMode));
     setFocusedNodeId(null);
     setPendingFocusNodeId(null);
     setDetailNode(null);
+    setMobileFiltersOpen(false);
     setVisibleLimit(DEFAULT_SHARE_TREE_LIMITS.virtualizeVisibleNodeCount);
   }, [detectedMode, model, model.signature]);
 
@@ -390,7 +393,7 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
         type="button"
         onClick={(event) => { event.stopPropagation(); onDownloadFile(downloadFile); }}
         onKeyDown={(event) => event.stopPropagation()}
-        className="retro-icon-button h-9 w-9"
+        className="retro-icon-button h-11 w-11"
         title="下载此文件"
         aria-label={`下载 ${downloadFile.file_name}`}
       >
@@ -404,7 +407,7 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
       type="button"
       onClick={(event) => { event.stopPropagation(); openDetail(node); }}
       onKeyDown={(event) => event.stopPropagation()}
-      className="retro-icon-button h-9 w-9"
+      className="retro-icon-button h-11 w-11"
       title={`查看${getNodeKindLabel(node)}详情`}
       aria-label={`查看 ${node.name} 详情`}
     >
@@ -488,7 +491,7 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
     <button
       type="button"
       onClick={() => setVisibleLimit((value) => value + DEFAULT_SHARE_TREE_LIMITS.virtualizeVisibleNodeCount)}
-      className="retro-text-button min-h-0 w-full py-2 font-tech text-[11px] tracking-widest"
+      className="retro-text-button min-h-[44px] w-full py-2 font-tech text-[11px] tracking-widest"
     >
       显示更多（剩余 {total - visibleLimit} 项）
     </button>
@@ -535,7 +538,7 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
       const copied = copiedDetailKey === copyKey;
       const Icon = copied ? Check : Copy;
       return (
-        <button type="button" onClick={() => { void copyDetailValue(copyKey, value); }} className="retro-btn-secondary min-h-0 px-3 py-2 text-xs">
+        <button type="button" onClick={() => { void copyDetailValue(copyKey, value); }} className="retro-btn-secondary min-h-[44px] px-3 py-2 text-xs">
           <Icon className="h-3.5 w-3.5" /> {copied ? "已复制" : label}
         </button>
       );
@@ -584,33 +587,45 @@ export function ShareFileBrowser({ files, emptyDirs, downloadsReady, selectedInd
           <span className="block font-tech text-[11px] tracking-[0.1em] text-[var(--yc-text-t)]">文件列表</span>
           <span className="mt-1 block truncate font-tech text-[10px] text-[var(--yc-text-t)]">{summary}</span>
         </div>
+        {variant === "mobile" && (
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen((open) => !open)}
+            className="retro-btn-secondary min-h-[44px] shrink-0 px-3 text-xs"
+            aria-expanded={showFilters}
+          >
+            <Search className="h-3.5 w-3.5" />筛选文件
+          </button>
+        )}
       </div>
 
-      <div className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]">
-        <label className="relative block min-w-0">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--yc-text-t)]" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索文件名、扩展名或路径..."
-            className="retro-input h-9 min-h-0 w-full pl-9 pr-9 text-xs"
-            aria-label="搜索文件名、扩展名或路径"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery("")} className="retro-icon-button absolute right-1 top-1/2 h-7 min-h-0 w-7 min-w-0 -translate-y-1/2" aria-label="清空搜索">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </label>
-        <select
-          value={sortMode}
-          onChange={(event) => setSortMode(event.target.value as ShareTreeSortMode)}
-          className="retro-input h-9 min-h-0 w-full px-3 text-xs"
-          aria-label="文件排序"
-        >
-          {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>按{option.label}</option>)}
-        </select>
-      </div>
+      {showFilters && (
+        <div className="mb-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]">
+          <label className="relative block min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--yc-text-t)]" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索文件名、扩展名或路径..."
+              className="retro-input h-11 w-full pl-9 pr-10 text-xs"
+              aria-label="搜索文件名、扩展名或路径"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery("")} className="retro-icon-button absolute right-0 top-1/2 h-11 w-11 -translate-y-1/2" aria-label="清空搜索">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </label>
+          <select
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as ShareTreeSortMode)}
+            className="retro-input h-11 w-full px-3 text-xs"
+            aria-label="文件排序"
+          >
+            {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>按{option.label}</option>)}
+          </select>
+        </div>
+      )}
 
       {hasQuery ? renderSearchResults() : renderTree()}
 

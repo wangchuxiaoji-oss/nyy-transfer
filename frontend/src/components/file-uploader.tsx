@@ -1293,7 +1293,7 @@ export function FileUploader({
                         <Lock className="w-3 h-3" /> 提取码 {password}
                       </span>
                     )}
-                    <button onClick={reset} className="retro-btn-secondary min-h-[34px] px-3 text-xs">继续上传</button>
+                    <button onClick={reset} className="retro-btn-secondary min-h-[44px] px-3 text-xs">继续上传</button>
                   </div>
                 </div>
 
@@ -1325,7 +1325,7 @@ export function FileUploader({
                         {!showAllFiles && totalItemCount > 5 && (
                           <button
                             onClick={() => setShowAllFiles(true)}
-                            className="retro-text-button ml-auto min-h-0 py-1 pr-1"
+                            className="retro-text-button ml-auto min-h-[44px] py-1 pr-1"
                           >
                             显示全部
                           </button>
@@ -1333,7 +1333,7 @@ export function FileUploader({
                         {showAllFiles && totalItemCount > 5 && (
                           <button
                             onClick={() => setShowAllFiles(false)}
-                            className="retro-text-button ml-auto min-h-0 py-1 pr-1"
+                            className="retro-text-button ml-auto min-h-[44px] py-1 pr-1"
                           >
                             收起
                           </button>
@@ -1347,11 +1347,11 @@ export function FileUploader({
                       </code>
                       <CopyLinkButton
                         onCopy={copyLink}
-                        className="btn-primary min-h-[40px] w-full px-3"
+                        className="btn-primary min-h-[44px] w-full px-3"
                         iconClassName="w-4 h-4"
                         copiedDuration={2000}
                       />
-                      <a href={resultShareUrl || "#"} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[40px] w-full px-3">
+                      <a href={resultShareUrl || "#"} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] w-full px-3">
                         <ExternalLink className="h-4 w-4" />打开
                       </a>
                     </div>
@@ -1405,7 +1405,7 @@ export function FileUploader({
           {overall === "uploading" && (
             <button
               onClick={() => void cancelUpload()}
-              className="retro-action-button retro-action-danger mt-3 min-h-[40px] px-4 type-action"
+              className="retro-action-button retro-action-danger mt-3 min-h-[44px] px-4 type-action"
             >
               取消上传
             </button>
@@ -1469,7 +1469,7 @@ export function FileUploader({
           {!showAllFiles && totalItemCount > 5 && (
             <button
               onClick={() => setShowAllFiles(true)}
-              className="retro-text-button min-h-0 w-full py-1.5"
+              className="retro-text-button min-h-[44px] w-full py-1.5"
             >
               查看全部
             </button>
@@ -1477,7 +1477,7 @@ export function FileUploader({
           {showAllFiles && totalItemCount > 5 && (
             <button
               onClick={() => setShowAllFiles(false)}
-              className="retro-text-button min-h-0 w-full py-1.5"
+              className="retro-text-button min-h-[44px] w-full py-1.5"
             >
               收起
             </button>
@@ -1548,7 +1548,7 @@ export function FileUploader({
                 placeholder="留空不设密码"
                 value={password}
                 onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                className="retro-input type-body-sm h-9 min-h-0 max-w-[160px] flex-1 px-3"
+                className="retro-input type-body-sm h-11 max-w-[160px] flex-1 px-3"
               />
             </div>
             <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.04]" />

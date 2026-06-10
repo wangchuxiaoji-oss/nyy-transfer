@@ -360,7 +360,7 @@ export default function Home() {
                       <div className="my-1 h-px bg-black/8 dark:bg-white/10" />
                       <div className="flex items-center justify-between gap-3 rounded-2xl px-3 py-2">
                         <span className="type-body-sm retro-text">切换主题</span>
-                        <ThemeToggle className="h-10 min-h-[40px] w-10 min-w-[40px]" />
+                        <ThemeToggle className="h-11 min-h-[44px] w-11 min-w-[44px]" />
                       </div>
                       <button
                         type="button"
@@ -501,10 +501,10 @@ export default function Home() {
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="type-caption font-semibold text-nyy-900 dark:text-nyy-200">上传 Debug 日志 · {debugEntries.length}</p>
             <div className="flex gap-2">
-              <button onClick={handleCopyDebugLogs} className="retro-text-button min-h-0 px-2 py-1 type-caption">
+              <button onClick={handleCopyDebugLogs} className="retro-text-button min-h-[44px] px-2 py-1 type-caption">
                 {debugCopied ? "已复制文本" : "复制文本"}
               </button>
-              <button onClick={handleCopyDebugJson} className="retro-text-button min-h-0 px-2 py-1 type-caption">
+              <button onClick={handleCopyDebugJson} className="retro-text-button min-h-[44px] px-2 py-1 type-caption">
                 复制 JSON
               </button>
             </div>
@@ -526,7 +526,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setAuthOpen(true)}
-              className="retro-btn-secondary min-h-[34px] shrink-0 px-2.5 text-xs sm:min-h-[36px]"
+              className="retro-btn-secondary min-h-[44px] shrink-0 px-2.5 text-xs"
             >
               登录后管理
             </button>

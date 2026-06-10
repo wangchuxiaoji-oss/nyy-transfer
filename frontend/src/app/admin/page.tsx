@@ -53,7 +53,7 @@ type DownloadBooleanKey = "smart_download_enabled" | "target_video" | "target_au
 const PAGE_SIZE = 20;
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
-const ADMIN_ACTION_BASE = "retro-action-button w-full sm:min-h-0 sm:w-auto sm:py-1";
+const ADMIN_ACTION_BASE = "retro-action-button min-h-[44px] w-full sm:w-auto sm:py-1.5";
 const ADMIN_ACTION_MUTED = `${ADMIN_ACTION_BASE} retro-action-muted`;
 const ADMIN_ACTION_DANGER = `${ADMIN_ACTION_BASE} retro-action-danger`;
 const ADMIN_ACTION_SUCCESS = `${ADMIN_ACTION_BASE} retro-action-success`;
@@ -381,10 +381,12 @@ function AdminConsolePage() {
             <form onSubmit={handleSearch} className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 retro-muted" />
               <input type="text" value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} placeholder="搜索…"
+                aria-label="搜索后台列表"
                 className="retro-input w-full py-2 pl-9 pr-3 type-body-sm" />
             </form>
             {(activeTab === "shares" || activeTab === "reports" || activeTab === "emails") && (
               <select value={statusFilter} onChange={(e) => setQuery({ status: e.target.value, page: null })}
+                aria-label="筛选状态"
                 className="retro-input px-3 py-2 type-body-sm">
                 <option value="all">全部状态</option>
                 {activeTab === "shares" && <><option value="active">有效</option><option value="download_exhausted">下载耗尽</option><option value="banned">已封禁</option><option value="expired">已过期</option><option value="revoked">已撤销</option></>}
@@ -395,6 +397,7 @@ function AdminConsolePage() {
             {activeTab === "users" && (
               <>
                 <select value={planFilter} onChange={(e) => setQuery({ plan: e.target.value, page: null })}
+                  aria-label="筛选用户计划"
                   className="retro-input px-3 py-2 type-body-sm">
                   <option value="all">全部计划</option>
                   <option value="free">免费</option>
@@ -402,6 +405,7 @@ function AdminConsolePage() {
                   <option value="admin">管理员</option>
                 </select>
                 <select value={statusFilter} onChange={(e) => setQuery({ status: e.target.value, page: null })}
+                  aria-label="筛选用户状态"
                   className="retro-input px-3 py-2 type-body-sm">
                   <option value="all">全部状态</option>
                   <option value="active">正常</option>
@@ -414,6 +418,7 @@ function AdminConsolePage() {
             )}
             {sortOptions.length > 0 && (
               <select value={activeSort} onChange={(e) => setQuery({ sort: e.target.value === "created_desc" ? null : e.target.value, page: null })}
+                aria-label="列表排序"
                 className="retro-input px-3 py-2 type-body-sm">
                 {sortOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
               </select>
@@ -461,8 +466,8 @@ function SharesPanel({ shares, total, page, onBan, onPage }: { shares: AdminShar
           {shares.map((s) => (
             <tr key={s.code} className="border-b border-white/10">
               <td className={`py-3 pr-4 ${ADMIN_CODE_CLASS}`}>/{s.code}</td>
-              <td className="py-3 pr-4 max-w-[120px] truncate">{s.title || "—"}</td>
-              <td className="py-3 pr-4 retro-text">{s.owner_email || "游客"}</td>
+              <td className="py-3 pr-4 max-w-[120px] truncate" title={s.title || undefined}>{s.title || "—"}</td>
+              <td className="py-3 pr-4 max-w-[220px] truncate retro-text" title={s.owner_email || "游客"}>{s.owner_email || "游客"}</td>
               <td className="py-3 pr-4">{s.file_count} · {formatSize(s.total_bytes)}</td>
               <td className="py-3 pr-4">{dl(s)}</td>
               <td className="py-3 pr-4"><span className={`rounded-full px-2 py-0.5 type-caption ${stCls(s)}`}>{st(s)}</span></td>
@@ -512,11 +517,12 @@ function UsersPanel({ users, total, page, onUpdate, onConfirmAction, onPage }: {
         </tr></thead><tbody>
           {users.map((u) => (
             <tr key={u.id} className="border-b border-white/10">
-              <td className="py-3 pr-4">{u.email}</td>
+              <td className="py-3 pr-4 max-w-[240px] truncate" title={u.email}>{u.email}</td>
               <td className="py-3 pr-4">
                 {u.is_admin ? <span className="type-caption retro-muted">{planLabel(u.plan)}</span> : (
                   <select value={u.plan === "pro" ? "pro" : "free"} disabled={u.deleted} onChange={(e) => onUpdate(u, { plan: e.target.value as "free" | "pro" }, "计划已更新")}
-                    className="retro-input min-h-[34px] px-2 py-1 type-caption disabled:opacity-50">
+                    aria-label={`修改 ${u.email} 的用户计划`}
+                    className="retro-input min-h-[44px] px-2 py-1 type-caption disabled:opacity-50">
                     <option value="free">免费</option>
                     <option value="pro">Pro</option>
                   </select>
@@ -542,6 +548,7 @@ function UsersPanel({ users, total, page, onUpdate, onConfirmAction, onPage }: {
             <p className="mt-1 type-caption retro-muted">{planLabel(u.plan)} · {u.is_admin ? "管理员" : "用户"} · {u.email_verified ? "已验证" : "未验证"} · {fmtDate(u.created_at)}</p>
             {!u.is_admin && !u.deleted && (
               <select value={u.plan === "pro" ? "pro" : "free"} onChange={(e) => onUpdate(u, { plan: e.target.value as "free" | "pro" }, "计划已更新")}
+                aria-label={`修改 ${u.email} 的用户计划`}
                 className="retro-input mt-3 w-full px-3 py-2 type-body-sm">
                 <option value="free">免费</option>
                 <option value="pro">Pro</option>
@@ -578,8 +585,8 @@ function ReportsPanel({ reports, total, page, onStatus, onPage }: { reports: Adm
           {reports.map((r) => (
             <tr key={r.id} className="border-b border-white/10">
               <td className={`py-3 pr-4 ${ADMIN_CODE_CLASS}`}>/{r.share_code}</td>
-              <td className="py-3 pr-4">{r.reason}</td>
-              <td className="py-3 pr-4 max-w-[200px] truncate retro-text">{r.detail || "—"}</td>
+              <td className="py-3 pr-4 max-w-[160px] truncate" title={r.reason}>{r.reason}</td>
+              <td className="py-3 pr-4 max-w-[200px] truncate retro-text" title={r.detail || undefined}>{r.detail || "—"}</td>
               <td className="py-3 pr-4"><span className={`rounded-full px-2 py-0.5 type-caption ${reportStatusCls(r.status)}`}>{reportStatus(r.status)}</span></td>
               <td className="py-3 pr-4 type-caption retro-muted">{fmtDate(r.created_at)}</td>
               <td className="py-3">{actions(r)}</td>
@@ -615,10 +622,10 @@ function EmailsPanel({ emails, total, page, onPage }: { emails: AdminEmailItem[]
         </tr></thead><tbody>
           {emails.map((e, i) => (
             <tr key={`${e.share_code}-${e.recipient}-${i}`} className="border-b border-white/10">
-              <td className="py-3 pr-4">{e.recipient}</td>
+              <td className="py-3 pr-4 max-w-[220px] truncate" title={e.recipient}>{e.recipient}</td>
               <td className={`py-3 pr-4 ${ADMIN_CODE_CLASS}`}>/{e.share_code}</td>
               <td className="py-3 pr-4"><span className={`rounded-full px-2 py-0.5 type-caption ${emailStatusCls(e.status)}`}>{emailStatus(e.status)}</span></td>
-              <td className="py-3 pr-4 max-w-[200px] truncate retro-muted">{e.error || "—"}</td>
+              <td className="py-3 pr-4 max-w-[200px] truncate retro-muted" title={e.error || undefined}>{e.error || "—"}</td>
               <td className="py-3 type-caption retro-muted">{fmtDate(e.created_at)}</td>
             </tr>
           ))}

@@ -105,8 +105,8 @@ export function ShareDetailModal({ share, open, onClose, onCopy, onDelete, canDe
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  <CopyLinkButton onCopy={copyShareUrl} className="retro-btn-secondary min-h-[38px] px-3 text-sm" />
-                  <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3 text-sm">
+                  <CopyLinkButton onCopy={copyShareUrl} className="retro-btn-secondary min-h-[44px] px-3 text-sm" />
+                  <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] px-3 text-sm">
                     <ExternalLink className="h-4 w-4" />打开分享
                   </a>
                 </div>

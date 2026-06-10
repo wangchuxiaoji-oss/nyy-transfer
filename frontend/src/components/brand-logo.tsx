@@ -27,7 +27,7 @@ export function BrandLogo({ className = "h-auto w-48", priority = false, src = "
 
   if (href) {
     return (
-      <Link href={href} aria-label={`返回${BRAND_NAME}首页`} className="inline-flex w-fit shrink-0 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nyy-400 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent">
+      <Link href={href} aria-label={`返回${BRAND_NAME}首页`} className="inline-flex min-h-[44px] w-fit shrink-0 items-center transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nyy-400 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent">
         {image}
       </Link>
     );

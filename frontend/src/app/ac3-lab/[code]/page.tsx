@@ -1083,7 +1083,7 @@ export default function Ac3LabPage() {
                   {test.status === "ok" && (
                     <button
                       onClick={() => playDecodedSample(test.targetSec)}
-                      className="retro-btn-secondary mt-2 min-h-[36px] px-3 text-xs"
+                      className="retro-btn-secondary mt-2 min-h-[44px] px-3 text-xs"
                     >
                       播放该样本
                     </button>

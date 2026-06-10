@@ -123,7 +123,7 @@ export function GuestShareCard({ share, onCopy, onOpenDetail }: GuestShareCardPr
   const copyShare = async () => {
     await onCopy(share);
   };
-  const buttonClass = "retro-btn-secondary min-h-[34px] w-full px-2.5 text-xs sm:min-h-[36px]";
+  const buttonClass = "retro-btn-secondary min-h-[44px] w-full px-2.5 text-xs";
 
   return (
     <article className="retro-card p-3 sm:p-3.5">

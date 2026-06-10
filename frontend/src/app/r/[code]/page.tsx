@@ -112,7 +112,7 @@ export default function FileRequestPage() {
 
       {/* Mobile fixed action bar (upload state only) */}
       {verified && state !== "done" && (
-        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-white/20 bg-white/70 px-4 py-3 backdrop-blur-2xl dark:border-white/10 dark:bg-card/70 md:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-white/20 bg-white/70 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur-2xl dark:border-white/10 dark:bg-card/70 md:hidden">
           <button onClick={() => inputRef.current?.click()} className="retro-btn-secondary flex-1">
             <Upload className="h-4 w-4" /> 选择文件{files.length > 0 && ` (${files.length})`}
           </button>

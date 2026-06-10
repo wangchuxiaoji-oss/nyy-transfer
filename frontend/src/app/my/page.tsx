@@ -502,7 +502,7 @@ function MyWorkbenchPage() {
             </div>
           </div>
           {activeTab === "inbox" && (
-            <button onClick={() => router.push("/?mode=receive")} className="btn-primary min-h-[40px] px-4">
+            <button onClick={() => router.push("/?mode=receive")} className="btn-primary min-h-[44px] px-4">
               <Plus className="h-4 w-4" /> 新建收件链接
             </button>
           )}
@@ -530,6 +530,7 @@ function MyWorkbenchPage() {
               value={searchDraft}
               onChange={(event) => setSearchDraft(event.target.value)}
               placeholder={activeTab === "shares" ? "搜索分享码或文件名..." : "搜索收件标题、请求码或文件名..."}
+              aria-label={activeTab === "shares" ? "搜索分享码或文件名" : "搜索收件标题、请求码或文件名"}
               className="retro-input type-body-sm w-full py-2 pl-9 pr-3"
             />
           </form>
@@ -678,7 +679,7 @@ function MyWorkbenchPage() {
                 <span>{downloadPercent(receivedDownloadProgress)} · {formatSpeed(receivedDownloadProgress.bytesPerSecond)}</span>
               </div>
             </div>
-            <button type="button" onClick={handleCancelReceivedDownload} className="retro-btn-secondary min-h-[36px] shrink-0 px-3 text-red-500 hover:text-red-500" aria-label="取消下载">
+            <button type="button" onClick={handleCancelReceivedDownload} className="retro-btn-secondary min-h-[44px] shrink-0 px-3 text-red-500 hover:text-red-500" aria-label="取消下载">
               <X className="h-4 w-4" />取消
             </button>
           </div>
@@ -800,7 +801,7 @@ function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="retro-btn-secondary min-h-[38px] w-full px-3"
+        className="retro-btn-secondary min-h-[44px] w-full px-3"
       >
         <MoreHorizontal className="h-4 w-4" />操作
       </button>
@@ -906,10 +907,10 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
-          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[38px] px-3" title="复制链接" />
-          <a href={`/${share.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3" title="打开分享"><ExternalLink className="h-4 w-4" />打开</a>
-          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3" title="编辑"><Pencil className="h-4 w-4" />编辑</button>}
-          {isActive && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500" title="撤销"><Trash2 className="h-4 w-4" />撤销</button>}
+          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[44px] px-3" title="复制链接" />
+          <a href={`/${share.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] px-3" title="打开分享"><ExternalLink className="h-4 w-4" />打开</a>
+          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[44px] px-3" title="编辑"><Pencil className="h-4 w-4" />编辑</button>}
+          {isActive && <button onClick={onRevoke} className="retro-btn-secondary min-h-[44px] px-3 text-red-500 hover:text-red-500" title="撤销"><Trash2 className="h-4 w-4" />撤销</button>}
         </div>
       </div>
 
@@ -959,8 +960,8 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
             </label>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button onClick={onEditSave} className="btn-primary min-h-[40px] px-4"><Check className="h-4 w-4" />保存</button>
-            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[40px] px-4"><X className="h-4 w-4" />取消</button>
+            <button onClick={onEditSave} className="btn-primary min-h-[44px] px-4"><Check className="h-4 w-4" />保存</button>
+            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[44px] px-4"><X className="h-4 w-4" />取消</button>
           </div>
         </div>
       )}
@@ -1054,12 +1055,12 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
-          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[38px] px-3" />
-          <a href={`/r/${group.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[38px] px-3"><ExternalLink className="h-4 w-4" />打开</a>
-          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[38px] px-3"><Pencil className="h-4 w-4" />编辑</button>}
-          {!isRevoked && <button onClick={onRevoke} className="retro-btn-secondary min-h-[38px] px-3 text-red-500 hover:text-red-500"><Trash2 className="h-4 w-4" />撤销</button>}
-          <button onClick={onDownloadGroup} disabled={downloading || group.files.length === 0} className="retro-btn-secondary min-h-[38px] px-3"><Package className="h-4 w-4" />{batchDownloadLabel}</button>
-          <button onClick={onToggle} className="retro-btn-secondary min-h-[38px] px-3"><ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />{expanded ? "收起" : "展开"}</button>
+          <CopyLinkButton onCopy={onCopy} className="retro-btn-secondary min-h-[44px] px-3" />
+          <a href={`/r/${group.code}`} target="_blank" rel="noopener noreferrer" className="retro-btn-secondary min-h-[44px] px-3"><ExternalLink className="h-4 w-4" />打开</a>
+          {isActive && <button onClick={onEditStart} className="retro-btn-secondary min-h-[44px] px-3"><Pencil className="h-4 w-4" />编辑</button>}
+          {!isRevoked && <button onClick={onRevoke} className="retro-btn-secondary min-h-[44px] px-3 text-red-500 hover:text-red-500"><Trash2 className="h-4 w-4" />撤销</button>}
+          <button onClick={onDownloadGroup} disabled={downloading || group.files.length === 0} className="retro-btn-secondary min-h-[44px] px-3"><Package className="h-4 w-4" />{batchDownloadLabel}</button>
+          <button onClick={onToggle} className="retro-btn-secondary min-h-[44px] px-3"><ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />{expanded ? "收起" : "展开"}</button>
         </div>
       </div>
 
@@ -1142,8 +1143,8 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
             </label>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button onClick={onEditSave} className="btn-primary min-h-[40px] px-4"><Check className="h-4 w-4" />保存</button>
-            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[40px] px-4"><X className="h-4 w-4" />取消</button>
+            <button onClick={onEditSave} className="btn-primary min-h-[44px] px-4"><Check className="h-4 w-4" />保存</button>
+            <button onClick={onEditCancel} className="retro-btn-secondary min-h-[44px] px-4"><X className="h-4 w-4" />取消</button>
           </div>
         </div>
       )}
@@ -1168,7 +1169,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
                       <p className="type-caption retro-muted">{formatSize(file.file_size)} · {formatDate(file.created_at)}</p>
                     </div>
                   </div>
-                  <button onClick={() => onDownloadFile(file)} className="retro-btn-secondary min-h-[38px] px-3 sm:shrink-0">
+                  <button onClick={() => onDownloadFile(file)} className="retro-btn-secondary min-h-[44px] px-3 sm:shrink-0">
                     <Download className="h-4 w-4" />下载
                   </button>
                 </div>
