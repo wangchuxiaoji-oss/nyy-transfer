@@ -423,6 +423,7 @@ export default function Home() {
               role="tab"
               aria-selected={mode === "send"}
               aria-controls="send-panel"
+              aria-label="传文件 - 生成分享链接"
               onClick={() => setMode("send")}
               className="retro-segment-button relative z-10 min-h-[56px] px-4 py-2.5"
             >
@@ -435,7 +436,7 @@ export default function Home() {
                 传文件
               </span>
               <span
-                className={`type-caption mt-0.5 block transition-colors duration-200 ${mode === "send" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}
+                className={`type-caption mt-0.5 hidden sm:block transition-colors duration-200 ${mode === "send" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}
               >生成分享链接</span>
             </button>
             <button
@@ -443,6 +444,7 @@ export default function Home() {
               role="tab"
               aria-selected={mode === "receive"}
               aria-controls="receive-panel"
+              aria-label="收文件 - 生成收件链接"
               onClick={() => setMode("receive")}
               className="retro-segment-button relative z-10 min-h-[56px] px-4 py-2.5"
             >
@@ -455,7 +457,7 @@ export default function Home() {
                 收文件
               </span>
               <span
-                className={`type-caption mt-0.5 block transition-colors duration-200 ${mode === "receive" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}
+                className={`type-caption mt-0.5 hidden sm:block transition-colors duration-200 ${mode === "receive" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}
               >生成收件链接</span>
             </button>
           </div>
