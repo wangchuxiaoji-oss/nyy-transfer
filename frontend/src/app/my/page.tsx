@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, ChevronDown, Clock, Copy, Download, ExternalLink, FileText, Inbox, Lock, MoreHorizontal, Package, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Button, Menu, MenuItem, MenuTrigger, Popover } from "react-aria-components";
 import {
   editFileRequest,
   editShare,
@@ -707,66 +708,43 @@ interface ShareCardProps {
   onRevoke: () => void;
 }
 
-function useDropdownDismiss<T extends HTMLElement>(open: boolean, ref: RefObject<T>, onClose: () => void) {
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointer = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Node && ref.current && !ref.current.contains(target)) onClose();
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-
-    document.addEventListener("mousedown", handlePointer);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handlePointer);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open, onClose, ref]);
-}
-
 function StatusMenu({ value, onChange }: { value: StatusFilter; onChange: (value: StatusFilter) => void }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const selected = STATUS_OPTIONS.find((option) => option.value === value) || STATUS_OPTIONS[0];
-  useDropdownDismiss(open, menuRef, () => setOpen(false));
 
   return (
-    <div ref={menuRef} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+    <MenuTrigger>
+      <Button
         className="retro-input type-body-sm flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        aria-label={`筛选状态，当前：${selected.label}`}
       >
         <span>{selected.label}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div role="menu" className="retro-menu absolute right-0 top-full z-30 mt-2 w-full min-w-44 rounded-2xl p-1">
+        <ChevronDown className="h-4 w-4 shrink-0" />
+      </Button>
+      <Popover placement="bottom end">
+        <Menu
+          selectionMode="single"
+          selectedKeys={[value]}
+          onSelectionChange={(selection) => {
+            if (selection === "all") return;
+            const key = Array.from(selection)[0] as StatusFilter | undefined;
+            if (key && isStatusFilter(key)) onChange(key);
+          }}
+          className="retro-menu w-full min-w-44 rounded-2xl p-1"
+        >
           {STATUS_OPTIONS.map((option) => (
-            <button
+            <MenuItem
               key={option.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={value === option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
+              id={option.value}
+              textValue={option.label}
               className="retro-menu-item type-action justify-between"
             >
               <span>{option.label}</span>
               {value === option.value && <Check className="h-4 w-4 text-nyy-500" />}
-            </button>
+            </MenuItem>
           ))}
-        </div>
-      )}
-    </div>
+        </Menu>
+      </Popover>
+    </MenuTrigger>
   );
 }
 
@@ -782,73 +760,46 @@ interface WorkbenchAction {
 }
 
 function ActionMenu({ actions }: { actions: WorkbenchAction[] }) {
-  const [open, setOpen] = useState(false);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const copyTimerRef = useRef<number | null>(null);
-  useDropdownDismiss(open, menuRef, () => setOpen(false));
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-
   return (
-    <div ref={menuRef} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="retro-btn-secondary min-h-[44px] w-full px-3"
+    <MenuTrigger>
+      <Button
+        className="retro-icon-button h-11 w-11"
+        aria-label="操作"
       >
-        <MoreHorizontal className="h-4 w-4" />操作
-      </button>
-      {open && (
-        <div role="menu" className="retro-menu absolute right-0 top-full z-30 mt-2 w-44 rounded-2xl p-1">
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+      <Popover placement="bottom end" offset={8} className="w-56 max-w-[calc(100vw-2rem)]">
+        <Menu
+          onAction={(key) => {
+            const action = actions.find((a) => a.key === key);
+            if (!action) return;
+            action.onClick?.();
+          }}
+          className="retro-menu rounded-2xl p-1"
+        >
           {actions.map((action) => {
-            const copied = copiedKey === action.key;
             const itemClass = cn(
-              "retro-menu-item type-action border border-transparent",
-              action.danger && "retro-menu-item-danger",
-              copied && "!border-emerald-400/80 !bg-emerald-50 !text-emerald-700 !shadow-[0_0_0_3px_rgba(16,185,129,0.10)] dark:!border-emerald-300/60 dark:!bg-emerald-400/10 dark:!text-emerald-200"
+              "retro-menu-item type-action",
+              action.danger && "retro-menu-item-danger"
             );
-            if (action.href && !action.disabled) {
-              return (
-                <a key={action.key} href={action.href} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setOpen(false)} className={itemClass}>
-                  {action.icon}{action.label}
-                </a>
-              );
-            }
             return (
-              <button
+              <MenuItem
                 key={action.key}
-                type="button"
-                role="menuitem"
-                disabled={action.disabled}
-                onClick={() => {
-                  action.onClick?.();
-                  if (action.copy) {
-                    setCopiedKey(action.key);
-                    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-                    copyTimerRef.current = window.setTimeout(() => {
-                      setCopiedKey(null);
-                      setOpen(false);
-                    }, 700);
-                    return;
-                  }
-                  setOpen(false);
-                }}
+                id={action.key}
+                href={action.href && !action.disabled ? action.href : undefined}
+                target={action.href ? "_blank" : undefined}
+                rel={action.href ? "noopener noreferrer" : undefined}
+                isDisabled={action.disabled}
+                textValue={action.label}
                 className={itemClass}
               >
-                {copied ? <Check className="h-4 w-4" /> : action.icon}{copied ? "已复制" : action.label}
-              </button>
+                {action.icon}{action.label}
+              </MenuItem>
             );
           })}
-        </div>
-      )}
-    </div>
+        </Menu>
+      </Popover>
+    </MenuTrigger>
   );
 }
 
@@ -869,23 +820,23 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
   }
 
   return (
-    <article className="retro-card p-4 sm:p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-lg font-bold text-nyy-500">/{share.code}</span>
+    <article className="retro-card relative min-w-0 overflow-hidden p-4 sm:p-5">
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1 pr-12 sm:pr-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate font-mono text-lg font-bold text-nyy-500">/{share.code}</span>
             <StatusBadge status={status} />
             {share.has_password && <span className="retro-chip"><Lock className="mr-1 h-3 w-3" /> 提取码</span>}
           </div>
-          <div className="mt-3 grid gap-2">
+          <div className="mt-3 grid min-w-0 gap-2">
             <p className="type-body-sm retro-text">
               {share.file_count > 0 ? `包含 ${share.file_count} 个文件` : "没有文件"}
               {share.empty_dir_count > 0 && ` · ${share.empty_dir_count} 个空文件夹`}
             </p>
             {previewFiles.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex min-w-0 flex-wrap gap-1.5 overflow-hidden">
                 {previewFiles.map((name) => (
-                  <span key={name} className="max-w-full truncate rounded-lg border border-white/10 bg-white/5 px-2 py-1 type-caption retro-text sm:max-w-[14rem]">
+                  <span key={name} className="min-w-0 max-w-full truncate rounded-lg border border-white/10 bg-white/5 px-2 py-1 type-caption retro-text sm:max-w-[14rem]">
                     {name}
                   </span>
                 ))}
@@ -894,16 +845,16 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
             ) : (
               <p className="type-caption retro-muted">打开分享页可查看完整文件列表</p>
             )}
-            <div className="flex flex-wrap gap-x-4 gap-y-1 type-caption retro-muted">
-              <span>{formatSize(share.total_bytes)}</span>
-              <span>创建 {formatDate(share.created_at)}</span>
-              <span>{share.expires_at ? `到期 ${formatDate(share.expires_at)}` : "永不过期"}</span>
-              <span>{share.last_downloaded_at ? `最近下载 ${formatDate(share.last_downloaded_at)}` : "暂无下载"}</span>
+            <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 overflow-hidden type-caption retro-muted">
+              <span className="min-w-0">{formatSize(share.total_bytes)}</span>
+              <span className="min-w-0">创建 {formatDate(share.created_at)}</span>
+              <span className="min-w-0">{share.expires_at ? `到期 ${formatDate(share.expires_at)}` : "永不过期"}</span>
+              <span className="min-w-0">{share.last_downloaded_at ? `最近下载 ${formatDate(share.last_downloaded_at)}` : "暂无下载"}</span>
               <span className={`inline-flex rounded-full border px-2 py-0.5 ${downloadClass(share.download_count, share.max_downloads)}`}>{downloadLabel(share.download_count, share.max_downloads)}</span>
             </div>
           </div>
         </div>
-        <div className="sm:hidden">
+        <div className="absolute right-4 top-4 sm:hidden">
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">
@@ -1018,19 +969,19 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
   );
 
   return (
-    <article className="retro-card p-4 sm:p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="retro-title text-lg">{group.title}</span>
-            <span className="font-mono type-body-sm text-nyy-500">/r/{group.code}</span>
+    <article className="retro-card relative min-w-0 overflow-hidden p-4 sm:p-5">
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1 pr-12 sm:pr-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="retro-title min-w-0 truncate text-lg">{group.title}</span>
+            <span className="min-w-0 truncate font-mono type-body-sm text-nyy-500">/r/{group.code}</span>
             <StatusBadge status={status} />
             {group.has_password && <span className="retro-chip"><Lock className="mr-1 h-3 w-3" /> 访问码</span>}
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 type-caption retro-muted">
-            <span className="inline-flex items-center gap-1"><Inbox className="h-3.5 w-3.5" /> 已收 {group.file_count} / {group.max_files} 个文件</span>
-            <span>{formatSize(group.total_bytes)} / {formatSize(group.max_bytes)}</span>
-            <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {group.expires_at ? `到期 ${formatDate(group.expires_at)}` : "永不过期"}</span>
+          <div className="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 overflow-hidden type-caption retro-muted">
+            <span className="inline-flex min-w-0 items-center gap-1"><Inbox className="h-3.5 w-3.5 shrink-0" /> 已收 {group.file_count} / {group.max_files} 个文件</span>
+            <span className="min-w-0">{formatSize(group.total_bytes)} / {formatSize(group.max_bytes)}</span>
+            <span className="inline-flex min-w-0 items-center gap-1"><Clock className="h-3.5 w-3.5 shrink-0" /> {group.expires_at ? `到期 ${formatDate(group.expires_at)}` : "永不过期"}</span>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <div>
@@ -1051,7 +1002,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
             </div>
           </div>
         </div>
-        <div className="sm:hidden">
+        <div className="absolute right-4 top-4 sm:hidden">
           <ActionMenu actions={actions} />
         </div>
         <div className="hidden flex-wrap gap-2 sm:flex lg:justify-end">

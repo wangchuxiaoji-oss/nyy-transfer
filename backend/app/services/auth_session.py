@@ -101,6 +101,17 @@ async def rotate_session(
     return new_session, new_token
 
 
+async def get_active_session_by_token(db: AsyncSession, raw_token: str) -> AuthSession | None:
+    """只读校验 refresh token，不做轮换，适合首屏 bootstrap。"""
+    token_h = _hash_token(raw_token)
+    now = datetime.now(timezone.utc)
+    result = await db.execute(select(AuthSession).where(AuthSession.token_hash == token_h))
+    session = result.scalar_one_or_none()
+    if not session or session.revoked_at or session.expires_at < now:
+        return None
+    return session
+
+
 async def revoke_family(db: AsyncSession, family_id: uuid.UUID) -> int:
     """撤销同一 family 下所有未撤销 session。"""
     now = datetime.now(timezone.utc)

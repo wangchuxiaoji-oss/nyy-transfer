@@ -2,7 +2,7 @@ import type { PlaybackAsset, ShareFileDownload } from "./api";
 import type { DebugLogFn } from "./debug";
 
 const VIDEO_ONLY_BLOB_FALLBACK_MAX_BYTES = 96 * 1024 * 1024;
-const VIRTUAL_MEDIA_SW_VERSION = "20260609-native-download-ascii-header";
+const VIRTUAL_MEDIA_SW_VERSION = "20260616-low-initial-prefetch";
 
 function getSwUrl(): string {
   if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sw") === "legacy") {

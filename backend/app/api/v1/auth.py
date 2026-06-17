@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -30,11 +32,13 @@ from app.services.auth_risk import (
 )
 from app.services.auth_session import (
     create_session,
+    get_active_session_by_token,
     revoke_family,
     revoke_session_by_token,
     revoke_user_sessions,
     rotate_session,
 )
+from app.services.quota import get_quota_snapshot
 from app.services.captcha import consume_captcha_token
 from app.services.email_code import (
     check_send_rate_limit,
@@ -48,6 +52,7 @@ from app.services.email_code import (
 from app.services.weak_passwords import is_weak_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
 
 
 def _get_redis(request: Request):
@@ -62,6 +67,14 @@ def _get_client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+def _get_guest_id(request: Request, ip: str) -> str:
+    """返回当前浏览器游客身份；缺失时退回旧的 IP 归属。"""
+    guest_id = (request.headers.get("x-nyy-guest-id") or "").strip()
+    if _GUEST_ID_RE.match(guest_id):
+        return guest_id
+    return f"ip:{ip}"
 
 
 def _get_ua(request: Request) -> str:
@@ -82,6 +95,8 @@ def _request_origin(request: Request) -> str:
 
 
 def _enforce_cookie_csrf(request: Request) -> None:
+    if request.headers.get("x-nyy-csrf") == "1":
+        return
     settings = get_settings()
     source = request.headers.get("origin") or request.headers.get("referer")
     if not source:
@@ -166,6 +181,24 @@ class TokenResponse(BaseModel):
     user: UserInfoResponse | None = None
 
 
+class QuotaResponse(BaseModel):
+    used_bytes: int
+    limit_bytes: int
+    remaining_bytes: int
+    ttl_hours: int
+
+
+class BootstrapAuthResponse(BaseModel):
+    status: Literal["guest", "user"]
+    user: UserInfoResponse | None = None
+    token_type: str = "bearer"
+
+
+class BootstrapResponse(BaseModel):
+    auth: BootstrapAuthResponse
+    quota: QuotaResponse
+
+
 def _user_info(user: User) -> UserInfoResponse:
     return UserInfoResponse(
         id=str(user.id),
@@ -176,6 +209,12 @@ def _user_info(user: User) -> UserInfoResponse:
         disabled=user.disabled_at is not None,
         deleted=user.deleted_at is not None,
     )
+
+
+async def _guest_bootstrap_response(request: Request, db: AsyncSession) -> BootstrapResponse:
+    ip = _get_client_ip(request)
+    quota = await get_quota_snapshot(request.app.state.redis, db, user=None, guest_id=_get_guest_id(request, ip))
+    return BootstrapResponse(auth=BootstrapAuthResponse(status="guest"), quota=QuotaResponse(**quota))
 
 
 # ─── 发送验证码 ──────────────────────────────────────────────────
@@ -514,6 +553,50 @@ async def refresh_token(
     return TokenResponse(
         access_token=access_token,
         expires_in=settings.auth_access_token_expire_minutes * 60,
+    )
+
+
+@router.post("/bootstrap", response_model=BootstrapResponse)
+async def bootstrap(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """首屏启动：一次性返回身份和当前配额，避免客户端多路探测。"""
+    settings = get_settings()
+    raw_token = request.cookies.get(settings.auth_refresh_cookie_name)
+    if not raw_token:
+        return await _guest_bootstrap_response(request, db)
+
+    session = await get_active_session_by_token(db, raw_token)
+    if not session:
+        _delete_refresh_cookie(response)
+        return await _guest_bootstrap_response(request, db)
+
+    result = await db.execute(select(User).where(User.id == session.user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        _delete_refresh_cookie(response)
+        return await _guest_bootstrap_response(request, db)
+
+    if user.deleted_at is not None or user.disabled_at is not None:
+        await revoke_user_sessions(db, user.id)
+        await db.commit()
+        _delete_refresh_cookie(response)
+        return await _guest_bootstrap_response(request, db)
+
+    quota = await get_quota_snapshot(
+        request.app.state.redis,
+        db,
+        user=user,
+        guest_id=_get_guest_id(request, _get_client_ip(request)),
+    )
+    return BootstrapResponse(
+        auth=BootstrapAuthResponse(
+            status="user",
+            user=_user_info(user),
+        ),
+        quota=QuotaResponse(**quota),
     )
 
 

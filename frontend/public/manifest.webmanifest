@@ -1,14 +1,13 @@
 {
-  "name": "拿呀² nyy.app",
+  "name": "拿呀² - 免费在线文件中转",
   "short_name": "拿呀²",
-  "description": "发文件，也收文件。浏览器直传，链接即走。",
+  "description": "传大文件给对方？直接拖进来，自动生成分享链接。无需注册、无需安装，支持超大文件浏览器直传。",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#168EFF",
-  "theme_color": "#168EFF",
-  "orientation": "portrait-primary",
+  "background_color": "#FFF4EB",
+  "theme_color": "#FF8A3D",
   "categories": ["productivity", "utilities"],
   "icons": [
     {

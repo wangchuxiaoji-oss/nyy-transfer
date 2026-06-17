@@ -7,9 +7,11 @@ export const BRAND_SLOGAN_SHORT = `想传文件？${BRAND_NAME}`;
 export const PRODUCT_SHORT = "发文件，也收文件。浏览器直传，链接即走。";
 export const PRODUCT_DESCRIPTION = "上传生成分享链接；也能创建收件链接，让对方直接提交文件。额度按当前规则实时同步。";
 
-export const SEO_TITLE = `${BRAND_NAME} ${BRAND_DOMAIN} - ${BRAND_SLOGAN_SHORT}`;
-export const SEO_DESCRIPTION = "发文件，也收文件。浏览器直传生成分享链接，也能创建收件链接让对方提交文件。";
-export const SEO_KEYWORDS = ["文件分享", "文件传输", "收文件", "浏览器直传", "nyy", BRAND_NAME];
+// SEO 核心：用户搜什么就写什么
+// 用户搜索词：免费传文件、大文件传输、文件中转、文件中转站、在线传文件、临时分享链接
+export const SEO_TITLE = `免费在线文件中转，拖进来就传 - ${BRAND_NAME}`;
+export const SEO_DESCRIPTION = "传大文件给对方？直接拖进来，自动生成分享链接。无需注册、无需安装，支持超大文件浏览器直传。还能创建收件链接让对方提交。";
+export const SEO_KEYWORDS = ["免费传文件", "文件中转站", "文件中转", "大文件传输", "在线传文件", "文件分享", "浏览器直传", "临时分享链接", "收文件", BRAND_NAME, BRAND_DOMAIN];
 
 export const HOME_COPY = {
   title: "发文件，也收文件",

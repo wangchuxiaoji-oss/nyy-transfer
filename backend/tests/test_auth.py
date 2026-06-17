@@ -446,6 +446,62 @@ async def test_refresh_token_rotation(client, redis):
     assert new_token != old_token
 
 
+async def test_bootstrap_returns_guest_quota_without_cookie(client, redis):
+    """bootstrap 未登录时直接返回游客身份和游客配额，不触发 401。"""
+    await redis.set("nyy:quota:guest:guest-bootstrap-device:bytes", "123")
+
+    response = await client.post(
+        "/api/v1/auth/bootstrap",
+        headers={"x-nyy-guest-id": "guest-bootstrap-device"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["auth"]["status"] == "guest"
+    assert data["auth"]["user"] is None
+    assert data["quota"]["used_bytes"] == 123
+
+
+async def test_bootstrap_restores_user_without_issuing_access_token(client, redis):
+    """bootstrap 只读恢复登录态，不签发 access token，避免绕过 refresh 轮换。"""
+    email = f"bootstrap-{uuid.uuid4().hex}@example.com"
+    password = "Str0ngP@ss!"
+    await create_verified_user(email, password)
+
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_resp.status_code == 200
+    token = login_resp.cookies.get("nyy_refresh_token")
+    assert token is not None
+    user = await get_user(email)
+    assert user is not None
+    await redis.set(f"nyy:quota:user:{user.id}:bytes", "456")
+
+    first = await client.post(
+        "/api/v1/auth/bootstrap",
+        cookies={"nyy_refresh_token": token},
+        headers={"x-nyy-guest-id": "guest-bootstrap-device"},
+    )
+    second = await client.post(
+        "/api/v1/auth/bootstrap",
+        cookies={"nyy_refresh_token": token},
+        headers={"x-nyy-guest-id": "guest-bootstrap-device"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_data = first.json()
+    second_data = second.json()
+    assert first_data["auth"]["status"] == "user"
+    assert first_data["auth"]["user"]["email"] == email
+    assert "access_token" not in first_data["auth"]
+    assert first_data["quota"]["used_bytes"] == 456
+    assert second_data["auth"]["status"] == "user"
+    assert "access_token" not in second_data["auth"]
+
+
 async def test_refresh_rejects_missing_origin(client, redis):
     """refresh 使用 Cookie 凭证时必须校验 Origin 或 Referer。"""
     email = f"csrf-{uuid.uuid4().hex}@example.com"
@@ -464,6 +520,27 @@ async def test_refresh_rejects_missing_origin(client, redis):
     )
 
     assert response.status_code == 403
+
+
+async def test_refresh_allows_same_origin_csrf_header(client, redis):
+    """同源前端可用自定义 header 通过 cookie CSRF 校验。"""
+    email = f"csrf-header-{uuid.uuid4().hex}@example.com"
+    password = "Str0ngP@ss!"
+    await create_verified_user(email, password)
+
+    login_resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    token = login_resp.cookies.get("nyy_refresh_token")
+
+    response = await client.post(
+        "/api/v1/auth/refresh",
+        cookies={"nyy_refresh_token": token},
+        headers={"X-NYY-CSRF": "1"},
+    )
+
+    assert response.status_code == 200
 
 
 async def test_refresh_token_reuse_revokes_family(client, redis):

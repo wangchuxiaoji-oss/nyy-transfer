@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { User, FolderOpen, Upload, Inbox, LogOut, ChevronDown, Shield } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { FileUploader } from "@/components/file-uploader";
 import { FileRequestCreator } from "@/components/file-request-creator";
-import { AuthModal } from "@/components/auth-modal";
+import dynamic from "next/dynamic";
+
+const AuthModal = dynamic(() => import("@/components/auth-modal").then((m) => m.AuthModal), { ssr: false });
 import { BrandLogo } from "@/components/brand-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { getMe, logout, type UserInfo } from "@/lib/auth";
+import { bootstrapSession, logout, type UserInfo } from "@/lib/auth";
 import { guestRevokeShare, getGuestShares, getQuota, type GuestShareInfo, type QuotaInfo } from "@/lib/api";
 import { ShareDetailModal } from "@/components/share-detail-modal";
 import { GuestShareCard } from "@/components/guest-share-card";
@@ -116,13 +117,26 @@ export default function Home() {
   };
 
   useEffect(() => {
-    loadQuota();
-    getMe()
-      .then(setUser)
+    let cancelled = false;
+    bootstrapSession()
+      .then((data) => {
+        if (cancelled) return;
+        setQuota(data.quota);
+        setQuotaLoaded(true);
+        if (data.auth.status === "user" && data.auth.user) setUser(data.auth.user);
+        else {
+          setUser(null);
+          loadGuestShares();
+        }
+      })
       .catch(() => {
+        if (cancelled) return;
         setUser(null);
+        setQuota(null);
+        setQuotaLoaded(true);
         loadGuestShares();
       });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -222,11 +236,11 @@ export default function Home() {
     loadQuota();
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
     setUser(null);
     setAccountMenuOpen(false);
     loadGuestShares();
+    await logout();
     loadQuota();
   };
 
@@ -284,19 +298,19 @@ export default function Home() {
     window.setTimeout(() => setDebugCopied(false), 1200);
   };
 
-  const quotaLabel = quota ? `已用 ${formatSize(quota.used_bytes)} / ${formatSize(quota.limit_bytes)} · ${formatQuotaPeriod(quota.ttl_hours)}` : quotaLoaded ? "额度暂不可用" : "额度同步中";
+  const quotaLabel = quota ? `${formatSize(quota.used_bytes)} / ${formatSize(quota.limit_bytes)} · 剩余 ${formatSize(quota.remaining_bytes)} · ${formatQuotaPeriod(quota.ttl_hours)}` : quotaLoaded ? "额度暂不可用" : "";
   const quotaRemainingLabel = quota ? formatSize(quota.remaining_bytes) : quotaLoaded ? "暂不可用" : "同步中";
-  const heroStatus = user
-    ? `账号上传额度：${quotaLabel}`
-    : `游客上传额度：${quotaLabel}`;
+  const heroStatus = quota ? `额度：${quotaLabel}` : quotaLabel;
 
   return (
-    <main className="nyy-product-shell flex flex-col items-center px-4 pt-[92px] pb-16">
-      {/* Top bar */}
+    <main className="nyy-product-shell flex flex-col items-center px-4 pt-[92px] pb-16" aria-label={`${BRAND_NAME}首页`}>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-white/20 bg-white/60 backdrop-blur-2xl transition-colors dark:border-white/10 dark:bg-[#121212]/60">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)]">
+        <nav className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-2 pt-[calc(env(safe-area-inset-top)+0.5rem)]" aria-label="主导航">
           <span className="select-none inline-flex min-w-0 items-center gap-1 text-sm tracking-wide">
-            <img src="/logo-lockup-scheme-02.png?v=20260608-lockup-02" alt={BRAND_NAME} className="inline-block h-[26px] w-auto" />
+            <Link href="/" aria-label={`返回${BRAND_NAME}首页`} className="inline-flex items-center gap-1.5 transition-opacity hover:opacity-80">
+              <img src="/icons/icon-192.png?v=20260608-symbol-transparent" alt="" className="h-[26px] w-[26px] rounded-md" />
+              <span className="hidden font-semibold tracking-tight sm:inline retro-text">{BRAND_NAME}</span>
+            </Link>
           </span>
           {user ? (
             <>
@@ -381,41 +395,39 @@ export default function Home() {
               <ThemeToggle />
               <button
                 onClick={() => setAuthOpen(true)}
-                className="retro-btn-secondary"
+                className="btn-primary"
               >
                 <User size={16} />
                 登录
               </button>
             </div>
           )}
-        </div>
+        </nav>
       </header>
 
       {/* Header */}
       <div className="mb-4 flex flex-col items-center text-center sm:flex-row sm:items-center sm:gap-6 sm:text-left">
         <BrandLogo className="h-auto w-44 sm:w-56 shrink-0" priority />
         <div className="mt-3 sm:mt-0">
-          <p className="retro-title text-lg">{HOME_COPY.title}</p>
+          <h1 className="retro-title text-lg">{HOME_COPY.title}</h1>
           <p className="type-body-sm mt-1 retro-text">{HOME_COPY.subtitle}</p>
           <p className="retro-kicker mt-1">
-            {heroStatus}
+            {quota || quotaLoaded ? heroStatus : "\u00a0"}
           </p>
         </div>
       </div>
 
       {/* Primary action panel */}
-      <section className="glass-card w-full max-w-3xl">
-        {/* Tab header */}
+      <section className="glass-card w-full max-w-3xl" aria-label="文件操作">
+        <h2 className="sr-only">传文件或收文件</h2>
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
             <div className="retro-segmented relative grid grid-cols-2 gap-1" role="tablist" aria-label="选择文件操作类型">
             {/* Sliding pill indicator */}
-            <motion.div
+            <div
               aria-hidden="true"
               data-testid="home-mode-indicator"
-              className="pointer-events-none absolute inset-y-1 left-1 rounded-xl bg-gradient-to-br from-[#FF8A3D] to-[#e0652a] shadow-[0_2px_16px_rgba(255,138,61,0.35)] will-change-transform"
-              style={{ width: "calc(50% - 0.375rem)" }}
-              animate={{ x: mode === "send" ? 0 : "calc(100% + 0.25rem)" }}
-              transition={{ type: "spring", stiffness: 380, damping: 32 }}
+              className="pointer-events-none absolute inset-y-1 left-1 rounded-xl bg-gradient-to-br from-[#FF8A3D] to-[#e0652a] shadow-[0_2px_16px_rgba(255,138,61,0.35)] will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]"
+              style={{ width: "calc(50% - 0.375rem)", transform: mode === "send" ? "translateX(0)" : "translateX(calc(100% + 0.25rem))" }}
             />
 
             <button
@@ -430,9 +442,9 @@ export default function Home() {
               <span
                 className={`type-action flex items-center justify-center gap-2 font-semibold transition-colors duration-200 ${mode === "send" ? "text-white" : "text-gray-600 dark:text-gray-400"}`}
               >
-                <motion.span animate={{ rotate: mode === "send" ? [0, -10, 0] : 0 }} transition={{ duration: 0.4, delay: 0.05 }}>
+                <span className={`inline-flex transition-transform duration-400 ${mode === "send" ? "rotate-0" : "-rotate-10"}`}>
                   <Upload className="h-4 w-4" />
-                </motion.span>
+                </span>
                 传文件
               </span>
               <span
@@ -451,9 +463,9 @@ export default function Home() {
               <span
                 className={`type-action flex items-center justify-center gap-2 font-semibold transition-colors duration-200 ${mode === "receive" ? "text-white" : "text-gray-600 dark:text-gray-400"}`}
               >
-                <motion.span animate={{ rotate: mode === "receive" ? [0, 10, 0] : 0 }} transition={{ duration: 0.4, delay: 0.05 }}>
+                <span className={`inline-flex transition-transform duration-400 ${mode === "receive" ? "rotate-0" : "rotate-10"}`}>
                   <Inbox className="h-4 w-4" />
-                </motion.span>
+                </span>
                 收文件
               </span>
               <span
@@ -465,26 +477,21 @@ export default function Home() {
 
         {/* Tab content */}
         <div className="px-5 pt-5 pb-6 sm:px-6 sm:pb-8 overflow-hidden">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={mode}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-              role="tabpanel"
-              aria-labelledby={mode === "send" ? "send-tab" : "receive-tab"}
-            >
-              {mode === "send" ? (
-                <FileUploader key={user ? "user" : "guest"} onUploadDone={loadGuestShares} loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} debugLog={debugEnabled ? appendDebugLog : undefined} />
-              ) : (
-                <>
-                  <FileRequestCreator embedded loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} />
-                  {user && <p className="type-caption mt-4 text-center retro-muted">收到的文件会占用你的账号上传额度，当前剩余 {quotaRemainingLabel}</p>}
-                </>
-              )}
-            </motion.div>
-          </AnimatePresence>
+          <div
+            key={mode}
+            role="tabpanel"
+            aria-labelledby={mode === "send" ? "send-tab" : "receive-tab"}
+            className="animate-[fadeIn_0.2s_ease]"
+          >
+            {mode === "send" ? (
+              <FileUploader key={user ? "user" : "guest"} initialQuota={quota} onQuotaChange={(nextQuota) => { setQuota(nextQuota); setQuotaLoaded(true); }} onUploadDone={loadGuestShares} loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} debugLog={debugEnabled ? appendDebugLog : undefined} />
+            ) : (
+              <>
+                <FileRequestCreator embedded loggedIn={!!user} onLoginClick={() => setAuthOpen(true)} />
+                {user && <p className="type-caption mt-4 text-center retro-muted">收到的文件会占用你的账号上传额度，当前剩余 {quotaRemainingLabel}</p>}
+              </>
+            )}
+          </div>
         </div>
       </section>
 

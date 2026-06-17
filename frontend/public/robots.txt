@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://nyy.app/sitemap.xml

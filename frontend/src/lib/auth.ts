@@ -6,6 +6,7 @@
  */
 
 import { createHttpError, HttpStatusError } from "./errors";
+import type { QuotaInfo } from "./api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const GUEST_ID_STORAGE_KEY = "nyy_guest_id";
@@ -13,17 +14,25 @@ const GUEST_ID_STORAGE_KEY = "nyy_guest_id";
 // ─── Access Token 管理（内存） ─────────────────────────────────
 
 let memoryAccessToken: string | null = null;
+let memoryAccessTokenExpiresAt = 0;
+const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 30_000;
 
 export function getToken(): string | null {
   return memoryAccessToken;
 }
 
-function setAccessToken(token: string) {
+function setAccessToken(token: string, expiresInSeconds?: number | null) {
   memoryAccessToken = token;
+  memoryAccessTokenExpiresAt = expiresInSeconds ? Date.now() + expiresInSeconds * 1000 : 0;
 }
 
 function clearAccessToken() {
   memoryAccessToken = null;
+  memoryAccessTokenExpiresAt = 0;
+}
+
+function shouldRefreshAccessToken(): boolean {
+  return !!memoryAccessToken && !!memoryAccessTokenExpiresAt && Date.now() >= memoryAccessTokenExpiresAt - ACCESS_TOKEN_REFRESH_LEEWAY_MS;
 }
 
 /** 清理旧 localStorage token（迁移用） */
@@ -67,6 +76,13 @@ export function isLoggedIn(): boolean {
 // ─── 带 auth 的 fetch（自动 refresh） ──────────────────────────
 
 let refreshPromise: Promise<boolean> | null = null;
+let bootstrapPromise: Promise<BootstrapResponse> | null = null;
+let bootstrapCache: { data: BootstrapResponse; at: number } | null = null;
+const BOOTSTRAP_DEDUPE_MS = 1500;
+
+function clearBootstrapCache() {
+  bootstrapCache = null;
+}
 
 async function tryRefresh(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
@@ -75,10 +91,11 @@ async function tryRefresh(): Promise<boolean> {
       const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
         method: "POST",
         credentials: "same-origin",
+        headers: { "X-NYY-CSRF": "1" },
       });
       if (!res.ok) return false;
       const data = await res.json();
-      setAccessToken(data.access_token);
+      setAccessToken(data.access_token, data.expires_in);
       return true;
     } catch {
       return false;
@@ -93,6 +110,7 @@ export async function authFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  if (shouldRefreshAccessToken()) await tryRefresh();
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -134,6 +152,15 @@ export interface UserInfo {
   email_verified: boolean;
   disabled?: boolean;
   deleted?: boolean;
+}
+
+export interface BootstrapResponse {
+  auth: {
+    status: "guest" | "user";
+    user: UserInfo | null;
+    token_type: string;
+  };
+  quota: QuotaInfo;
 }
 
 export { API_BASE };
@@ -226,7 +253,8 @@ export async function login(
   }
 
   const data = await handleResponse<TokenResponse>(res);
-  setAccessToken(data.access_token);
+  setAccessToken(data.access_token, data.expires_in);
+  clearBootstrapCache();
   return data;
 }
 
@@ -234,6 +262,30 @@ export async function login(
 export async function getMe(): Promise<UserInfo> {
   const res = await authFetch(`${API_BASE}/api/v1/auth/me`);
   return handleResponse(res);
+}
+
+/** 首屏启动：一次性恢复身份与配额，避免 auth/me + quota 多路探测。 */
+export async function bootstrapSession(): Promise<BootstrapResponse> {
+  const now = Date.now();
+  if (bootstrapCache && now - bootstrapCache.at < BOOTSTRAP_DEDUPE_MS) return bootstrapCache.data;
+  if (bootstrapPromise) return bootstrapPromise;
+  bootstrapPromise = (async () => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const guestId = getGuestId();
+    if (guestId) headers["X-NYY-Guest-ID"] = guestId;
+    const res = await fetch(`${API_BASE}/api/v1/auth/bootstrap`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+    });
+    const data = await handleResponse<BootstrapResponse>(res);
+    if (data.auth.status !== "user") clearAccessToken();
+    bootstrapCache = { data, at: Date.now() };
+    return data;
+  })().finally(() => {
+    bootstrapPromise = null;
+  });
+  return bootstrapPromise;
 }
 
 /** 重置密码 */
@@ -256,11 +308,13 @@ export async function logout() {
     await fetch(`${API_BASE}/api/v1/auth/logout`, {
       method: "POST",
       credentials: "same-origin",
+      headers: { "X-NYY-CSRF": "1" },
     });
   } catch {
     // 忽略登出错误
   } finally {
     clearAccessToken();
+    clearBootstrapCache();
   }
 }
 

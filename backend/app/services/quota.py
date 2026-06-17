@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TypedDict
 
 from app.core.config import get_settings
+from app.models.user import User
+from app.services.app_config import get_quota_config
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +23,35 @@ class QuotaCheckResult:
     reason: str = ""
     used_bytes: int = 0
     limit_bytes: int = 0
+
+
+class QuotaSnapshot(TypedDict):
+    used_bytes: int
+    limit_bytes: int
+    remaining_bytes: int
+    ttl_hours: int
+
+
+async def get_quota_snapshot(redis, db, *, user: User | None, guest_id: str) -> QuotaSnapshot:
+    """返回当前用户或游客身份的配额快照。"""
+    quota_config = await get_quota_config(db)
+    used = 0
+    if user:
+        if redis:
+            used = int(await redis.get(f"nyy:quota:user:{user.id}:bytes") or 0)
+        limit = quota_config["user_max_file_bytes"]
+        ttl_hours = quota_config["user_ttl_hours"]
+    else:
+        if redis:
+            used = int(await redis.get(f"nyy:quota:guest:{guest_id}:bytes") or 0)
+        limit = quota_config["guest_max_file_bytes"]
+        ttl_hours = quota_config["guest_ttl_hours"]
+    return {
+        "used_bytes": used,
+        "limit_bytes": limit,
+        "remaining_bytes": max(0, limit - used),
+        "ttl_hours": ttl_hours,
+    }
 
 
 class QuotaService:

@@ -66,7 +66,7 @@ export function PdfPreview({ url, className = "" }: PdfPreviewProps) {
     <div className={className}>
       {status === "loading" && (
         <div className="flex items-center justify-center h-full">
-          <p className="font-tech text-sm tracking-widest text-white/60">PDF 渲染中…</p>
+          <p className="font-tech text-sm tracking-widest text-[var(--yc-text-t)]">PDF 渲染中…</p>
         </div>
       )}
       {status === "error" && (

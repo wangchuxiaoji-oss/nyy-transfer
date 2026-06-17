@@ -34,6 +34,7 @@ from app.services.doubao_client import (
 )
 from app.services.app_config import get_quota_config
 from app.services.playback_assets import attach_playback_assets_for_single_object
+from app.services.quota import get_quota_snapshot
 from app.utils.short_code import gen_short_code
 
 log = logging.getLogger(__name__)
@@ -212,30 +213,9 @@ async def get_quota(
     """返回当前用户/游客身份的剩余配额信息。"""
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
-    redis = request.app.state.redis
-    used = 0
-
     from app.db.session import get_session_factory
     async with get_session_factory()() as db:
-        quota_config = await get_quota_config(db)
-
-    if user and redis:
-        key = f"nyy:quota:user:{user.id}:bytes"
-        used = int(await redis.get(key) or 0)
-        limit = quota_config["user_max_file_bytes"]
-        ttl_hours = quota_config["user_ttl_hours"]
-    else:
-        if redis:
-            used = int(await redis.get(f"nyy:quota:guest:{guest_id}:bytes") or 0)
-        limit = quota_config["guest_max_file_bytes"]
-        ttl_hours = quota_config["guest_ttl_hours"]
-
-    return {
-        "used_bytes": used,
-        "limit_bytes": limit,
-        "remaining_bytes": max(0, limit - used),
-        "ttl_hours": ttl_hours,
-    }
+        return await get_quota_snapshot(request.app.state.redis, db, user=user, guest_id=guest_id)
 
 
 @router.post(

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { X, FileText, Clock, Download, Trash2, Link2, Folder, ExternalLink } from "lucide-react";
-import QRCode from "qrcode";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { getShareInfo, type ShareInfo, type GuestShareInfo } from "@/lib/api";
 
@@ -56,7 +55,7 @@ export function ShareDetailModal({ share, open, onClose, onCopy, onDelete, canDe
       .catch((e) => setError(e instanceof Error ? e.message : "加载失败"))
       .finally(() => setLoading(false));
     // Generate QR
-    QRCode.toDataURL(shareUrl, { width: 200, margin: 2, color: { dark: "#2a1810" } })
+    import("qrcode").then((QRCode) => QRCode.toDataURL(shareUrl, { width: 200, margin: 2, color: { dark: "#2a1810" } }))
       .then(setQrUrl)
       .catch(() => {});
   }, [open, share.code, shareUrl]);

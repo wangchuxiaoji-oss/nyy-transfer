@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import QRCode from "qrcode";
 import { CheckCircle2, Download, Clock, AlertCircle, Package, Flag, X, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { CopyLinkButton } from "@/components/copy-link-button";
@@ -1232,7 +1231,7 @@ export default function SharePage() {
 
   // QR 二维码
   useEffect(() => {
-    QRCode.toDataURL(window.location.href, { margin: 1, width: 180 })
+    import("qrcode").then((QRCode) => QRCode.toDataURL(window.location.href, { margin: 1, width: 180 }))
       .then(setQr)
       .catch(() => {});
   }, []);
@@ -2070,11 +2069,11 @@ export default function SharePage() {
             <p className={`text-xs ${s.tMuted} mb-4`}>请选择举报原因。</p>
             <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} aria-label="选择举报原因"
               className={`mb-4 min-h-[44px] w-full rounded-lg border border-white/10 bg-white/6 px-3 py-2.5 text-sm ${s.tPrimary} focus:border-yc-accent focus:outline-none`}>
-              <option value="" className="text-black">选择原因…</option>
-              <option value="侵权内容" className="text-black">侵权内容</option>
-              <option value="恶意软件" className="text-black">恶意软件</option>
-              <option value="违法内容" className="text-black">违法内容</option>
-              <option value="其他" className="text-black">其他</option>
+              <option value="">选择原因…</option>
+              <option value="侵权内容">侵权内容</option>
+              <option value="恶意软件">恶意软件</option>
+              <option value="违法内容">违法内容</option>
+              <option value="其他">其他</option>
             </select>
             <button onClick={handleReport} disabled={!reportReason}
               className={`${s.glowBtn} min-h-[44px] w-full py-3 font-tech text-xs tracking-widest`}>

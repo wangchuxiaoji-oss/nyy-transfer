@@ -6,7 +6,6 @@ import {
   Upload, CheckCircle2, AlertCircle, FileIcon, Lock, Clock,
   X, RotateCcw, Files, Download, Folder, ExternalLink,
 } from "lucide-react";
-import QRCode from "qrcode";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { cn } from "@/lib/utils";
 import { computeCRC32 } from "@/lib/crc32";
@@ -81,11 +80,15 @@ export function FileUploader({
   loggedIn = false,
   onLoginClick,
   debugLog,
+  initialQuota,
+  onQuotaChange,
 }: {
   onUploadDone?: () => void;
   loggedIn?: boolean;
   onLoginClick?: () => void;
   debugLog?: DebugLogFn;
+  initialQuota?: QuotaInfo | null;
+  onQuotaChange?: (quota: QuotaInfo | null) => void;
 } = {}) {
   const idPrefix = useId();
   const shouldReduceMotion = useReducedMotion();
@@ -98,7 +101,7 @@ export function FileUploader({
   const [resultPhase, setResultPhase] = useState<"check" | "card">("check");
   const [dragOver, setDragOver] = useState(false);
   const [qrUrl, setQrUrl] = useState<string>("");
-  const [quota, setQuota] = useState<QuotaInfo | null>(null);
+  const [quota, setQuota] = useState<QuotaInfo | null>(initialQuota ?? null);
   const [password, setPassword] = useState("");
   const [expiresHours, setExpiresHours] = useState(loggedIn ? 168 : 1);
   const [maxDownloads, setMaxDownloads] = useState(loggedIn ? 100 : 10);
@@ -117,9 +120,12 @@ export function FileUploader({
   const lastDebugMetricsAtRef = useRef(0);
 
   useEffect(() => {
-    getQuota().then(setQuota).catch(() => {});
     setSupportsDirectoryPicker(typeof window !== "undefined" && "showDirectoryPicker" in window);
   }, []);
+
+  useEffect(() => {
+    setQuota(initialQuota ?? null);
+  }, [initialQuota]);
 
   // Transition from checkmark animation to result card
   useEffect(() => {
@@ -157,7 +163,6 @@ export function FileUploader({
     lastDebugMetricsAtRef.current = 0;
     cancelledRef.current = false;
     activeUploadBatchIdRef.current = null;
-    getQuota().then(setQuota).catch(() => {});
     debugLog?.("upload", "reset");
   };
 
@@ -1042,7 +1047,7 @@ export function FileUploader({
       debugLog?.("upload", "done", { uploadBatchId: session.upload_batch_id, shareCode: commitRes.share_code, totalBytes: totalSize, elapsedMs: Math.round(performance.now() - uploadStartAtRef.current) });
       setResultPhase("check");
       setResult({ shareCode: commitRes.share_code, shareUrl: commitRes.share_url, fileCount: commitRes.file_count, revokeToken: commitRes.revoke_token });
-      QRCode.toDataURL(commitRes.share_url, { width: 160, margin: 2, color: { dark: "#2a1810" } }).then(setQrUrl).catch(() => {});
+      import("qrcode").then((QRCode) => QRCode.toDataURL(commitRes.share_url, { width: 160, margin: 2, color: { dark: "#2a1810" } })).then(setQrUrl).catch(() => {});
       // 游客：存到 localStorage 以便后续展示；有撤销令牌时才允许撤销。
       if (!loggedIn) {
         try {
@@ -1051,7 +1056,7 @@ export function FileUploader({
           localStorage.setItem("nyy_guest_shares", JSON.stringify(stored.slice(0, 10)));
         } catch {}
       }
-      getQuota().then(setQuota).catch(() => {});
+      getQuota().then((nextQuota) => { setQuota(nextQuota); onQuotaChange?.(nextQuota); }).catch(() => {});
       onUploadDone?.();
     } catch (err) {
       if (cancelledRef.current) {
@@ -1211,7 +1216,7 @@ export function FileUploader({
         {/* Quota inside drop zone */}
         {quota && overall === "idle" && (
           <p className="type-caption mt-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-center retro-muted">
-            已用 {formatSize(quota.used_bytes)} / {formatSize(quota.limit_bytes)}，剩余 {formatSize(quota.remaining_bytes)}
+            可上传 {formatSize(quota.remaining_bytes)}
           </p>
         )}
       </motion.div>
@@ -1382,10 +1387,10 @@ export function FileUploader({
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
             <div className="h-full rounded-full bg-gradient-to-r from-yc-accent to-yc-accent-3 transition-all" style={{ width: `${totalProgress}%` }} />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-2 md:grid-cols-[1.45fr_1fr_1fr_1fr_auto]">
             <div className="retro-card px-3 py-2">
               <p className="type-caption retro-muted">已上传</p>
-              <p className="type-body-sm retro-text">{formatSize(displayedUploadedBytes)} / {formatSize(totalSize)}</p>
+              <p className="type-body-sm whitespace-nowrap retro-text">{formatSize(displayedUploadedBytes)} / {formatSize(totalSize)}</p>
             </div>
             <div className="retro-card px-3 py-2">
               <p className="type-caption retro-muted">实时速度</p>
@@ -1401,15 +1406,15 @@ export function FileUploader({
                 {overall === "committing" ? "即将完成" : remainingMs > 0 ? formatDuration(remainingMs) : "计算中"}
               </p>
             </div>
+            {overall === "uploading" && (
+              <button
+                onClick={() => void cancelUpload()}
+                className="retro-action-button retro-action-danger col-span-2 min-h-[44px] px-4 type-action md:col-span-1 md:h-full md:self-stretch md:whitespace-nowrap"
+              >
+                取消上传
+              </button>
+            )}
           </div>
-          {overall === "uploading" && (
-            <button
-              onClick={() => void cancelUpload()}
-              className="retro-action-button retro-action-danger mt-3 min-h-[44px] px-4 type-action"
-            >
-              取消上传
-            </button>
-          )}
         </div>
       )}
 

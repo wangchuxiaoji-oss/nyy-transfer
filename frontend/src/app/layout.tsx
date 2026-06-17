@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import "plyr/dist/plyr.css";
 import { ToastProvider } from "@/components/toast-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BRAND_NAME, SEO_DESCRIPTION, SEO_KEYWORDS, SEO_TITLE } from "@/lib/copy";
@@ -22,6 +21,28 @@ export const metadata: Metadata = {
   title: SEO_TITLE,
   description: SEO_DESCRIPTION,
   keywords: SEO_KEYWORDS,
+  metadataBase: new URL("https://nyy.app"),
+  alternates: {
+    canonical: "/",
+  },
+  verification: {
+    other: {
+      "baidu-site-verification": "codeva-X46dCl44SR",
+    },
+  },
+  openGraph: {
+    type: "website",
+    siteName: BRAND_NAME,
+    title: SEO_TITLE,
+    description: SEO_DESCRIPTION,
+    url: "https://nyy.app",
+    locale: "zh_CN",
+  },
+  twitter: {
+    card: "summary",
+    title: SEO_TITLE,
+    description: SEO_DESCRIPTION,
+  },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -61,7 +82,22 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("nyy-theme");var d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches);if(d)document.documentElement.classList.add("dark")}catch(e){}})()`,
+            __html: `(function(){try{var t=localStorage.getItem("nyy-theme");var d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches);var r=document.documentElement;if(d){r.classList.add("dark");r.setAttribute("data-theme","dark")}else{r.setAttribute("data-theme","light")}}catch(e){}})()`,
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebApplication",
+              name: BRAND_NAME,
+              url: "https://nyy.app",
+              description: SEO_DESCRIPTION,
+              applicationCategory: "UtilityApplication",
+              operatingSystem: "Web",
+              offers: { "@type": "Offer", price: "0", priceCurrency: "CNY" },
+            }),
           }}
         />
       </head>

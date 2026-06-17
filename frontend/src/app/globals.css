@@ -164,8 +164,8 @@ textarea,
     background: var(--yc-glass-s, rgba(255,255,255,0.85));
     border: 1px solid var(--yc-border, rgba(10,4,24,0.15));
     box-shadow: 0 24px 70px rgba(255, 138, 61, 0.12), inset 0 1px 0 rgba(255,255,255,0.36);
-    backdrop-filter: blur(var(--glass-blur-card));
     -webkit-backdrop-filter: blur(var(--glass-blur-card));
+    backdrop-filter: blur(var(--glass-blur-card));
     overflow: hidden;
   }
   .glass-card::before {
@@ -247,8 +247,8 @@ textarea,
     border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
     background: var(--yc-glass, rgba(255,255,255,0.06));
     box-shadow: 0 20px 60px rgba(255, 138, 61, 0.10), inset 0 1px 0 rgba(255,255,255,0.28);
-    backdrop-filter: blur(var(--glass-blur-card));
     -webkit-backdrop-filter: blur(var(--glass-blur-card));
+    backdrop-filter: blur(var(--glass-blur-card));
   }
 
   .retro-panel-strong {
@@ -257,8 +257,8 @@ textarea,
     border: 1px solid color-mix(in srgb, var(--yc-accent, #FF8A3D) 36%, var(--yc-border, rgba(255,255,255,0.18)));
     background: var(--yc-glass-s, rgba(255,255,255,0.12));
     box-shadow: 0 24px 70px rgba(255, 138, 61, 0.16), inset 0 1px 0 rgba(255,255,255,0.34);
-    backdrop-filter: blur(var(--glass-blur-card));
     -webkit-backdrop-filter: blur(var(--glass-blur-card));
+    backdrop-filter: blur(var(--glass-blur-card));
   }
 
   .retro-card {
@@ -266,8 +266,8 @@ textarea,
     border-color: var(--yc-border, rgba(255,255,255,0.18));
     background: var(--yc-glass, rgba(255,255,255,0.06));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-card:hover {
@@ -323,8 +323,8 @@ textarea,
     background: var(--yc-glass, rgba(255,255,255,0.06));
     color: var(--yc-text-s, rgba(255,255,255,0.7));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-btn-secondary:hover:not(:disabled) {
@@ -357,8 +357,8 @@ textarea,
     background: var(--yc-glass, rgba(255,255,255,0.06));
     color: var(--yc-text-s, rgba(255,255,255,0.7));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-close-button:hover:not(:disabled) {
@@ -393,8 +393,8 @@ textarea,
     @apply rounded-card p-1;
     border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
     background: var(--yc-glass, rgba(255,255,255,0.06));
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-segment-button {
@@ -526,8 +526,8 @@ textarea,
     border-color: color-mix(in srgb, var(--yc-accent, #FF8A3D) 26%, var(--yc-border, rgba(255,255,255,0.18)));
     background: var(--yc-glass, rgba(255,255,255,0.06));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-file-dropzone:hover {
@@ -567,8 +567,8 @@ textarea,
     background: var(--yc-glass-s, rgba(255,255,255,0.12));
     color: var(--yc-text-s, rgba(255,255,255,0.7));
     box-shadow: 0 18px 46px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.24);
-    backdrop-filter: blur(var(--glass-blur-overlay));
     -webkit-backdrop-filter: blur(var(--glass-blur-overlay));
+    backdrop-filter: blur(var(--glass-blur-overlay));
   }
 
   .nyy-account-menu {
@@ -582,13 +582,19 @@ textarea,
   }
 
   .retro-menu-item {
-    @apply flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50;
+    @apply flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50;
     color: var(--yc-text-s, rgba(255,255,255,0.7));
   }
 
-  .retro-menu-item:hover:not(:disabled) {
+  .retro-menu-item:hover:not(:disabled),
+  .retro-menu-item[data-focused] {
     background: color-mix(in srgb, var(--yc-accent, #FF8A3D) 14%, transparent);
     color: var(--yc-accent, #FF8A3D);
+  }
+
+  .retro-menu-item[data-disabled] {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .retro-menu-item-danger {
@@ -604,8 +610,8 @@ textarea,
     @apply rounded-2xl p-1;
     border: 1px solid var(--yc-border, rgba(255,255,255,0.18));
     background: var(--yc-glass, rgba(255,255,255,0.06));
-    backdrop-filter: blur(var(--glass-blur-control));
     -webkit-backdrop-filter: blur(var(--glass-blur-control));
+    backdrop-filter: blur(var(--glass-blur-control));
   }
 
   .retro-tab-active {
@@ -687,54 +693,7 @@ textarea,
   }
 }
 
-/* Plyr player theme overrides */
-:root {
-  --plyr-color-main: #FF8A3D;
-  --plyr-video-background: #1a1a1a;
-  --plyr-range-fill-background: #FF8A3D;
-  --plyr-badge-background: #FF8A3D;
-  --plyr-audio-controls-background: #fefcf9;
-  --plyr-audio-control-color: #2a1810;
-  /* Buffer bar: visible warm white against dark track */
-  --plyr-video-progress-buffered-background: rgba(255, 255, 255, 0.45);
-  --plyr-video-range-track-background: rgba(255, 255, 255, 0.12);
-  --plyr-audio-progress-buffered-background: rgba(255, 138, 61, 0.3);
-  --plyr-audio-range-track-background: rgba(0, 0, 0, 0.1);
-}
-
-.dark {
-  --plyr-audio-controls-background: #1e1e1e;
-  --plyr-audio-control-color: #f0ebe5;
-  --plyr-audio-progress-buffered-background: rgba(255, 138, 61, 0.35);
-  --plyr-audio-range-track-background: rgba(255, 255, 255, 0.08);
-}
-
-.plyr {
-  border-radius: var(--radius-card);
-  overflow: hidden;
-}
-
-.plyr--audio {
-  border-radius: var(--radius-control);
-}
-
-/* Ensure buffer progress bar is visible across browsers */
-.plyr--video .plyr__progress__buffer {
-  color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
-  background-color: transparent;
-  border-radius: var(--radius-pill);
-}
-.plyr--video .plyr__progress__buffer::-webkit-progress-value {
-  background-color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
-  border-radius: var(--radius-pill);
-  transition: width 0.2s ease;
-}
-.plyr--video .plyr__progress__buffer::-moz-progress-bar {
-  background-color: var(--plyr-video-progress-buffered-background, rgba(255, 255, 255, 0.45));
-  border-radius: var(--radius-pill);
-  transition: width 0.2s ease;
-}
-.plyr--video .plyr__progress__buffer::-webkit-progress-bar {
-  background-color: var(--plyr-video-range-track-background, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-pill);
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

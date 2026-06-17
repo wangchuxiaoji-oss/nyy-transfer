@@ -7,8 +7,8 @@ const THROUGHPUT_WINDOW = 3;
 const THROUGHPUT_MIBPS_FOR_4 = 2;
 const THROUGHPUT_MIBPS_FOR_3 = 0.8;
 const RANGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const FETCH_RETRY_COUNT = 2;
-const FETCH_RETRY_DELAY_MS = 160;
+const FETCH_RETRY_COUNT = 3;
+const FETCH_RETRY_DELAY_MS = 300;
 const debugClientIds = new Set();
 const rangeCache = new Map();
 let rangeCacheBytes = 0;
@@ -196,7 +196,7 @@ function isAbortError(err) {
 }
 
 function isTransientFetchError(err) {
-  return err instanceof TypeError && /failed to fetch|networkerror/i.test(err.message || "");
+  return err instanceof TypeError && /failed to fetch|networkerror|load failed|abort/i.test(err.message || "");
 }
 
 function waitForRetry() {
@@ -298,7 +298,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
   let activeReader = null;
   let activeSliceMeta = null;
   let streamClosed = false;
-  let desiredConcurrency = MAX_PREFETCH_CONCURRENCY;
+  let desiredConcurrency = MIN_PREFETCH_CONCURRENCY;
   const readerQueue = []; // ordered promises resolving to { reader } or { done/error }
   const abortControllers = new Set();
   const recentThroughputsMibps = [];

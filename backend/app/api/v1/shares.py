@@ -156,20 +156,27 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
 
 
 async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[ShareFileDownload]:
-    """为所有逻辑文件获取临时下载 URL。"""
+    """为所有逻辑文件获取临时下载 URL（并行获取以提升性能）。"""
+    import asyncio
+
     resolver = DoubaoDownloadUrlResolver()
 
     try:
-        results: list[ShareFileDownload] = []
-        for logical_file in sorted(logical_files, key=lambda item: item.sort_index):
+        sorted_files = sorted(logical_files, key=lambda item: item.sort_index)
+        if not sorted_files:
+            return []
+
+        async def resolve_single_file(logical_file: ShareLogicalFile) -> ShareFileDownload | None:
+            """处理单个逻辑文件，返回 ShareFileDownload 或 None（空文件时）。"""
             chunks_sorted = sorted(logical_file.files, key=lambda item: item.chunk_index)
             if not chunks_sorted:
-                continue
+                return None
 
+            # 单 chunk 文件
             if len(chunks_sorted) == 1 and logical_file.chunk_total == 1:
                 chunk = chunks_sorted[0]
                 if chunk.tos_uri.startswith(_EMPTY_URI_PREFIX):
-                    results.append(ShareFileDownload(
+                    return ShareFileDownload(
                         file_name=logical_file.original_name,
                         file_size=logical_file.size,
                         content_type=logical_file.content_type or "",
@@ -177,16 +184,13 @@ async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[Shar
                         download_url=_EMPTY_FILE_DATA_URL,
                         chunks=[],
                         media_metadata=logical_file.media_metadata,
-                    ))
-                    continue
+                    )
 
-                try:
-                    url = await resolver.get_download_url(chunk.tos_uri, expire_seconds=86400)
-                    media_metadata = await _metadata_with_signed_assets(logical_file.media_metadata, resolver)
-                except DoubaoClientError as e:
-                    log.error("get_download_url failed for %s: %s", chunk.tos_uri, e)
-                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
-                results.append(ShareFileDownload(
+                # 并行获取 URL 和签名资源
+                url_coro = resolver.get_download_url(chunk.tos_uri, expire_seconds=86400)
+                meta_coro = _metadata_with_signed_assets(logical_file.media_metadata, resolver)
+                url, media_metadata = await asyncio.gather(url_coro, meta_coro)
+                return ShareFileDownload(
                     file_name=logical_file.original_name,
                     file_size=logical_file.size,
                     content_type=logical_file.content_type or "",
@@ -194,33 +198,42 @@ async def _get_download_urls(logical_files: list[ShareLogicalFile]) -> list[Shar
                     download_url=url,
                     chunks=[],
                     media_metadata=media_metadata,
-                ))
-                continue
+                )
 
-            chunk_downloads: list[ChunkDownloadInfo] = []
-            for c in chunks_sorted:
-                try:
-                    url = await resolver.get_download_url(c.tos_uri, expire_seconds=86400)
-                except DoubaoClientError as e:
-                    log.error("get_download_url failed for chunk %s: %s", c.tos_uri, e)
-                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "下载服务暂时不可用，请稍后重试")
-                chunk_downloads.append(ChunkDownloadInfo(
-                    index=c.chunk_index,
-                    size=c.size,
-                    download_url=url,
-                ))
+            # 多 chunk 文件：并行获取所有 chunk 的下载 URL
+            chunk_url_coros = [
+                resolver.get_download_url(c.tos_uri, expire_seconds=86400)
+                for c in chunks_sorted
+            ]
+            meta_coro = _metadata_with_signed_assets(logical_file.media_metadata, resolver)
 
-            results.append(ShareFileDownload(
+            # 并行执行所有 chunk URL 获取 + 元数据签名
+            all_results = await asyncio.gather(*chunk_url_coros, meta_coro)
+            chunk_urls = all_results[:-1]
+            media_metadata = all_results[-1]
+
+            chunk_downloads = [
+                ChunkDownloadInfo(index=c.chunk_index, size=c.size, download_url=url)
+                for c, url in zip(chunks_sorted, chunk_urls)
+            ]
+
+            return ShareFileDownload(
                 file_name=logical_file.original_name,
                 file_size=logical_file.size,
                 content_type=logical_file.content_type or "",
                 is_chunked=True,
                 download_url="",
                 chunks=chunk_downloads,
-                media_metadata=await _metadata_with_signed_assets(logical_file.media_metadata, resolver),
-            ))
+                media_metadata=media_metadata,
+            )
 
-        return results
+        # 并行处理所有文件
+        file_coros = [resolve_single_file(lf) for lf in sorted_files]
+        file_results = await asyncio.gather(*file_coros)
+
+        # 过滤掉 None（空文件），保持原始顺序
+        return [r for r in file_results if r is not None]
+
     finally:
         await resolver.close()
 
