@@ -286,6 +286,7 @@ class DoubaoUploadClient:
             if new_cookies:
                 data["cookies"] = new_cookies
                 data["timestamp"] = int(time.time())
+                data["source"] = "heartbeat+persist"
                 tmp = path.with_suffix(".tmp")
                 tmp.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 tmp.replace(path)
