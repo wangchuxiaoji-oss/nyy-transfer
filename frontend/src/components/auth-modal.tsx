@@ -645,6 +645,9 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                       <button type="submit" disabled={loading || (loginNeedsCaptcha && !loginCaptchaToken)} className={primaryBtnCls}>
                         {loading ? "登录中..." : loginNeedsCaptcha && !loginCaptchaToken ? "完成验证后登录" : "登录"}
                       </button>
+                      <p className="type-caption text-center text-[#8b7563] dark:text-white/38">
+                        登录即表示你同意 <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-nyy-600 dark:text-nyy-400 hover:underline">服务条款</a> 和 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-nyy-600 dark:text-nyy-400 hover:underline">隐私政策</a>
+                      </p>
                       <button type="button" onClick={() => switchTab("forgot")} className={`${subtleBtnCls} w-full`}>忘记密码？</button>
                     </form>
                   )}
@@ -687,7 +690,7 @@ export function AuthModal({ open, onClose, onLoginSuccess }: AuthModalProps) {
                               <PasswordStrength password={regPassword} />
                               <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-black/8 bg-white/42 p-3 dark:border-white/10 dark:bg-white/[0.035]">
                                 <input type="checkbox" checked={agreedTerms} onChange={(e) => setAgreedTerms(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-nyy-600 focus:ring-nyy-500" />
-                                <span className="type-caption text-[#6f5948] dark:text-white/55">我已阅读并同意 <a href="/terms" target="_blank" className="font-medium text-nyy-600 hover:underline">服务条款</a> 和 <a href="/privacy" target="_blank" className="font-medium text-nyy-600 hover:underline">隐私政策</a></span>
+                                <span className="type-caption text-[#6f5948] dark:text-white/55">我已阅读并同意 <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium text-nyy-600 dark:text-nyy-400 hover:underline">服务条款</a> 和 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium text-nyy-600 dark:text-nyy-400 hover:underline">隐私政策</a></span>
                               </label>
                             </div>
                           </div>

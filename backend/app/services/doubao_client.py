@@ -458,8 +458,13 @@ class DoubaoUploadClient:
         resp = await self.http.post(commit_url, content=commit_body, headers=sign_headers)
         body = resp.json()
         results = body.get("Result", {}).get("Results", [])
-        if not results or results[0].get("UriStatus") != 2000:
-            log.error("CommitImageUpload failed: %s", body)
+        if not results:
+            log.error("CommitImageUpload failed: no results, body=%s", body)
+            raise DoubaoClientError(f"CommitImageUpload failed: {body}")
+        status = results[0].get("UriStatus")
+        if status != 2000 and status != 2001:
+            # 2000=处理成功, 2001=文件已存在但非图片(正常的非图片文件上传)
+            log.error("CommitImageUpload failed: status=%s body=%s", status, body)
             raise DoubaoClientError(f"CommitImageUpload failed: {body}")
 
         store_uri = results[0].get("Uri", "")
