@@ -264,7 +264,34 @@ class DoubaoUploadClient:
             last_heartbeat_success_at=time.time(),
             last_heartbeat_error="",
         )
+        # 心跳成功后把更新的 cookies 持久化到文件，防止重启丢失
+        await self._persist_cookies()
         return True
+
+    async def _persist_cookies(self) -> None:
+        """将 httpx 内部更新后的 cookies 写回 .doubao_session.json。"""
+        if not self.session_file or not self._http:
+            return
+        import json as _json
+        from pathlib import Path as _Path
+        path = _Path(self.session_file)
+        if not path.exists():
+            return
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = _json.load(f)
+            new_cookies = {}
+            for cookie in self._http.cookies.jar:
+                new_cookies[cookie.name] = cookie.value
+            if new_cookies:
+                data["cookies"] = new_cookies
+                data["timestamp"] = int(time.time())
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp.replace(path)
+                log.debug("persisted %d cookies to %s", len(new_cookies), path)
+        except Exception as exc:
+            log.warning("persist_cookies failed: %s", exc)
 
     async def _prepare_upload_auth(self) -> UploadAuthResult:
         """获取一组新的豆包上传 STS 授权。"""
