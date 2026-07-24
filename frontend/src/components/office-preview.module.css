@@ -1,0 +1,355 @@
+.root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: clip;
+  isolation: isolate;
+  color: var(--yc-text, #0a0418);
+  background: #ece7e1;
+  background-clip: padding-box;
+}
+
+.scroll {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  -webkit-overflow-scrolling: touch;
+  color-scheme: light;
+}
+
+.scroll:hover,
+.scroll:focus-visible,
+.scroll[data-scrolling="true"] {
+  scrollbar-color: rgba(91, 69, 53, 0.42) transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.scroll:hover::-webkit-scrollbar-thumb,
+.scroll:focus-visible::-webkit-scrollbar-thumb,
+.scroll[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  background-color: rgba(91, 69, 53, 0.42);
+}
+
+.status {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--yc-text-s, rgba(10, 4, 24, 0.7));
+  background: #ece7e1;
+}
+
+.statusTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.statusDetail {
+  max-width: 440px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--yc-text-t, rgba(10, 4, 24, 0.52));
+}
+
+.progressTrack {
+  width: min(280px, 72%);
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(10, 4, 24, 0.09);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff8a3d, #ff3366);
+  transition: width 160ms ease-out;
+}
+
+.retryButton {
+  min-height: 44px;
+  border: 1px solid rgba(255, 138, 61, 0.36);
+  border-radius: 12px;
+  padding: 0 16px;
+  color: #b54c19;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.statusActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.retryButton:hover {
+  border-color: #ff8a3d;
+  background: #fff;
+}
+
+.documentPage {
+  min-height: 100%;
+  padding: 24px;
+  color: #251a13;
+}
+
+.docxHost {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  color: #251a13;
+  background: #fff;
+}
+
+.sheetShell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  background: #f7f4f0;
+}
+
+.sheetTabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex: none;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(42, 24, 16, 0.12);
+  background: rgba(255, 252, 249, 0.94);
+  scrollbar-width: none;
+  backdrop-filter: blur(12px);
+}
+
+.sheetTabs::-webkit-scrollbar {
+  display: none;
+}
+
+.sheetTab {
+  min-height: 36px;
+  flex: none;
+  border: 1px solid rgba(42, 24, 16, 0.12);
+  border-radius: 10px;
+  padding: 0 12px;
+  color: rgba(42, 24, 16, 0.68);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sheetTabActive {
+  border-color: rgba(255, 138, 61, 0.48);
+  color: #9f4219;
+  background: rgba(255, 138, 61, 0.13);
+}
+
+.sheetViewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+}
+
+.sheetCanvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.sheetRow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+}
+
+.sheetRowHeader {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  transform: none !important;
+}
+
+.sheetCell {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid #e7e2dc;
+  border-bottom: 1px solid #e7e2dc;
+  padding: 0 9px;
+  color: #2a1810;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sheetHeaderCell {
+  justify-content: center;
+  color: #7a6855;
+  background: #f5f0ea;
+  font-weight: 700;
+}
+
+.pptxHost {
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+}
+
+:global([data-theme="dark"]) .stage,
+:global([data-theme="dark"]) .status {
+  color: var(--yc-text, #fff);
+  background: #17121d;
+}
+
+:global([data-theme="dark"]) .scroll {
+  color-scheme: dark;
+}
+
+:global([data-theme="dark"]) .scroll:hover,
+:global([data-theme="dark"]) .scroll:focus-visible,
+:global([data-theme="dark"]) .scroll[data-scrolling="true"] {
+  scrollbar-color: rgba(255, 255, 255, 0.36) transparent;
+}
+
+:global([data-theme="dark"]) .scroll:hover::-webkit-scrollbar-thumb,
+:global([data-theme="dark"]) .scroll:focus-visible::-webkit-scrollbar-thumb,
+:global([data-theme="dark"]) .scroll[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.36);
+}
+
+:global([data-theme="dark"]) .documentPage {
+  color: #f1ebe6;
+}
+
+:global([data-theme="dark"]) .sheetShell,
+:global([data-theme="dark"]) .sheetViewport,
+:global([data-theme="dark"]) .sheetCanvas {
+  background: #17121d;
+}
+
+:global([data-theme="dark"]) .sheetTabs {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(23, 18, 29, 0.94);
+}
+
+:global([data-theme="dark"]) .sheetTab {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+:global([data-theme="dark"]) .sheetTabActive {
+  border-color: rgba(255, 138, 61, 0.45);
+  color: #fed7aa;
+  background: rgba(255, 138, 61, 0.16);
+}
+
+:global([data-theme="dark"]) .sheetCell {
+  border-color: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.82);
+  background: #17121d;
+}
+
+:global([data-theme="dark"]) .sheetHeaderCell {
+  color: rgba(255, 255, 255, 0.56);
+  background: #211a28;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .scroll {
+    scrollbar-width: none;
+  }
+
+  .scroll::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .documentPage,
+  .pptxHost {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 639px) {
+  .sheetTabs {
+    padding-inline: 8px;
+  }
+
+  .sheetTab {
+    min-height: 40px;
+  }
+}
+
+@media (forced-colors: active) {
+  .scroll {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .scroll::-webkit-scrollbar {
+    display: initial;
+    width: auto;
+    height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressFill,
+  .retryButton {
+    transition: none;
+  }
+}

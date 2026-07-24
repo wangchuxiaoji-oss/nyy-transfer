@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
@@ -70,7 +72,7 @@ async def get_auth_events(*event_types: str) -> list[AuthEvent]:
 
 
 async def create_verified_user(email: str, password: str) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.db.session import get_session_factory
 
@@ -79,7 +81,7 @@ async def create_verified_user(email: str, password: str) -> None:
         db.add(User(
             email=email,
             password_hash=hash_password(password),
-            email_verified_at=datetime.now(timezone.utc),
+            email_verified_at=datetime.now(UTC),
         ))
         await db.commit()
 
@@ -273,6 +275,51 @@ async def test_send_code_ip_daily_limit(client, redis):
         settings.email_code_ip_hourly_limit = original_hourly
 
     assert response.status_code == 429
+
+
+def test_production_settings_reject_default_secret_key():
+    """生产环境不能继续使用示例 SECRET_KEY。"""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError, match="SECRET_KEY"):
+        Settings(
+            app_env="production",
+            secret_key="change-me-please-32-bytes-minimum-secret",
+            jwt_secret="production-jwt-secret-with-at-least-32-bytes",
+            captcha_hmac_secret="production-captcha-secret-at-least-32-bytes",
+            email_code_secret="production-email-secret-at-least-32-bytes",
+        )
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"app_base_url": "http://127.0.0.1:8000"}, "APP_BASE_URL"),
+        ({"database_url": "postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy"}, "数据库凭据"),
+        ({"doubao_file_station_api_key": "sk-local"}, "豆包 API 密钥"),
+    ],
+)
+def test_production_settings_reject_default_deployment_values(override, message):
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    values = {
+        "app_env": "production",
+        "app_base_url": "https://nyy.app",
+        "secret_key": "production-app-secret-with-at-least-32-bytes",
+        "jwt_secret": "production-jwt-secret-with-at-least-32-bytes",
+        "captcha_hmac_secret": "production-captcha-secret-at-least-32-bytes",
+        "email_code_secret": "production-email-secret-at-least-32-bytes",
+        "database_url": "postgresql+asyncpg://nyy:strong-password@127.0.0.1:5432/nyy",
+        "database_sync_url": "postgresql+psycopg://nyy:strong-password@127.0.0.1:5432/nyy",
+        "doubao_file_station_api_key": "production-doubao-api-key",
+    }
+    values.update(override)
+    with pytest.raises(ValidationError, match=message):
+        Settings(**values)
 
 
 async def test_register_requires_valid_email_code(client, redis):
@@ -569,6 +616,46 @@ async def test_refresh_token_reuse_revokes_family(client, redis):
     )
 
     assert reuse_resp.status_code == 401
+    sessions = await get_user_sessions(email)
+    assert sessions
+    assert all(session.revoked_at is not None for session in sessions)
+
+
+async def test_concurrent_refresh_replay_never_returns_token_and_revokes_family(client, redis):
+    """同一旧 token 并发刷新只允许一次签发，竞争请求按复用撤销 family。"""
+    email = f"concurrent-refresh-{uuid.uuid4().hex}@example.com"
+    password = "Str0ngP@ss!"
+    await create_verified_user(email, password)
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    old_token = login_response.cookies.get("nyy_refresh_token")
+    assert old_token is not None
+
+    responses = await asyncio.gather(
+        *[
+            client.post(
+                "/api/v1/auth/refresh",
+                cookies={"nyy_refresh_token": old_token},
+                headers={"Origin": "http://test"},
+            )
+            for _ in range(2)
+        ]
+    )
+
+    assert sorted(response.status_code for response in responses) == [200, 401]
+    successful_response = next(response for response in responses if response.status_code == 200)
+    issued_token = successful_response.cookies.get("nyy_refresh_token")
+    assert issued_token and issued_token != old_token
+
+    replay_response = await client.post(
+        "/api/v1/auth/refresh",
+        cookies={"nyy_refresh_token": issued_token},
+        headers={"Origin": "http://test"},
+    )
+    assert replay_response.status_code == 401
     sessions = await get_user_sessions(email)
     assert sessions
     assert all(session.revoked_at is not None for session in sessions)

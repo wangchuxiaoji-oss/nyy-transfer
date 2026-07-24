@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
 
 from app.core.config import get_settings
 

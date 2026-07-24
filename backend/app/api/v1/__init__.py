@@ -7,6 +7,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.captcha import router as captcha_router
 from app.api.v1.debug_logs import router as debug_logs_router
 from app.api.v1.file_requests import router as file_requests_router
+from app.api.v1.growth import router as growth_router
 from app.api.v1.health import router as health_router
 from app.api.v1.my_shares import router as my_shares_router
 from app.api.v1.shares import router as shares_router
@@ -18,6 +19,7 @@ api_v1_router.include_router(health_router)
 api_v1_router.include_router(captcha_router)
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(debug_logs_router)
+api_v1_router.include_router(growth_router)
 api_v1_router.include_router(admin_router)
 api_v1_router.include_router(file_requests_router)
 api_v1_router.include_router(my_shares_router)

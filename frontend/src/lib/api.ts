@@ -114,6 +114,7 @@ export interface PlaybackAsset {
   offset_delta?: number;
   crc32?: string;
   download_url?: string;
+  backup_download_url?: string;
 }
 
 export interface PlaybackHints {
@@ -179,6 +180,7 @@ export interface ChunkDownloadInfo {
   index: number;
   size: number;
   download_url: string;
+  backup_download_url?: string;
 }
 
 export interface ShareInfo {
@@ -199,6 +201,7 @@ export interface ShareFileDownload {
   content_type: string;
   is_chunked: boolean;
   download_url: string;
+  backup_download_url?: string;
   chunks: ChunkDownloadInfo[];
   media_metadata?: MediaMetadata | null;
 }
@@ -243,6 +246,7 @@ export async function uploadCommit(params: {
   expires_hours?: number;
   max_downloads?: number;
   recipients?: string[];
+  retention_coupon_id?: string;
 }): Promise<UploadCommitResponse> {
   const res = await authFetch(`${API_BASE}/api/v1/uploads/commit`, {
     method: "POST",
@@ -276,18 +280,59 @@ export async function getShareInfo(code: string): Promise<ShareInfo> {
   return handleResponse(res, "分享不存在或已被删除");
 }
 
-export async function verifyShare(code: string, password: string): Promise<ShareDownloadResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/shares/${code}/verify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  return handleResponse(res, "提取码验证失败");
+export type ShareInteractionEvent = "page_rendered" | "human_interaction";
+
+export function createLinkRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `link-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export async function downloadShare(code: string): Promise<ShareDownloadResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/shares/${code}/download`);
-  return handleResponse(res, "获取下载链接失败");
+export async function recordShareInteraction(code: string, eventType: ShareInteractionEvent, requestId = createLinkRequestId()): Promise<void> {
+  const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/interaction`, {
+    method: "POST",
+    headers: { "X-NYY-Request-ID": requestId },
+    body: JSON.stringify({ event_type: eventType, request_id: requestId }),
+  });
+  if (response.ok) return;
+  const error = await createHttpError(response, { fallback: "访问事件记录失败" });
+  if (eventType === "page_rendered" && (isHttpStatusError(error, 404) || isHttpStatusError(error, 405))) {
+    const legacyResponse = await authFetch(`${API_BASE}/api/v1/shares/${code}/access`, { method: "POST" });
+    if (!legacyResponse.ok) throw await createHttpError(legacyResponse, { fallback: "页面访问记录失败" });
+    return;
+  }
+  throw error;
+}
+
+export async function verifyShare(code: string, password: string, requestId = createLinkRequestId()): Promise<ShareDownloadResponse> {
+  const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
+    method: "POST",
+    headers: { "X-NYY-Link-Request-ID": requestId },
+    body: JSON.stringify({ password, request_id: requestId }),
+  });
+  if (response.ok) return response.json();
+  const error = await createHttpError(response, { fallback: "提取码验证失败" });
+  if (!isHttpStatusError(error, 404) && !isHttpStatusError(error, 405)) throw error;
+  const legacyResponse = await authFetch(`${API_BASE}/api/v1/shares/${code}/verify`, {
+    method: "POST",
+    headers: { "X-NYY-Link-Request-ID": requestId },
+    body: JSON.stringify({ password }),
+  });
+  return handleResponse(legacyResponse, "提取码验证失败");
+}
+
+export async function downloadShare(code: string, requestId = createLinkRequestId()): Promise<ShareDownloadResponse> {
+  const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
+    method: "POST",
+    headers: { "X-NYY-Link-Request-ID": requestId },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+  if (response.ok) return response.json();
+  const error = await createHttpError(response, { fallback: "获取下载链接失败" });
+  if (!isHttpStatusError(error, 404) && !isHttpStatusError(error, 405)) throw error;
+  const legacyResponse = await authFetch(`${API_BASE}/api/v1/shares/${code}/download`, {
+    headers: { "X-NYY-Link-Request-ID": requestId },
+  });
+  return handleResponse(legacyResponse, "获取下载链接失败");
 }
 
 export async function getPublicDownloadConfig(): Promise<DownloadConfig> {

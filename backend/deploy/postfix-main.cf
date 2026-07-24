@@ -1,0 +1,39 @@
+# 由 deploy/README.md 逐行传给 postconf -e，禁止复制覆盖 /etc/postfix/main.cf。
+compatibility_level = 3.6
+smtpd_banner = $myhostname ESMTP
+biff = no
+append_dot_mydomain = no
+myhostname = mail.nyy.app
+mydomain = nyy.app
+myorigin = $mydomain
+inet_interfaces = all
+inet_protocols = ipv4
+mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
+mynetworks = 127.0.0.0/8
+home_mailbox = Maildir/
+recipient_delimiter = +
+alias_maps = hash:/etc/aliases, hash:/etc/postfix/nyy-aliases
+alias_database = hash:/etc/aliases, hash:/etc/postfix/nyy-aliases
+relayhost =
+smtp_tls_security_level = may
+smtp_tls_note_starttls_offer = yes
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_protocols = >=TLSv1.2
+smtpd_tls_security_level = may
+smtpd_tls_cert_file = /etc/letsencrypt/live/mail.nyy.app/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/mail.nyy.app/privkey.pem
+smtpd_tls_loglevel = 1
+smtpd_tls_protocols = >=TLSv1.2
+message_size_limit = 26214400
+mailbox_size_limit = 0
+milter_protocol = 6
+milter_default_action = accept
+smtpd_milters = local:opendkim/opendkim.sock
+non_smtpd_milters = $smtpd_milters
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_non_fqdn_recipient, reject_unknown_recipient_domain
+smtpd_sender_restrictions = reject_non_fqdn_sender, reject_unknown_sender_domain
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+strict_rfc821_envelopes = yes
+smtpd_client_connection_rate_limit = 30

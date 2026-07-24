@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +20,15 @@ async def healthz() -> dict[str, str]:
 
 
 @router.get("/readyz")
-async def readyz(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
-    """就绪检查：探测一下数据库连通性。"""
+async def readyz(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, str]:
+    """就绪检查：数据库和 Redis 均可用才接收生产流量。"""
 
     await db.execute(text("SELECT 1"))
-    return {"status": "ready", "db": "ok"}
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail="redis unavailable")
+    try:
+        await redis_client.ping()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="redis unavailable") from exc
+    return {"status": "ready", "db": "ok", "redis": "ok"}

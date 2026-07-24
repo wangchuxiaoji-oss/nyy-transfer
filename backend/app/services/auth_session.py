@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ async def create_session(
     settings = get_settings()
     token = _generate_token()
     token_h = _hash_token(token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     session = AuthSession(
         user_id=user_id,
@@ -66,10 +66,10 @@ async def rotate_session(
     如果旧 token 被复用（已被撤销），返回 (None, family_id_hex) 以触发 family 撤销。
     """
     token_h = _hash_token(raw_token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result = await db.execute(
-        select(AuthSession).where(AuthSession.token_hash == token_h)
+        select(AuthSession).where(AuthSession.token_hash == token_h).with_for_update()
     )
     old_session = result.scalar_one_or_none()
 
@@ -97,14 +97,13 @@ async def rotate_session(
         family_id=old_session.family_id,
         rotated_from_id=old_session.id,
     )
-
     return new_session, new_token
 
 
 async def get_active_session_by_token(db: AsyncSession, raw_token: str) -> AuthSession | None:
     """只读校验 refresh token，不做轮换，适合首屏 bootstrap。"""
     token_h = _hash_token(raw_token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await db.execute(select(AuthSession).where(AuthSession.token_hash == token_h))
     session = result.scalar_one_or_none()
     if not session or session.revoked_at or session.expires_at < now:
@@ -114,7 +113,7 @@ async def get_active_session_by_token(db: AsyncSession, raw_token: str) -> AuthS
 
 async def revoke_family(db: AsyncSession, family_id: uuid.UUID) -> int:
     """撤销同一 family 下所有未撤销 session。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await db.execute(
         update(AuthSession)
         .where(
@@ -128,7 +127,7 @@ async def revoke_family(db: AsyncSession, family_id: uuid.UUID) -> int:
 
 async def revoke_user_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
     """撤销用户所有 session。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await db.execute(
         update(AuthSession)
         .where(
@@ -143,7 +142,7 @@ async def revoke_user_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
 async def revoke_session_by_token(db: AsyncSession, raw_token: str) -> bool:
     """通过 raw token 撤销单个 session。"""
     token_h = _hash_token(raw_token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await db.execute(
         update(AuthSession)
         .where(

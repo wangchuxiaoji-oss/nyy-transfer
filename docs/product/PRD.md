@@ -73,7 +73,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 - SHA256 黑名单：abuse.ch MalwareBazaar 每日 feed + 自维护（举报命中入库）
 - Captcha：hCaptcha 免费档
 - 链接不可枚举：6 位 base62 + 提取码错误指数退避封禁
-- IP 日志：保留 90 天后硬删
+- IP 行为日志：保留 180 天后硬删；分享创建来源随分享生命周期保留
 - 文件名：上传者可选公开/隐藏，默认公开
 - 第三方内容审核 API：v1 不接，靠举报入口；v2 视风险情况评估
 
@@ -90,7 +90,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
   - 新 `/api/v1/*` 给 Web 前端（session cookie + CSRF）
   - 旧 `/v1/files` `/v1/images/upload` 仍由 doubao-file-station 提供，作 SDK / OpenAI 兼容层
 - 栈：FastAPI + SQLAlchemy 2.0 async + Alembic + Pydantic v2 + Redis 7
-- 进程：v1 单进程 FastAPI，Caddy 反代，Next.js 静态导出
+- 进程：Nginx TLS 入口，专用 `nyy` 用户下的 PM2 管理 FastAPI 与 Next.js
 - 后台任务：APScheduler 内嵌（v1）→ Celery + Redis（v2 量大后）
   - 每 5 分钟扫描软过期
   - 每天凌晨 pg_dump 备份
@@ -101,7 +101,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 ## 10. 部署 & 运维
 
 - VPS：Ubuntu 22.04 / 24.04
-- Caddy 2 + 自动 Let's Encrypt
+- Nginx + Certbot，应用进程统一由 `nyy` 用户的 PM2 管理
 - 监控：Prometheus + Grafana + Loki
 - 错误追踪：Sentry（自托管或 sentry.io 免费档）
 - 备份：
@@ -115,7 +115,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 - 完整版：用户协议 / 隐私政策 / Cookie 政策 / DMCA 投诉
 - 起草：Termly 模板 + 人工修订，上线前过律师
 - 不在大陆暴露，不备案
-- 明确条款：禁止违法 / 版权 / CSAM / 恶意软件 / 营销垃圾；保留 IP 90 天；豆包 TOS 第三方告知；服务可用性免责
+- 明确条款：禁止违法 / 版权 / CSAM / 恶意软件 / 营销垃圾；IP 行为日志保留 180 天；豆包 TOS 第三方告知；服务可用性免责
 
 ## 12. 商业化（v2）
 
@@ -131,7 +131,7 @@ v1 配额由管理员后台配置，前台通过 `/api/v1/uploads/quota` 实时�
 
 ## 13. 里程碑（一把梭，6–8 周）
 
-- **Week 1 地基（进行中）**：仓库、DB schema、Alembic、FastAPI 骨架、Caddyfile、Next.js 占位、品牌 Logo mock
+- **Week 1 地基（进行中）**：仓库、DB schema、Alembic、FastAPI 骨架、反向代理模板、Next.js 占位、品牌 Logo mock
 - **Week 2 上传/下载核心**：`/api/v1/uploads/init` `/commit` 单文件 ≤1 GiB；前端拖拽上传；短链生成；落地页直接 302；提取码
 - **Week 3 分享生命周期**：有效期 / 下载次数 / 落地页元信息 / 在线预览 / 视频直播 / client-zip 打包
 - **Week 4 用户体系**：邮箱注册 / 验证 / 游客 vs 注册 / 个人面板 / hCaptcha / slowapi 限流

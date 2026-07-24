@@ -12,10 +12,12 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
@@ -24,7 +26,69 @@ import httpx
 from app.core.config import get_settings
 
 log = logging.getLogger(__name__)
-_SESSION_STATUS_LOCK = threading.Lock()
+_SESSION_FILE_LOCK = threading.RLock()
+
+
+def _secure_session_directory(path: Path) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+
+
+def _write_session_data(path: Path, data: dict) -> None:
+    _secure_session_directory(path)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(file_descriptor, 0o600)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as temporary_file:
+            file_descriptor = -1
+            json.dump(data, temporary_file, ensure_ascii=False, indent=2)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, path)
+        os.chmod(path, 0o600)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        temporary_path.unlink(missing_ok=True)
+
+
+def _load_session_data(path: Path, *, repair: bool = True) -> dict:
+    text = path.read_text("utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        start = len(text) - len(text.lstrip())
+        data, end = decoder.raw_decode(text, start)
+        remainder = text[end:].strip()
+        if not isinstance(data, dict) or not remainder or set(remainder) != {"}"}:
+            raise
+        log.warning("repairing trailing braces in doubao session file: %s", path)
+        if repair:
+            _write_session_data(path, data)
+    if not isinstance(data, dict):
+        raise DoubaoClientError(f"Invalid session data in {path}")
+    return data
+
+
+def load_doubao_session_data(session_file: str) -> dict:
+    path = Path(session_file)
+    if not path.exists():
+        raise FileNotFoundError(f"Session file not found: {session_file}")
+    with _SESSION_FILE_LOCK:
+        _secure_session_directory(path)
+        os.chmod(path, 0o600)
+        return _load_session_data(path)
 
 # --- AWS Signature V4 (inline, 避免对 doubao-file-station 的运行时依赖) ---
 
@@ -41,7 +105,7 @@ def _aws_sign_v4(
     parsed = urlparse(url)
     host = parsed.hostname or ""
     path = parsed.path or "/"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = now.strftime("%Y%m%d")
 
@@ -121,6 +185,14 @@ class CommitResult:
     success: bool
 
 
+@dataclass(frozen=True)
+class DownloadUrlResult:
+    """豆包返回的主、备临时下载地址。"""
+
+    main_url: str
+    backup_url: str = ""
+
+
 # --- Client ---
 
 # 豆包安全参数模板（从 session 文件获取 device_id 等）
@@ -138,17 +210,15 @@ def record_doubao_session_status(session_file: str | None, **updates: object) ->
     if not path.exists():
         return
     try:
-        with _SESSION_STATUS_LOCK:
-            data = json.loads(path.read_text("utf-8"))
+        with _SESSION_FILE_LOCK:
+            data = _load_session_data(path)
             status = data.get("nyy_status")
             if not isinstance(status, dict):
                 status = {}
             status.update(updates)
             data["nyy_status"] = status
-            tmp_path = path.with_name(f"{path.name}.tmp")
-            tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp_path.replace(path)
-    except Exception as exc:  # noqa: BLE001
+            _write_session_data(path, data)
+    except Exception as exc:
         log.warning("record doubao session status failed: %s", exc)
 
 
@@ -245,12 +315,12 @@ class DoubaoUploadClient:
             resp = await self.http.get(f"{_BASE_URL}/passport/token/beat/web/?{urlencode(params)}")
             try:
                 body = resp.json()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise DoubaoClientError(f"token_beat 响应非 JSON: {resp.text[:200]}") from exc
             data = body.get("data") if isinstance(body, dict) else None
             if resp.status_code != 200 or not isinstance(data, dict) or data.get("error_code") != 0:
                 raise DoubaoClientError(f"token_beat failed: {body}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             record_doubao_session_status(
                 self.session_file,
                 last_heartbeat_at=started_at,
@@ -272,25 +342,21 @@ class DoubaoUploadClient:
         """将 httpx 内部更新后的 cookies 写回 .doubao_session.json。"""
         if not self.session_file or not self._http:
             return
-        import json as _json
-        from pathlib import Path as _Path
-        path = _Path(self.session_file)
+        path = Path(self.session_file)
         if not path.exists():
             return
         try:
-            with path.open("r", encoding="utf-8") as f:
-                data = _json.load(f)
-            new_cookies = {}
-            for cookie in self._http.cookies.jar:
-                new_cookies[cookie.name] = cookie.value
-            if new_cookies:
-                data["cookies"] = new_cookies
-                data["timestamp"] = int(time.time())
-                data["source"] = "heartbeat+persist"
-                tmp = path.with_suffix(".tmp")
-                tmp.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                tmp.replace(path)
-                log.debug("persisted %d cookies to %s", len(new_cookies), path)
+            with _SESSION_FILE_LOCK:
+                data = _load_session_data(path)
+                new_cookies = {}
+                for cookie in self._http.cookies.jar:
+                    new_cookies[cookie.name] = cookie.value
+                if new_cookies:
+                    data["cookies"] = new_cookies
+                    data["timestamp"] = int(time.time())
+                    data["source"] = "heartbeat+persist"
+                    _write_session_data(path, data)
+                    log.debug("persisted %d cookies to %s", len(new_cookies), path)
         except Exception as exc:
             log.warning("persist_cookies failed: %s", exc)
 
@@ -298,7 +364,7 @@ class DoubaoUploadClient:
         """获取一组新的豆包上传 STS 授权。"""
         try:
             await self.refresh_login_heartbeat()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.warning("doubao login heartbeat failed before prepare_upload: %s", exc)
 
         started_at = time.time()
@@ -314,7 +380,7 @@ class DoubaoUploadClient:
                 raise DoubaoClientError(f"prepare_upload failed: {body.get('msg', body)}")
             data = body["data"]
             auth_token = data["upload_auth_token"]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             record_doubao_session_status(
                 self.session_file,
                 last_probe_at=started_at,
@@ -414,7 +480,7 @@ class DoubaoUploadClient:
         resp = await self.http.put(url, headers=headers)
         try:
             body = resp.json()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise DoubaoClientError(f"init_multipart 响应非 JSON: {resp.text[:200]}") from exc
         upload_id = (body.get("payload") or {}).get("uploadID")
         if resp.status_code != 200 or not upload_id:
@@ -503,8 +569,8 @@ class DoubaoUploadClient:
     # 下载 URL 获取
     # ------------------------------------------------------------------
 
-    async def get_download_url(self, uri: str, expire_seconds: int = 3600) -> str:
-        """获取文件的临时下载 URL。"""
+    async def get_download_urls(self, uri: str, expire_seconds: int = 3600) -> DownloadUrlResult:
+        """获取文件的主、备临时下载 URL。"""
         params = self._security_params()
         ext = uri.rsplit(".", 1)[-1] if "." in uri else ""
         url = f"{_BASE_URL}/alice/message/get_file_url?{urlencode(params)}"
@@ -524,21 +590,26 @@ class DoubaoUploadClient:
         file_urls = data.get("file_urls", []) if isinstance(data, dict) else []
         if not file_urls:
             raise DoubaoClientError("get_file_url returned no file_urls")
-        return str(file_urls[0].get("main_url", ""))
+        item = file_urls[0]
+        main_url = str(item.get("main_url") or item.get("back_url") or "")
+        backup_url = str(item.get("back_url") or "")
+        if not main_url:
+            raise DoubaoClientError("get_file_url returned an empty URL")
+        if backup_url == main_url:
+            backup_url = ""
+        return DownloadUrlResult(main_url=main_url, backup_url=backup_url)
+
+    async def get_download_url(self, uri: str, expire_seconds: int = 3600) -> str:
+        """获取文件的主临时下载 URL。"""
+        return (await self.get_download_urls(uri, expire_seconds=expire_seconds)).main_url
 
 
 # --- Factory ---
 
 def create_doubao_client_from_session(session_file: str) -> DoubaoUploadClient:
     """从 .doubao_session.json 创建客户端（未 start，需 await client.start()）。"""
-    import json as _json
-    from pathlib import Path
-
     path = Path(session_file)
-    if not path.exists():
-        raise FileNotFoundError(f"Session file not found: {session_file}")
-    with path.open("r", encoding="utf-8") as f:
-        session = _json.load(f)
+    session = load_doubao_session_data(session_file)
 
     cookies = session.get("cookies", {})
     params = session.get("params", {})
@@ -621,7 +692,7 @@ class DoubaoDownloadUrlResolver:
             try:
                 client = await self._get_primary_client()
                 return await client.get_download_url(uri, expire_seconds=expire_seconds)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._failed_labels.add("primary")
                 errors.append(f"primary: {exc}")
                 log.warning("doubao primary download url failed for %s: %s", uri, exc)
@@ -635,13 +706,41 @@ class DoubaoDownloadUrlResolver:
                 url = await client.get_download_url(uri, expire_seconds=expire_seconds)
                 log.info("doubao fallback download url OK for %s via %s", uri, Path(session_file).name)
                 return url
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._failed_labels.add(label)
                 errors.append(f"{Path(session_file).name}: {exc}")
                 log.warning("doubao fallback download url failed for %s via %s: %s", uri, session_file, exc)
 
         detail = "; ".join(errors) if errors else "no available doubao session"
         raise DoubaoClientError(f"get_download_url failed for all sessions: {detail}")
+
+    async def get_download_urls(self, uri: str, expire_seconds: int = 3600) -> DownloadUrlResult:
+        errors: list[str] = []
+        if "primary" not in self._failed_labels:
+            try:
+                client = await self._get_primary_client()
+                return await client.get_download_urls(uri, expire_seconds=expire_seconds)
+            except Exception as exc:
+                self._failed_labels.add("primary")
+                errors.append(f"primary: {exc}")
+                log.warning("doubao primary download urls failed for %s: %s", uri, exc)
+
+        for session_file in _download_fallback_session_files():
+            label = f"fallback:{session_file}"
+            if label in self._failed_labels:
+                continue
+            try:
+                client = await self._get_fallback_client(session_file)
+                urls = await client.get_download_urls(uri, expire_seconds=expire_seconds)
+                log.info("doubao fallback download urls OK for %s via %s", uri, Path(session_file).name)
+                return urls
+            except Exception as exc:
+                self._failed_labels.add(label)
+                errors.append(f"{Path(session_file).name}: {exc}")
+                log.warning("doubao fallback download urls failed for %s via %s: %s", uri, session_file, exc)
+
+        detail = "; ".join(errors) if errors else "no available doubao session"
+        raise DoubaoClientError(f"get_download_urls failed for all sessions: {detail}")
 
 
 async def get_doubao_download_url(uri: str, expire_seconds: int = 3600) -> str:

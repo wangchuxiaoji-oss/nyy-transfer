@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, ChevronDown, Clock, Copy, Download, ExternalLink, FileText, Inbox, Lock, MoreHorizontal, Package, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Clock, Copy, Download, ExternalLink, FileText, Gift, Inbox, Lock, MoreHorizontal, Package, Pencil, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
 import { Button, Menu, MenuItem, MenuTrigger, Popover } from "react-aria-components";
 import {
   editFileRequest,
@@ -35,6 +35,7 @@ import {
   type DownloadConfig,
   type SmartDownloadProgress,
 } from "@/lib/smart-download";
+import { getAvailableRetentionCoupons, getGrowthMe, type GrowthMe } from "@/lib/growth";
 
 type Tab = "shares" | "inbox";
 type StatusFilter = "all" | "active" | "expired" | "revoked";
@@ -95,6 +96,39 @@ function StatusBadge({ status }: { status: "active" | "expired" | "revoked" }) {
       ? "bg-warm-100 text-warm-600 dark:bg-gray-800 dark:text-gray-400"
       : "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400";
   return <span className={`type-caption rounded-full px-2 py-0.5 font-medium ${cls}`}>{label}</span>;
+}
+
+function GrowthBenefits({ growth }: { growth: GrowthMe }) {
+  const coupons = getAvailableRetentionCoupons(growth);
+  const progress = growth.invitation;
+  return (
+    <section data-testid="growth-benefits" className="mb-4 grid gap-3 md:grid-cols-2" aria-label="增长权益">
+      <div className="retro-panel overflow-hidden p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-500/12 text-orange-500"><Gift className="h-5 w-5" /></span>
+          <div className="min-w-0">
+            <p className="retro-kicker">保留权益</p>
+            <h2 className="retro-title mt-1 text-base">90 天保留券</h2>
+            <p className="mt-1 type-body-sm retro-text">当前可用 {coupons.length} 张。创建分享时需要手动选择，不会自动消耗。</p>
+          </div>
+        </div>
+        {coupons.length > 0 && <p className="mt-4 rounded-xl border border-orange-400/20 bg-orange-500/8 px-3 py-2 type-caption text-orange-700 dark:text-orange-200">最近到期：{coupons[0].expires_at ? new Date(coupons[0].expires_at).toLocaleDateString("zh-CN") : "长期有效"}</p>}
+      </div>
+      <div className="retro-panel p-5">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-300"><UserPlus className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="retro-kicker">邀请进度</p>
+            <h2 className="retro-title mt-1 text-base">已完成 {progress.invited_count} / {progress.target_count}</h2>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/8 dark:bg-white/10" aria-label={`邀请进度 ${Math.round(progress.progress_percent)}%`}>
+              <span className="block h-full rounded-full bg-gradient-to-r from-orange-500 to-cyan-500" style={{ width: `${progress.progress_percent}%` }} />
+            </div>
+            <p className="mt-2 type-caption retro-muted">{progress.next_reward || "继续邀请可推进下一档权益"}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function downloadLabel(count: number, max: number): string {
@@ -165,6 +199,7 @@ function MyWorkbenchPage() {
   const [directoryDownloadSupported, setDirectoryDownloadSupported] = useState(false);
   const [receivedDownloadProgress, setReceivedDownloadProgress] = useState<SmartDownloadProgress | null>(null);
   const [receivedDownloadName, setReceivedDownloadName] = useState("");
+  const [growth, setGrowth] = useState<GrowthMe | null>(null);
   const loadSeqRef = useRef(0);
   const downloadAbortRef = useRef<AbortController | null>(null);
 
@@ -187,6 +222,13 @@ function MyWorkbenchPage() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    getGrowthMe().then((data) => { if (!cancelled) setGrowth(data); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [authReady]);
 
   useEffect(() => {
     setDirectoryDownloadSupported(supportsDirectoryPicker());
@@ -508,6 +550,8 @@ function MyWorkbenchPage() {
             </button>
           )}
         </div>
+
+        {growth && <GrowthBenefits growth={growth} />}
 
         <div className="retro-segmented mb-4 grid grid-cols-2 gap-1" role="tablist" aria-label="工作台栏目">
           {tabs.map((tab) => (

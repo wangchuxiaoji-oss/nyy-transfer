@@ -1,0 +1,23 @@
+[Unit]
+Description=Import admin@nyy.app local Maildir
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=nyy
+Group=nyy
+WorkingDirectory=/data/nyy/backend
+EnvironmentFile=/data/nyy/backend/.env
+Environment=MAILDIR_PATH=/data/nyy-runtime/mail/admin/Maildir
+Environment=MAILBOX_STORAGE_PATH=/data/nyy-runtime/mailbox
+ExecStart=/data/nyy/backend/.venv/bin/python /data/nyy/backend/scripts/import_admin_mailbox.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadOnlyPaths=/data/nyy-runtime/mail/admin/Maildir
+ReadWritePaths=/data/nyy-runtime/mailbox
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=55s

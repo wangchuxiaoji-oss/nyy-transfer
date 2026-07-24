@@ -264,7 +264,7 @@ async def fetch_range(url: str, start: int, end_exclusive: int) -> bytes:
                 if resp.status_code not in (200, 206):
                     raise RuntimeError(f"Range fetch failed: HTTP {resp.status_code}")
                 return resp.content
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_error = exc
             log.warning(
                 "range fetch attempt %d/%d failed bytes=%d-%d: %s",
@@ -556,14 +556,14 @@ async def attach_playback_assets_for_single_object(
     media = SingleObjectMedia(original_name=original_name, size=size, tos_uri=tos_uri, media_metadata=next_metadata)
     try:
         next_metadata, changed = await ensure_mp4_layout_metadata(next_metadata, media, client=client)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("failed to recover mp4 layout for %s: %s", original_name, exc)
         changed = False
     media = SingleObjectMedia(original_name=original_name, size=size, tos_uri=tos_uri, media_metadata=next_metadata)
 
     try:
         asset = await build_faststart_asset_for_media(media, dry_run=False, force=force, client=client)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("failed to build faststart sidecar for %s: %s", original_name, exc)
         asset = None
     if asset:
@@ -576,7 +576,7 @@ async def attach_playback_assets_for_single_object(
     media.media_metadata = next_metadata
     try:
         video_only_asset = await build_video_only_asset_for_media(media, dry_run=False, force=force, client=client)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("failed to build video-only sidecar for %s: %s", original_name, exc)
         video_only_asset = None
     if video_only_asset:
@@ -642,7 +642,7 @@ async def backfill_share_playback_assets(code: str, *, dry_run: bool, force: boo
                 )
                 try:
                     metadata, layout_changed = await ensure_mp4_layout_metadata(metadata, media)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.error("failed layout recovery %s: %s", logical_file.original_name, exc)
                     layout_changed = False
                 if layout_changed:
@@ -650,7 +650,7 @@ async def backfill_share_playback_assets(code: str, *, dry_run: bool, force: boo
             asset = None
             try:
                 asset = await build_faststart_asset(logical_file, dry_run=dry_run, force=force)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.error("failed %s: %s", logical_file.original_name, exc)
             if asset:
                 hints = dict(metadata.get("playback_hints") or {})
@@ -663,7 +663,7 @@ async def backfill_share_playback_assets(code: str, *, dry_run: bool, force: boo
             video_only_asset = None
             try:
                 video_only_asset = await build_video_only_asset(logical_file, dry_run=dry_run, force=force)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.error("failed video-only %s: %s", logical_file.original_name, exc)
             if video_only_asset:
                 hints = dict(metadata.get("playback_hints") or {})

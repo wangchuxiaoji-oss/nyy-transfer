@@ -1,0 +1,22 @@
+[Unit]
+Description=Update nyy DB-IP ASN Lite database
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=nyy
+Group=nyy
+WorkingDirectory=/data/nyy/backend
+EnvironmentFile=/data/nyy/backend/.env
+Environment=HOME=/home/nyy
+Environment=PM2_HOME=/home/nyy/.pm2
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/data/nyy/backend/.venv/bin/python /data/nyy/backend/scripts/update_dbip_asn.py
+ExecStartPost=/usr/bin/pm2 restart nyy-backend
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/data/nyy/backend/var/geoip /home/nyy/.pm2

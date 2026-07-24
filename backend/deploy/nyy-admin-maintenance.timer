@@ -1,0 +1,11 @@
+[Unit]
+Description=Maintain nyy operational data daily
+
+[Timer]
+OnBootSec=10min
+OnCalendar=*-*-* 04:20:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
-  Upload, CheckCircle2, AlertCircle, FileIcon, Lock, Clock,
+  Upload, CheckCircle2, AlertCircle, FileIcon, Lock, Clock, FileCheck2,
   X, RotateCcw, Files, Download, Folder, ExternalLink,
 } from "lucide-react";
 import { CopyLinkButton } from "@/components/copy-link-button";
@@ -13,6 +14,7 @@ import { uploadInit, uploadCommit, multipartInit, multipartMerge, getQuota, type
 import { formatXhrStatusError, getErrorMessage, HttpStatusError, isSuccessfulHttpStatus } from "@/lib/errors";
 import { probeMediaMetadata, shouldProbeMediaMetadata, checkCodecCompatibility } from "@/lib/media-metadata";
 import type { DebugLogFn } from "@/lib/debug";
+import { getAvailableRetentionCoupons, getGrowthMe, type GrowthMe } from "@/lib/growth";
 import {
   clearExpiredUploadSessions,
   createUploadSession,
@@ -105,6 +107,8 @@ export function FileUploader({
   const [password, setPassword] = useState("");
   const [expiresHours, setExpiresHours] = useState(loggedIn ? 168 : 1);
   const [maxDownloads, setMaxDownloads] = useState(loggedIn ? 100 : 10);
+  const [growth, setGrowth] = useState<GrowthMe | null>(null);
+  const [retentionCouponId, setRetentionCouponId] = useState("");
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [supportsDirectoryPicker, setSupportsDirectoryPicker] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
@@ -126,6 +130,17 @@ export function FileUploader({
   useEffect(() => {
     setQuota(initialQuota ?? null);
   }, [initialQuota]);
+
+  useEffect(() => {
+    if (!loggedIn) {
+      setGrowth(null);
+      setRetentionCouponId("");
+      return;
+    }
+    let cancelled = false;
+    getGrowthMe().then((data) => { if (!cancelled) setGrowth(data); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [loggedIn]);
 
   // Transition from checkmark animation to result card
   useEffect(() => {
@@ -156,6 +171,7 @@ export function FileUploader({
     setResumeMessage("");
     setUploadMetrics({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
     setShowAllFiles(false);
+    setRetentionCouponId("");
     fileLoadedRef.current.clear();
     uploadStartAtRef.current = 0;
     uploadSamplesRef.current = [];
@@ -1025,6 +1041,7 @@ export function FileUploader({
             password: password || undefined,
             expires_hours: expiresHours,
             max_downloads: maxDownloads || undefined,
+            retention_coupon_id: retentionCouponId || undefined,
           });
           debugLog?.("commit", "done", {
             uploadBatchId: session.upload_batch_id,
@@ -1055,6 +1072,18 @@ export function FileUploader({
           stored.unshift({ code: commitRes.share_code, url: commitRes.share_url, revokeToken: commitRes.revoke_token || "", createdAt: Date.now() });
           localStorage.setItem("nyy_guest_shares", JSON.stringify(stored.slice(0, 10)));
         } catch {}
+      }
+      if (loggedIn && retentionCouponId) {
+        const consumedCouponId = retentionCouponId;
+        setRetentionCouponId("");
+        setGrowth((current) => current ? {
+          ...current,
+          retention_coupons: current.retention_coupons.filter((coupon) => coupon.id !== consumedCouponId),
+        } : current);
+        getGrowthMe().then((nextGrowth) => setGrowth({
+          ...nextGrowth,
+          retention_coupons: nextGrowth.retention_coupons.filter((coupon) => coupon.id !== consumedCouponId),
+        })).catch(() => {});
       }
       getQuota().then((nextQuota) => { setQuota(nextQuota); onQuotaChange?.(nextQuota); }).catch(() => {});
       onUploadDone?.();
@@ -1138,6 +1167,7 @@ export function FileUploader({
   const remainingMs = uploadMetrics.speedBps > 0 && remainingBytes > 0 ? (remainingBytes / uploadMetrics.speedBps) * 1000 : 0;
   const totalItemCount = files.length + emptyDirs.length;
   const visibleFiles = showAllFiles ? files : files.slice(0, 5);
+  const retentionCoupons = getAvailableRetentionCoupons(growth);
   const visibleEmptyDirs = showAllFiles ? emptyDirs : emptyDirs.slice(0, Math.max(0, 5 - visibleFiles.length));
   const resultShareUrl = result?.shareUrl || "";
   const resultSummary = [
@@ -1191,19 +1221,15 @@ export function FileUploader({
               >
                 选择文件
               </button>
-              <button
-                onClick={handleFolderPick}
-                disabled={!supportsDirectoryPicker}
-                title={supportsDirectoryPicker ? "选择文件夹" : "当前浏览器无法保留空文件夹结构，请使用 Chrome / Edge 桌面端"}
-                className={cn(
-                  "retro-segment-button hidden min-h-[44px] px-4 active:scale-[0.97] sm:inline-flex",
-                  supportsDirectoryPicker
-                    ? ""
-                    : "cursor-not-allowed text-gray-300 dark:text-gray-600"
-                )}
-              >
-                选择文件夹
-            </button>
+              {supportsDirectoryPicker && (
+                <button
+                  onClick={handleFolderPick}
+                  title="选择文件夹"
+                  className="retro-segment-button hidden min-h-[44px] px-4 active:scale-[0.97] sm:inline-flex"
+                >
+                  选择文件夹
+                </button>
+              )}
           </div>
         )}
 
@@ -1364,7 +1390,7 @@ export function FileUploader({
 
                   {qrUrl && (
                     <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 rounded-control border border-white/10 bg-white/5 p-2 dark:bg-black/10 lg:grid-cols-1 lg:justify-items-center lg:self-start">
-                      <img src={qrUrl} alt="分享二维码" className="h-20 w-20 rounded-lg bg-white p-1 lg:h-24 lg:w-24" />
+                      <Image src={qrUrl} alt="分享二维码" width={96} height={96} unoptimized className="h-20 w-20 rounded-lg bg-white p-1 lg:h-24 lg:w-24" />
                       <span className="type-caption retro-muted lg:text-center">扫码访问</span>
                     </div>
                   )}
@@ -1556,14 +1582,14 @@ export function FileUploader({
                 className="retro-input type-body-sm h-11 max-w-[160px] flex-1 px-3"
               />
             </div>
-            <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.04]" />
+            <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.08]" />
             {/* 过期时间 */}
             <div className="flex items-center gap-4 px-4 py-3">
               <div className="flex items-center gap-2 w-24 shrink-0">
                 <Clock className="w-3.5 h-3.5 text-gray-400" />
                 <label className="text-sm text-gray-500 dark:text-gray-400">有效期</label>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {[
                   { value: 1, label: "1时" },
                   { value: 6, label: "6时" },
@@ -1597,14 +1623,39 @@ export function FileUploader({
                 })}
               </div>
             </div>
-            <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.04]" />
+            {loggedIn && retentionCoupons.length > 0 && (
+              <>
+                <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.08]" />
+                <div className="flex items-start gap-4 px-4 py-3" data-testid="retention-coupon-setting">
+                  <div className="flex w-24 shrink-0 items-center gap-2 pt-3">
+                    <FileCheck2 className="h-3.5 w-3.5 text-orange-500" />
+                    <label htmlFor={`${idPrefix}-retention-coupon`} className="text-sm text-gray-500 dark:text-gray-400">保留券</label>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <select
+                      id={`${idPrefix}-retention-coupon`}
+                      value={retentionCouponId}
+                      onChange={(event) => setRetentionCouponId(event.target.value)}
+                      className="retro-input type-body-sm w-full max-w-sm px-3"
+                    >
+                      <option value="">不使用保留券</option>
+                      {retentionCoupons.map((coupon) => (
+                        <option key={coupon.id} value={coupon.id}>{coupon.duration_days || 90} 天保留券{coupon.expires_at ? ` · ${new Date(coupon.expires_at).toLocaleDateString("zh-CN")} 前使用` : ""}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1.5 type-caption retro-muted">手动选择后，本次创建分享才会提交对应的保留券。</p>
+                  </div>
+                </div>
+              </>
+            )}
+            <div className="mx-4 h-px bg-gray-100 dark:bg-white/[0.08]" />
             {/* 下载次数 */}
             <div className="flex items-center gap-4 px-4 py-3">
               <div className="flex items-center gap-2 w-24 shrink-0">
                 <Download className="w-3.5 h-3.5 text-gray-400" />
                 <label className="text-sm text-gray-500 dark:text-gray-400">下载上限</label>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {[
                   { value: 1, label: "1次" },
                   { value: 10, label: "10次" },

@@ -1,13 +1,13 @@
 """Full e2e test for nyy.app - all guest features."""
 import asyncio
-import json
-import struct
 import sys
 import zlib
 from pathlib import Path
 
 # Ensure app is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from datetime import UTC
 
 import httpx
 
@@ -84,7 +84,7 @@ async def main():
         assert info["files"][0]["file_name"] == "test.txt"
         assert info["files"][0]["file_size"] == 1024
         assert info["has_password"] is False
-        print(f"    PASS - files=1, has_password=False")
+        print("    PASS - files=1, has_password=False")
 
         # 6. Download (no password)
         print(f"\n[6] GET /api/v1/shares/{share_code_1}/download")
@@ -120,15 +120,17 @@ async def main():
 
         # 8. Revoke first share
         print("\n[8] Revoke first share")
+        from datetime import datetime
+
+        from sqlalchemy import update
+
         from app.db.session import get_session_factory
         from app.models.share import Share
-        from sqlalchemy import update
-        from datetime import datetime, timezone
         factory = get_session_factory()
         async with factory() as db:
             await db.execute(
                 update(Share).where(Share.code == share_code_1)
-                .values(revoked_at=datetime.now(timezone.utc))
+                .values(revoked_at=datetime.now(UTC))
             )
             await db.commit()
         print(f"    Revoked {share_code_1}")
@@ -175,22 +177,22 @@ async def main():
         assert info2["has_password"] is True
         assert info2["total_bytes"] == 1536
         assert info2["expires_at"] is not None
-        print(f"    PASS - 2 files, has_password=True, total=1536B")
+        print("    PASS - 2 files, has_password=True, total=1536B")
 
         # 11. Download blocked (password required)
-        print(f"\n[11] Download without password -> 403")
+        print("\n[11] Download without password -> 403")
         r = await c.get(f"/api/v1/shares/{share_code_2}/download")
         assert r.status_code == 403
         print(f"    PASS - blocked: {r.json()['detail']}")
 
         # 12. Wrong password
-        print(f"\n[12] Verify wrong password -> 403")
+        print("\n[12] Verify wrong password -> 403")
         r = await c.post(f"/api/v1/shares/{share_code_2}/verify", json={"password": "0000"})
         assert r.status_code == 403
         print("    PASS - wrong password rejected")
 
         # 13. Correct password
-        print(f"\n[13] Verify correct password -> download URLs")
+        print("\n[13] Verify correct password -> download URLs")
         r = await c.post(f"/api/v1/shares/{share_code_2}/verify", json={"password": "6789"})
         assert r.status_code == 200, f"FAIL: {r.status_code} {r.text}"
         verify = r.json()

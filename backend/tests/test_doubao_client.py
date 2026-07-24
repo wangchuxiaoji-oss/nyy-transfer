@@ -3,12 +3,48 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
 
-from app.services.doubao_client import CommitResult, DoubaoClientError, DoubaoUploadClient, get_doubao_download_url
+from app.services.doubao_client import (
+    CommitResult,
+    DoubaoClientError,
+    DoubaoUploadClient,
+    DownloadUrlResult,
+    _write_session_data,
+    create_doubao_client_from_session,
+    get_doubao_download_url,
+)
+
+
+@pytest.mark.asyncio
+async def test_download_urls_include_backup_url():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "code": 0,
+            "data": {
+                "file_urls": [{
+                    "main_url": "https://main.test/file.mkv?signature=main",
+                    "back_url": "https://backup.test/file.mkv?signature=backup",
+                }],
+            },
+        })
+
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        urls = await client.get_download_urls("tos-cn-i-test/file.mkv", expire_seconds=86400)
+    finally:
+        await client.close()
+
+    assert urls == DownloadUrlResult(
+        main_url="https://main.test/file.mkv?signature=main",
+        backup_url="https://backup.test/file.mkv?signature=backup",
+    )
 
 
 @pytest.mark.asyncio
@@ -124,3 +160,60 @@ async def test_download_url_uses_fallback_session_when_primary_fails(monkeypatch
     assert url == "https://download.test/tos-cn-i-test/file.txt?expire=86400"
     assert calls == ["primary", "fallback"]
     assert closed == ["fallback"]
+
+
+def test_session_loader_repairs_trailing_closing_brace(tmp_path):
+    session_file = tmp_path / "session.json"
+    session_data = {
+        "cookies": {"sessionid": "session"},
+        "sessionid": "session",
+        "params": {},
+    }
+    session_file.write_text(json.dumps(session_data) + "}", encoding="utf-8")
+
+    client = create_doubao_client_from_session(str(session_file))
+
+    assert client.cookies["sessionid"] == "session"
+    assert json.loads(session_file.read_text("utf-8")) == session_data
+
+
+def test_session_atomic_write_uses_private_directory_and_file_modes(tmp_path, monkeypatch):
+    session_directory = tmp_path / "sessions"
+    session_directory.mkdir(mode=0o755)
+    session_file = session_directory / "session.json"
+    session_file.write_text("{}", encoding="utf-8")
+    session_file.chmod(0o644)
+
+    temporary_modes: list[int] = []
+    real_replace = os.replace
+
+    def capture_replace(source, destination):
+        temporary_modes.append(stat.S_IMODE(os.stat(source).st_mode))
+        real_replace(source, destination)
+
+    monkeypatch.setattr("app.services.doubao_client.os.replace", capture_replace)
+    _write_session_data(session_file, {"cookies": {"sessionid": "secret"}})
+
+    assert temporary_modes == [0o600]
+    assert stat.S_IMODE(session_directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(session_file.stat().st_mode) == 0o600
+    assert list(session_directory.glob("*.tmp")) == []
+
+
+def test_qr_login_save_session_uses_private_permissions(tmp_path):
+    from doubao_login.run import QRResult, QRStatus, save_session
+
+    session_directory = tmp_path / "qr-sessions"
+    session_file = session_directory / "session.json"
+    save_session(
+        QRResult(
+            status=QRStatus.CONFIRMED,
+            cookies={"sessionid": "secret"},
+            sessionid="secret",
+            device_params={"device_id": "device"},
+        ),
+        str(session_file),
+    )
+
+    assert stat.S_IMODE(session_directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(session_file.stat().st_mode) == 0o600

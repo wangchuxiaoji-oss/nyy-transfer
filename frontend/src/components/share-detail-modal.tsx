@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { X, FileText, Clock, Download, Trash2, Link2, Folder, ExternalLink } from "lucide-react";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { getShareInfo, type ShareInfo, type GuestShareInfo } from "@/lib/api";
@@ -89,7 +90,7 @@ export function ShareDetailModal({ share, open, onClose, onCopy, onDelete, canDe
               {qrUrl && (
                 <div className="shrink-0 flex flex-col items-center gap-1.5">
                   <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white p-2">
-                    <img src={qrUrl} alt="分享二维码" className="w-32 h-32 sm:w-36 sm:h-36" />
+                    <Image src={qrUrl} alt="分享二维码" width={144} height={144} unoptimized className="h-32 w-32 sm:h-36 sm:w-36" />
                   </div>
                   <span className="type-caption retro-muted">扫码访问</span>
                 </div>

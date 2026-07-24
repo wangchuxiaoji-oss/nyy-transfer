@@ -7,6 +7,7 @@
 
 import { createHttpError, HttpStatusError } from "./errors";
 import type { QuotaInfo } from "./api";
+import { clearGrowthAttribution, getReferralShareCode } from "./growth-attribution";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const GUEST_ID_STORAGE_KEY = "nyy_guest_id";
@@ -220,12 +221,18 @@ export async function register(
   password: string,
   code: string
 ): Promise<{ message: string }> {
+  const referralShareCode = getReferralShareCode();
+  const guestId = getGuestId();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (guestId) headers["X-NYY-Guest-ID"] = guestId;
   const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, code }),
+    headers,
+    body: JSON.stringify({ email, password, code, referral_share_code: referralShareCode }),
   });
-  return handleResponse(res);
+  const result = await handleResponse<{ message: string }>(res);
+  clearGrowthAttribution();
+  return result;
 }
 
 /** 登录（支持可选 captcha_token） */

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class UploadInitRequest(BaseModel):
@@ -23,7 +24,7 @@ class UploadInitRequest(BaseModel):
     logical_file_size: int = Field(default=0, ge=0)  # 逻辑文件总大小（用于配额预检）
     # 文件请求上传场景：访客上传到请求链接，占创建者配额
     request_code: str = Field(default="", max_length=16)
-    request_password: str = Field(default="", max_length=4)
+    request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 
 
 class UploadInitResponse(BaseModel):
@@ -71,13 +72,15 @@ class UploadCommitRequest(BaseModel):
     # 空目录路径（例如 "folder/empty/"），用于下载 ZIP 时恢复目录结构
     empty_dirs: list[str] = Field(default_factory=list, max_length=500)
     # 可选：提取码（4位数字）
-    password: str = Field(default="", max_length=4, pattern=r"^[0-9]{0,4}$")
+    password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
     # 可选：过期时间（小时），0 = 不过期
     expires_hours: int = Field(default=0, ge=0, le=720)  # max 30 days
     # 可选：最大下载次数，0 = 不限制
     max_downloads: int = Field(default=0, ge=0, le=200)
     # 可选：邮件收件人，最多 5 个
-    recipients: list[str] = Field(default_factory=list, max_length=5)
+    recipients: list[EmailStr] = Field(default_factory=list, max_length=5)
+    # 可选：消费一张留存券，将新分享有效期强制设为 90 天
+    retention_coupon_id: uuid.UUID | None = None
 
 
 class UploadCommitResponse(BaseModel):
@@ -97,7 +100,7 @@ class MultipartInitRequest(BaseModel):
     captcha_token: str = Field(default="", max_length=4096)
     logical_file_id: str = Field(..., min_length=1, max_length=36)
     request_code: str = Field(default="", max_length=16)
-    request_password: str = Field(default="", max_length=4)
+    request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 
 
 class MultipartInitResponse(BaseModel):

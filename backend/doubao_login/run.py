@@ -14,13 +14,13 @@ import http.server
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from qr_login import QRLogin, QRStatus, QRResult, generate_device_params
-
+from qr_login import QRLogin, QRResult, QRStatus
 
 DEFAULT_OUTPUT = "/data/nyy/backend/.doubao_session.json"
 DEFAULT_PORT = 8899
@@ -64,9 +64,33 @@ def save_session(result: QRResult, output_path: str):
         "timestamp": int(time.time()),
         "source": "qr_login",
     }
-    Path(output_path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    output = Path(output_path)
+    output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(output.parent, 0o700)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=output.parent,
+        prefix=f".{output.name}.",
+        suffix=".tmp",
     )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(file_descriptor, 0o600)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as temporary_file:
+            file_descriptor = -1
+            json.dump(data, temporary_file, indent=2, ensure_ascii=False)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary, output)
+        os.chmod(output, 0o600)
+        directory_descriptor = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -130,7 +154,7 @@ def main():
     # Start HTTP server
     server = serve_qr_image(args.port, qr.qrcode_data)
 
-    print(f"  [QR ] QR code ready! Scan with Doubao app:")
+    print("  [QR ] QR code ready! Scan with Doubao app:")
     print(f"         http://103.237.92.203:{args.port}/qr.png")
     print(f"         (also saved to {qr_path})")
     print()

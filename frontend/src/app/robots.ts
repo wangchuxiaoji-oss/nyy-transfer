@@ -6,7 +6,10 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/api/", "/admin/", "/my/"],
+        disallow: [
+          "/api/", "/admin", "/my", "/r/", "/prototype-preview", "/video-inspect",
+          "/file-icon-preview", "/logo-lockup-preview", "/logo-symbol-preview", "/ac3-lab", "/tmp/",
+        ],
       },
     ],
     sitemap: "https://nyy.app/sitemap.xml",

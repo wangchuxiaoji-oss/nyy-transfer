@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
@@ -14,10 +14,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.main import create_app
-from app.models.share import DownloadLog, Share, ShareLogicalFile
-from app.models.system import FileRequest, FileRequestFile
+from app.models.share import DownloadLog, DownloadSession, Share, ShareFile, ShareLogicalFile
+from app.models.system import EmailDelivery, FileRequest, FileRequestFile
 from app.models.user import User
-from app.services.doubao_client import CommitResult, UploadInitResult
+from app.services.doubao_client import CommitResult, DownloadUrlResult, UploadInitResult
 
 
 @pytest.fixture
@@ -190,7 +190,7 @@ async def test_guest_active_share_limit_isolated_by_guest_id(client, redis):
             guest_id=phone_guest_id,
             ip_created_from="127.0.0.1",
             total_bytes=128,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
             revoke_token="token-active-limit",
         ))
         await db.commit()
@@ -279,6 +279,61 @@ async def test_upload_commit_success(client, redis, _raise_share_limit):
 
 
 @pytest.mark.asyncio
+async def test_upload_commit_persists_email_outbox_before_dispatch(client, redis, _raise_share_limit):
+    token = "email-outbox-token"
+    token_data = {
+        "ip": "127.0.0.1",
+        "guest_id": "guest-email-outbox",
+        "file_name": "email.txt",
+        "file_size": 512,
+        "file_ext": "txt",
+        "store_uri": "tos-cn-i-test/email.txt",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }
+    await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
+
+    with patch("app.api.v1.uploads.get_doubao_client", new_callable=AsyncMock) as mock_get, patch(
+        "app.services.email.dispatch_share_email",
+        new=AsyncMock(side_effect=RuntimeError("worker stopped")),
+    ):
+        mock_client = AsyncMock()
+        mock_client.commit_upload.return_value = CommitResult(
+            store_uri="tos-cn-i-test/email.txt",
+            success=True,
+        )
+        mock_get.return_value = mock_client
+        response = await client.post("/api/v1/uploads/commit", json={
+            "files": [{"commit_token": token, "store_uri": "tos-cn-i-test/email.txt"}],
+            "recipients": ["Receiver@Example.com", "receiver@example.com"],
+        })
+
+    assert response.status_code == 201
+    assert int(await redis.get("nyy:quota:guest:guest-email-outbox:bytes") or 0) == 512
+    from app.db.session import get_session_factory
+
+    async with get_session_factory()() as db:
+        deliveries = list((await db.scalars(select(EmailDelivery))).all())
+        assert len(deliveries) == 1
+        assert deliveries[0].status == "pending"
+        assert deliveries[0].recipient == "receiver@example.com"
+        assert deliveries[0].idempotency_key.startswith("share:")
+
+    from app.services.email import dispatch_pending_share_email_outbox
+
+    with patch("app.services.email.send_email", new=AsyncMock(return_value=True)) as mock_send:
+        attempted, sent = await dispatch_pending_share_email_outbox()
+    assert (attempted, sent) == (1, 1)
+    mock_send.assert_awaited_once()
+    async with get_session_factory()() as db:
+        delivery = await db.scalar(select(EmailDelivery))
+        assert delivery.status == "sent"
+
+
+@pytest.mark.asyncio
 async def test_upload_commit_rejects_legacy_download_limit(client):
     """创建分享时下载次数必须使用固定选项。"""
     resp = await client.post("/api/v1/uploads/commit", json={
@@ -287,6 +342,54 @@ async def test_upload_commit_rejects_legacy_download_limit(client):
     })
     assert resp.status_code == 400
     assert resp.json()["detail"] == "下载次数上限不合法"
+
+
+@pytest.mark.parametrize("password", ["1", "123", "abcd", "12345"])
+def test_share_password_schemas_require_exactly_four_digits(password):
+    from pydantic import ValidationError
+
+    from app.api.v1.my_shares import ShareEditRequest
+    from app.schemas.file_request import FileRequestCommit, FileRequestVerify
+    from app.schemas.share import ShareDownloadSessionRequest, ShareVerifyRequest
+    from app.schemas.upload import MultipartInitRequest, UploadCommitRequest, UploadInitRequest
+
+    with pytest.raises(ValidationError):
+        UploadCommitRequest(password=password)
+    with pytest.raises(ValidationError):
+        ShareEditRequest(password=password)
+    with pytest.raises(ValidationError):
+        ShareVerifyRequest(password=password)
+    with pytest.raises(ValidationError):
+        ShareDownloadSessionRequest(password=password)
+    with pytest.raises(ValidationError):
+        FileRequestVerify(password=password)
+    with pytest.raises(ValidationError):
+        FileRequestCommit(files=[{"commit_token": "token", "store_uri": "tos://file"}], password=password)
+    with pytest.raises(ValidationError):
+        UploadInitRequest(file_name="file.txt", file_size=1, request_password=password)
+    with pytest.raises(ValidationError):
+        MultipartInitRequest(file_name="file.bin", file_size=1, logical_file_id="logical", request_password=password)
+
+
+@pytest.mark.asyncio
+async def test_playback_assets_include_backup_url_only_after_authorization():
+    from app.api.v1.shares import _metadata_with_signed_assets, _public_media_metadata
+
+    metadata = {"playback_assets": [{"kind": "mp4_faststart_init", "store_uri": "tos://sidecar"}]}
+    resolver = AsyncMock()
+    resolver.get_download_urls.return_value = DownloadUrlResult(
+        main_url="https://download.test/sidecar",
+        backup_url="https://backup.test/sidecar",
+    )
+
+    signed = await _metadata_with_signed_assets(metadata, resolver, asyncio.Semaphore(1))
+    asset = signed["playback_assets"][0]
+    assert asset["download_url"] == "https://download.test/sidecar"
+    assert asset["backup_download_url"] == "https://backup.test/sidecar"
+    assert "store_uri" not in asset
+    public_asset = _public_media_metadata(signed)["playback_assets"][0]
+    assert "download_url" not in public_asset
+    assert "backup_download_url" not in public_asset
 
 
 @pytest.mark.asyncio
@@ -322,11 +425,15 @@ async def test_share_download_writes_download_log(client, redis, _raise_share_li
 
     with patch("app.api.v1.shares.DoubaoDownloadUrlResolver") as mock_resolver_cls:
         mock_resolver = AsyncMock()
-        mock_resolver.get_download_url.return_value = "https://download.test/hello.txt"
+        mock_resolver.get_download_urls.return_value = DownloadUrlResult(
+            main_url="https://download.test/hello.txt",
+            backup_url="https://backup.test/hello.txt",
+        )
         mock_resolver_cls.return_value = mock_resolver
         download_resp = await client.get(f"/api/v1/shares/{code}/download")
 
     assert download_resp.status_code == 200
+    assert download_resp.json()["files"][0]["backup_download_url"] == "https://backup.test/hello.txt"
 
     from app.db.session import get_session_factory
     factory = get_session_factory()
@@ -393,6 +500,108 @@ async def test_share_download_limit_is_reserved_atomically(client, redis, _raise
 
 
 @pytest.mark.asyncio
+async def test_download_session_rechecks_authorization_and_stores_no_signed_url(client):
+    from app.db.session import get_session_factory
+    from app.utils.security import hash_secret
+
+    code = f"ds{uuid.uuid4().hex[:8]}"
+    share = Share(
+        code=code,
+        password_hash=hash_secret("1234"),
+        total_bytes=64,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    logical = ShareLogicalFile(
+        share=share,
+        original_name="secure.txt",
+        size=64,
+        content_type="text/plain",
+        chunk_total=1,
+        sort_index=0,
+    )
+    share_file = ShareFile(
+        share=share,
+        logical_file=logical,
+        original_name="secure.txt",
+        size=64,
+        content_type="text/plain",
+        tos_uri="tos-cn-i-test/secure.txt",
+        chunk_index=0,
+        chunk_total=1,
+    )
+    factory = get_session_factory()
+    async with factory() as db:
+        db.add_all([share, logical, share_file])
+        await db.commit()
+
+    public_info = await client.get(f"/api/v1/shares/{code}")
+    assert public_info.status_code == 200
+    assert public_info.json()["has_password"] is True
+    assert public_info.json()["files"] == []
+    assert public_info.json()["empty_dirs"] == []
+    assert public_info.json()["total_bytes"] == 0
+
+    request_headers = {"X-NYY-Link-Request-ID": f"session-{uuid.uuid4().hex}"}
+    with patch("app.api.v1.shares.DoubaoDownloadUrlResolver") as resolver_class:
+        resolver = AsyncMock()
+        resolver.get_download_urls.side_effect = [
+            DownloadUrlResult(main_url="https://download.test/first", backup_url=""),
+            DownloadUrlResult(main_url="https://download.test/fresh", backup_url=""),
+        ]
+        resolver_class.return_value = resolver
+        first = await client.post(
+            f"/api/v1/shares/{code}/download-session",
+            headers=request_headers,
+            json={"password": "1234"},
+        )
+        replay = await client.post(
+            f"/api/v1/shares/{code}/download-session",
+            headers=request_headers,
+            json={"password": "1234"},
+        )
+        wrong_password = await client.post(
+            f"/api/v1/shares/{code}/download-session",
+            headers=request_headers,
+            json={"password": "9999"},
+        )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert first.json()["files"][0]["download_url"].endswith("/first")
+    assert replay.json()["files"][0]["download_url"].endswith("/fresh")
+    assert wrong_password.status_code == 403
+
+    async with factory() as db:
+        persisted_share = await db.scalar(select(Share).where(Share.code == code))
+        session = await db.scalar(select(DownloadSession).where(DownloadSession.share_id == persisted_share.id))
+        assert persisted_share.download_count == 1
+        assert session.response_payload == {"file_count": 1, "empty_dir_count": 0}
+        assert "https://" not in json.dumps(session.response_payload)
+        assert session.expires_at - session.created_at == timedelta(minutes=5)
+        persisted_share.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+
+    expired = await client.post(
+        f"/api/v1/shares/{code}/download-session",
+        headers=request_headers,
+        json={"password": "1234"},
+    )
+    assert expired.status_code == 410, expired.text
+
+    async with factory() as db:
+        persisted_share = await db.scalar(select(Share).where(Share.code == code))
+        persisted_share.expires_at = datetime.now(UTC) + timedelta(hours=1)
+        persisted_share.max_downloads = 1
+        await db.commit()
+    exhausted = await client.post(
+        f"/api/v1/shares/{code}/download-session",
+        headers=request_headers,
+        json={"password": "1234"},
+    )
+    assert exhausted.status_code == 410, exhausted.text
+
+
+@pytest.mark.asyncio
 async def test_guest_mine_requires_local_revoke_tokens(client):
     """游客列表只能返回本机持有撤销令牌的分享。"""
     suffix = uuid.uuid4().hex[:6]
@@ -407,7 +616,7 @@ async def test_guest_mine_requires_local_revoke_tokens(client):
             owner_id=None,
             ip_created_from="127.0.0.1",
             total_bytes=128,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
             revoke_token="token-a",
         )
         share_a.logical_files = [ShareLogicalFile(
@@ -424,7 +633,7 @@ async def test_guest_mine_requires_local_revoke_tokens(client):
                 owner_id=None,
                 ip_created_from="127.0.0.1",
                 total_bytes=256,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
                 revoke_token="token-b",
             ),
         ])
@@ -463,7 +672,7 @@ async def test_guest_revoke_uses_revoke_token(client):
             owner_id=None,
             ip_created_from="127.0.0.1",
             total_bytes=128,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
             revoke_token="token-revoke",
         ))
         await db.commit()
@@ -526,7 +735,7 @@ async def test_file_request_commit_limit_is_checked_under_commit_lock(client, re
             code=request_code,
             owner_id=user.id,
             title="并发收件测试",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
             max_files=1,
             max_bytes=10_000,
         ))

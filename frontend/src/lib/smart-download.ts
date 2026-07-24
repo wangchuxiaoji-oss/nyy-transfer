@@ -311,7 +311,9 @@ export function openOriginalDownload(file: ShareFileDownload): void {
   link.href = url;
   link.download = sanitizeFileName(file.file_name);
   link.rel = "noopener";
+  document.body.appendChild(link);
   link.click();
+  link.remove();
 }
 
 function filePickerAccept(fileName: string, contentType: string): Record<string, string[]> | undefined {
@@ -467,15 +469,51 @@ function emitProgress(progress: ProgressState, force = false): void {
   });
 }
 
-function downloadParts(file: ShareFileDownload): { url: string; size: number; index: number }[] {
+function downloadParts(file: ShareFileDownload): { url: string; backupUrl: string; size: number; index: number }[] {
   if (file.is_chunked && file.chunks.length > 0) {
     return [...file.chunks].sort((left, right) => left.index - right.index).map((chunk) => ({
       url: chunk.download_url,
+      backupUrl: chunk.backup_download_url || "",
       size: chunk.size,
       index: chunk.index,
     }));
   }
-  return [{ url: file.download_url, size: file.file_size, index: 0 }];
+  return [{ url: file.download_url, backupUrl: file.backup_download_url || "", size: file.file_size, index: 0 }];
+}
+
+async function fetchPartRange(
+  part: ReturnType<typeof downloadParts>[number],
+  rangeStart: number,
+  rangeEnd: number,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const urls = [part.url, part.backupUrl].filter((url, index, values) => Boolean(url) && values.indexOf(url) === index);
+  let lastError = "下载链接无效";
+  for (const url of urls) {
+    throwIfAborted(signal);
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
+        signal,
+      });
+      if (response.status === 200 && part.size > FILESYSTEM_RANGE_CHUNK_BYTES) {
+        await response.body?.cancel().catch(() => undefined);
+        lastError = "下载源未按 Range 返回分段数据";
+        continue;
+      }
+      if (!response.ok && response.status !== 206) {
+        await response.body?.cancel().catch(() => undefined);
+        lastError = `下载失败：HTTP ${response.status}`;
+        continue;
+      }
+      return response;
+    } catch (error) {
+      throwIfAborted(signal);
+      lastError = error instanceof Error ? error.message : "下载请求失败";
+    }
+  }
+  throw new Error(lastError);
 }
 
 async function writeRangeResponseToFile(
@@ -520,14 +558,7 @@ async function writeFilePartsToWritable(
     for (let partOffset = 0; partOffset < part.size; partOffset += FILESYSTEM_RANGE_CHUNK_BYTES) {
       throwIfAborted(options.signal);
       const rangeEnd = Math.min(part.size - 1, partOffset + FILESYSTEM_RANGE_CHUNK_BYTES - 1);
-      const response = await fetch(part.url, {
-        cache: "no-store",
-        headers: { Range: `bytes=${partOffset}-${rangeEnd}` },
-        signal: options.signal,
-      });
-      if (response.status === 200 && part.size > FILESYSTEM_RANGE_CHUNK_BYTES) {
-        throw new Error("下载源未按 Range 返回分段数据，已停止本地写盘以避免内存风险");
-      }
+      const response = await fetchPartRange(part, partOffset, rangeEnd, options.signal);
       const expectedBytes = rangeEnd - partOffset + 1;
       const written = await writeRangeResponseToFile(response, writable, fileOffset + partOffset, progress, options.signal);
       if (written !== expectedBytes && response.status === 206) {

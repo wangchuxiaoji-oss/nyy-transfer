@@ -46,7 +46,7 @@ function NativeDirectMediaPlayer({ file, mediaType, className = "" }: { file: Sh
       <PlayerChrome view={view} actions={actions}>
         {mediaType === "video" ? (
           <video
-            ref={mediaRef as React.RefObject<HTMLVideoElement>}
+            ref={mediaRef as React.RefObject<HTMLVideoElement | null>}
             src={file.download_url}
             crossOrigin="anonymous"
             preload="metadata"
@@ -55,7 +55,7 @@ function NativeDirectMediaPlayer({ file, mediaType, className = "" }: { file: Sh
             onError={() => setError("视频加载失败")}
           />
         ) : (
-          <AudioSurface mediaRef={mediaRef as React.RefObject<HTMLAudioElement>} src={file.download_url} loading={false} onError={() => setError("音频加载失败")} />
+          <AudioSurface mediaRef={mediaRef as React.RefObject<HTMLAudioElement | null>} src={file.download_url} loading={false} onError={() => setError("音频加载失败")} />
         )}
       </PlayerChrome>
     </div>
@@ -73,7 +73,7 @@ function useNativeMediaChrome({
   forcedNativeMuted = false,
   onUiVolumeChange,
 }: {
-  mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement>;
+  mediaRef: React.RefObject<HTMLVideoElement | HTMLAudioElement | null>;
   mediaType: "video" | "audio";
   title: string;
   modeLabel: string;
@@ -257,7 +257,7 @@ function AudioSurface({
   loading,
   onError,
 }: {
-  mediaRef: React.RefObject<HTMLAudioElement>;
+  mediaRef: React.RefObject<HTMLAudioElement | null>;
   src?: string;
   loading: boolean;
   onError: () => void;

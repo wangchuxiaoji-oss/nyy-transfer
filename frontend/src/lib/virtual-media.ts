@@ -129,6 +129,7 @@ function hasAc3Audio(file: ShareFileDownload): boolean {
 
 function getFaststartVirtualLayout(file: ShareFileDownload): {
   sidecarUrl: string;
+  sidecarBackupUrl: string;
   sidecarSize: number;
   virtualSize: number;
   sourceMediaStart: number;
@@ -143,6 +144,7 @@ function getFaststartVirtualLayout(file: ShareFileDownload): {
   }
   return {
     sidecarUrl: asset.download_url,
+    sidecarBackupUrl: asset.backup_download_url || "",
     sidecarSize: Number(asset.sidecar_size),
     virtualSize: Number(asset.virtual_size),
     sourceMediaStart: Number(asset.source_media_start),
@@ -156,6 +158,7 @@ export function needsVirtualFaststart(file: ShareFileDownload): boolean {
 
 function getVideoOnlyVirtualLayout(file: ShareFileDownload): {
   sidecarUrl: string;
+  sidecarBackupUrl: string;
   sidecarSize: number;
   virtualSize: number;
   sourceMediaStart: number;
@@ -171,6 +174,7 @@ function getVideoOnlyVirtualLayout(file: ShareFileDownload): {
   }
   return {
     sidecarUrl: asset.download_url,
+    sidecarBackupUrl: asset.backup_download_url || "",
     sidecarSize: Number(asset.sidecar_size),
     virtualSize: Number(asset.virtual_size),
     sourceMediaStart: Number(asset.source_media_start),
@@ -182,15 +186,15 @@ export function needsVideoOnlyVirtualMp4(file: ShareFileDownload): boolean {
   return getVideoOnlyVirtualLayout(file) !== null;
 }
 
-function getPhysicalChunks(file: ShareFileDownload): Array<{ url: string; start: number; end: number; size: number }> {
+function getPhysicalChunks(file: ShareFileDownload): Array<{ urls: string[]; start: number; end: number; size: number }> {
   if (!file.is_chunked) {
-    return [{ url: file.download_url, start: 0, end: file.file_size - 1, size: file.file_size }];
+    return [{ urls: [file.download_url, file.backup_download_url || ""].filter(Boolean), start: 0, end: file.file_size - 1, size: file.file_size }];
   }
 
   let offset = 0;
   return [...file.chunks].sort((a, b) => a.index - b.index).map((chunk) => {
     const size = Number(chunk.size || 0);
-    const item = { url: chunk.download_url, start: offset, end: offset + size - 1, size };
+    const item = { urls: [chunk.download_url, chunk.backup_download_url || ""].filter(Boolean), start: offset, end: offset + size - 1, size };
     offset += size;
     return item;
   });
@@ -200,6 +204,18 @@ async function fetchWholeBytes(url: string, signal?: AbortSignal): Promise<Uint8
   const resp = await fetch(url, { mode: "cors", signal });
   if (!resp.ok) throw new Error(`Fetch failed: HTTP ${resp.status}`);
   return new Uint8Array(await resp.arrayBuffer());
+}
+
+async function fetchWholeBytesFromSources(urls: string[], signal?: AbortSignal): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (const url of urls) {
+    try {
+      return await fetchWholeBytes(url, signal);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Fetch failed");
 }
 
 export function getVideoOnlyBlobFallbackSize(file: ShareFileDownload): number | null {
@@ -217,14 +233,14 @@ export async function createVideoOnlyMp4BlobUrl(file: ShareFileDownload, signal?
   const totalBytes = getVideoOnlyBlobFallbackSize(file);
   if (totalBytes === null) throw new Error("当前文件过大，无法启用 AC-3 Blob 兜底");
 
-  const sidecarBytes = await fetchWholeBytes(layout.sidecarUrl, signal);
+  const sidecarBytes = await fetchWholeBytesFromSources([layout.sidecarUrl, layout.sidecarBackupUrl].filter(Boolean), signal);
   if (sidecarBytes.byteLength < layout.sidecarSize) throw new Error("video-only sidecar 数据不完整");
 
   const parts: BlobPart[] = [sidecarBytes.slice(0, layout.sidecarSize)];
   for (const chunk of getPhysicalChunks(file)) {
     if (chunk.end < layout.sourceMediaStart) continue;
     if (chunk.start >= layout.sourceMediaEnd) break;
-    const bytes = await fetchWholeBytes(chunk.url, signal);
+    const bytes = await fetchWholeBytesFromSources(chunk.urls, signal);
     const localStart = Math.max(0, layout.sourceMediaStart - chunk.start);
     const localEnd = Math.min(chunk.size, layout.sourceMediaEnd - chunk.start);
     parts.push(bytes.slice(localStart, localEnd));
@@ -265,10 +281,12 @@ export async function registerVirtualMediaFile(file: ShareFileDownload, idPrefix
       fileName: file.file_name,
       fileSize: file.file_size,
       downloadUrl: file.download_url,
+      backupDownloadUrl: file.backup_download_url || "",
       contentType: file.content_type || "video/mp4",
       virtualFileSize: virtualLayout?.virtualSize,
       sidecar: virtualLayout ? {
         downloadUrl: virtualLayout.sidecarUrl,
+        backupDownloadUrl: virtualLayout.sidecarBackupUrl,
         size: virtualLayout.sidecarSize,
         sourceMediaStart: virtualLayout.sourceMediaStart,
         sourceMediaEnd: virtualLayout.sourceMediaEnd,
@@ -277,6 +295,7 @@ export async function registerVirtualMediaFile(file: ShareFileDownload, idPrefix
         index: chunk.index,
         size: chunk.size,
         downloadUrl: chunk.download_url,
+        backupDownloadUrl: chunk.backup_download_url || "",
       })),
     },
   }, [channel.port2]);

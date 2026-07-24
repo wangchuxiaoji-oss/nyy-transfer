@@ -20,5 +20,5 @@ def verify_secret(plain: str, hashed: str) -> bool:
         return _hasher.verify(hashed, plain)
     except VerifyMismatchError:
         return False
-    except Exception:  # noqa: BLE001 - argon2 抛多种异常，统一视为失败
+    except Exception:
         return False

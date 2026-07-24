@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import uuid
-import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -38,7 +37,6 @@ from app.services.auth_session import (
     revoke_user_sessions,
     rotate_session,
 )
-from app.services.quota import get_quota_snapshot
 from app.services.captcha import consume_captcha_token
 from app.services.email_code import (
     check_send_rate_limit,
@@ -49,10 +47,14 @@ from app.services.email_code import (
     store_email_code,
     verify_email_code,
 )
+from app.services.growth import create_referral_attribution
+from app.services.quota import get_quota_snapshot
+from app.services.visitor_identity import resolve_visitor_identity
 from app.services.weak_passwords import is_weak_password
+from app.utils.client_ip import get_client_ip as _get_client_ip
+from app.utils.client_ip import get_guest_id as _get_guest_id
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
 
 
 def _get_redis(request: Request):
@@ -60,21 +62,6 @@ def _get_redis(request: Request):
     if not redis:
         raise HTTPException(503, "服务暂时不可用")
     return redis
-
-
-def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-def _get_guest_id(request: Request, ip: str) -> str:
-    """返回当前浏览器游客身份；缺失时退回旧的 IP 归属。"""
-    guest_id = (request.headers.get("x-nyy-guest-id") or "").strip()
-    if _GUEST_ID_RE.match(guest_id):
-        return guest_id
-    return f"ip:{ip}"
 
 
 def _get_ua(request: Request) -> str:
@@ -150,6 +137,12 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    referral_share_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=16,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
 
 
 class LoginRequest(BaseModel):
@@ -308,6 +301,7 @@ async def send_code(
 async def register(
     body: RegisterRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """注册新用户，需携带邮箱验证码。"""
@@ -349,7 +343,7 @@ async def register(
         )
         raise HTTPException(409, "该邮箱已注册")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if user:
         # 存在未验证用户，更新密码并激活
         user.password_hash = hash_password(body.password)
@@ -363,6 +357,19 @@ async def register(
         )
         db.add(user)
 
+    await db.flush()
+    visitor_id = await resolve_visitor_identity(
+        request,
+        response=response,
+        redis=redis,
+        issue=True,
+    )
+    await create_referral_attribution(
+        db,
+        referred_user=user,
+        referral_share_code=body.referral_share_code,
+        registration_guest_id=visitor_id,
+    )
     await db.commit()
 
     await log_auth_event(
@@ -456,7 +463,7 @@ async def login(
     await clear_login_failures(redis, body.email, ip)
 
     # 5. 更新最后登录时间
-    user.last_login_at = datetime.now(timezone.utc)
+    user.last_login_at = datetime.now(UTC)
     await db.commit()
 
     # 6. 创建 refresh session
@@ -498,14 +505,18 @@ async def refresh_token(
     settings = get_settings()
     ip = _get_client_ip(request)
     ua = _get_ua(request)
-
     # 1. 从 cookie 读取 refresh token
     raw_token = request.cookies.get(settings.auth_refresh_cookie_name)
     if not raw_token:
         raise HTTPException(401, "未登录")
 
     # 2. 轮换 session
-    new_session, new_token = await rotate_session(db, raw_token, ip=ip, ua=ua)
+    new_session, new_token = await rotate_session(
+        db,
+        raw_token,
+        ip=ip,
+        ua=ua,
+    )
 
     if new_session is None and new_token is None:
         # token 不存在或已过期

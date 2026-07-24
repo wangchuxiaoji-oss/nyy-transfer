@@ -233,7 +233,7 @@ export function useAc3PlayerAdapter(
     void prewarmAc3Window(fileRef.current, windowStartSec, AUDIO_WINDOW_SEC).catch(() => {
       if (lastPrewarmedWindowStartRef.current === windowStartSec) lastPrewarmedWindowStartRef.current = null;
     });
-  }, [cancelPreviewPrewarm, playbackSessionKey]);
+  }, [cancelPreviewPrewarm]);
 
   const previewAudioWindowAtTime = useCallback((seconds: number) => {
     const windowStartSec = getAudioWindowStartSec(seconds);
@@ -262,13 +262,13 @@ export function useAc3PlayerAdapter(
           if (previewPrewarmRef.current?.controller === controller) previewPrewarmRef.current = null;
         });
     }, PREVIEW_PREWARM_DEBOUNCE_MS);
-  }, [playbackSessionKey]);
+  }, []);
 
   const registerSwSource = useCallback(async () => {
     const currentFile = fileRef.current;
     await prepareVirtualMediaTransport();
     return registerVirtualMediaFile(currentFile, "share-video", undefined, virtualMediaIdRef.current || undefined);
-  }, [playbackSessionKey]);
+  }, []);
 
   const reloadSwSource = useCallback((url: string) => {
     setSrc("");

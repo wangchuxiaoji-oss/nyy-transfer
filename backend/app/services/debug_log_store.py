@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ def append_debug_log_batch(
 
     log_path = session_dir / "events.ndjson"
     summary_path = session_dir / "summary.json"
-    received_at = datetime.now(timezone.utc).isoformat()
+    received_at = datetime.now(UTC).isoformat()
 
     with log_path.open("a", encoding="utf-8") as file:
         for entry in payload.entries:

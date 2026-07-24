@@ -9,23 +9,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
 
 from app.services.video_analyzer import (
     ALL_VIDEO_EXTS,
     AUDIO_EXTS,
     PLAYABLE_VIDEO_EXTS,
     UNPLAYABLE_VIDEO_EXTS,
-    AnalysisResult,
     analyze_video_file,
-    classify_file,
     get_file_extension,
 )
 
@@ -46,7 +40,7 @@ def _ensure_dir(path: str) -> None:
 
 def _get_timestamp_dir() -> str:
     """生成时间戳目录名。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return now.strftime("%Y-%m-%d_%H-%M-%S")
 
 

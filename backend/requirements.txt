@@ -22,6 +22,7 @@ apscheduler==3.10.4
 argon2-cffi==23.1.0
 itsdangerous==2.2.0
 pyjwt==2.9.0
+bleach==6.2.0
 
 # 邮件发送
 aiosmtplib==3.0.2
@@ -37,6 +38,7 @@ jinja2==3.1.4
 
 # 日志
 structlog==24.4.0
+geoip2==5.1.0
 
 # 测试
 pytest==8.3.3

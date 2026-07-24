@@ -1,23 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { createElement, useState, useEffect, useCallback, useRef, type HTMLAttributes, type Ref } from "react";
 import { getCaptchaChallenge, verifyCaptcha } from "@/lib/auth";
 
-// ALTCHA Web Component 类型声明
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace -- ALTCHA 自定义元素需要扩展 JSX 命名空间。
-  namespace JSX {
-    interface IntrinsicElements {
-      "altcha-widget": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement>,
-        HTMLElement
-      > & {
-        challenge?: string;
-        auto?: string;
-        name?: string;
-      };
-    }
-  }
+function AltchaWidget(props: HTMLAttributes<HTMLElement> & { challenge?: string; auto?: string; name?: string; ref?: Ref<HTMLElement> }) {
+  return createElement("altcha-widget", props);
 }
 
 interface CaptchaChallengeProps {
@@ -141,7 +128,7 @@ export function CaptchaChallenge({
 
   return (
     <div className="space-y-2">
-      {!insecureContext && <altcha-widget ref={widgetRef as React.Ref<HTMLElement>} />}
+      {!insecureContext && <AltchaWidget ref={widgetRef as React.Ref<HTMLElement>} />}
       {loading && (
         <p className="type-caption text-gray-500">加载验证...</p>
       )}

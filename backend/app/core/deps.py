@@ -12,7 +12,6 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services.auth import decode_token
 
-
 ADMIN_EMAIL = "admin@nyy.app"
 
 

@@ -56,7 +56,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
     async with factory() as session:
         try:
             yield session
-        except Exception:  # noqa: BLE001 - 让上层捕获，这里只负责回滚
+        except Exception:
             await session.rollback()
             raise
 

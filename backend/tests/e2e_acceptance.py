@@ -10,7 +10,7 @@ import asyncio
 import os
 import sys
 import zlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -240,7 +240,7 @@ async def ensure_guest_active_share(
     from app.db.session import get_session_factory
     from app.models.share import Share
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with get_session_factory()() as db:
         active_count = await db.scalar(
             select(func.count()).select_from(Share).where(

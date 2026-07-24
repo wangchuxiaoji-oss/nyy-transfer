@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { ToastProvider } from "@/components/toast-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { GrowthTracker } from "@/components/growth-tracker";
 import { BRAND_NAME, SEO_DESCRIPTION, SEO_KEYWORDS, SEO_TITLE } from "@/lib/copy";
 
 const geistSans = localFont({
@@ -26,6 +27,7 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || undefined,
     other: {
       "baidu-site-verification": "codeva-X46dCl44SR",
     },
@@ -37,11 +39,13 @@ export const metadata: Metadata = {
     description: SEO_DESCRIPTION,
     url: "https://nyy.app",
     locale: "zh_CN",
+    images: [{ url: "https://nyy.app/logo-home-preview.png", width: 1200, height: 630, alt: `${BRAND_NAME}文件传输工具` }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: SEO_TITLE,
     description: SEO_DESCRIPTION,
+    images: ["https://nyy.app/logo-home-preview.png"],
   },
   manifest: "/manifest.webmanifest",
   icons: {
@@ -88,16 +92,35 @@ export default function RootLayout({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "WebApplication",
-              name: BRAND_NAME,
-              url: "https://nyy.app",
-              description: SEO_DESCRIPTION,
-              applicationCategory: "UtilityApplication",
-              operatingSystem: "Web",
-              offers: { "@type": "Offer", price: "0", priceCurrency: "CNY" },
-            }),
+            __html: JSON.stringify([
+              {
+                "@context": "https://schema.org",
+                "@type": "Organization",
+                name: BRAND_NAME,
+                url: "https://nyy.app",
+                logo: "https://nyy.app/icons/icon-192.png",
+                email: "admin@nyy.app",
+              },
+              {
+                "@context": "https://schema.org",
+                "@type": "WebSite",
+                name: BRAND_NAME,
+                url: "https://nyy.app",
+                inLanguage: "zh-CN",
+                description: SEO_DESCRIPTION,
+              },
+              {
+                "@context": "https://schema.org",
+                "@type": "SoftwareApplication",
+                name: BRAND_NAME,
+                url: "https://nyy.app",
+                description: SEO_DESCRIPTION,
+                applicationCategory: "UtilitiesApplication",
+                operatingSystem: "Web",
+                inLanguage: "zh-CN",
+                offers: { "@type": "Offer", price: "0", priceCurrency: "CNY" },
+              },
+            ]),
           }}
         />
       </head>
@@ -105,6 +128,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider>
+          <GrowthTracker />
           <ToastProvider>{children}</ToastProvider>
         </ThemeProvider>
       </body>

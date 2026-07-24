@@ -34,7 +34,7 @@
 | 数据库 | PostgreSQL 16 |
 | 缓存 | Redis 7 |
 | 文件存储 | 豆包 TOS / 火山 CDN，浏览器直传 |
-| 邮件 | Postfix send-only + OpenDKIM |
+| 邮件 | Postfix + OpenDKIM + admin@nyy.app Maildir |
 | 打包下载 | `client-zip` 浏览器端流式打包 |
 | 二维码 | `qrcode` |
 | 图标 | `lucide-react` |
@@ -106,8 +106,12 @@ npm run dev
 
 ```bash
 cd /data/nyy/backend
+# 首次运行时创建隔离测试库
+docker exec nyy-postgres createdb -U nyy -O nyy nyy_test
 .venv/bin/python -m pytest
 ```
+
+测试启动时会强制切换到 `TEST_DATABASE_URL`；本地数据库名必须包含 `test`，并在每个用例开始前清空，避免测试数据进入生产分享列表。
 
 前端类型检查：
 
@@ -144,6 +148,8 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `APP_BASE_URL` | `http://127.0.0.1:3000` | 分享 URL 前缀，开发中建议指向前端 |
 | `DATABASE_URL` | `postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy` | 后端异步 DB |
 | `DATABASE_SYNC_URL` | `postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy` | Alembic 同步 DB |
+| `TEST_DATABASE_URL` | `postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy_test` | Pytest 专用异步 DB，禁止指向生产库 |
+| `TEST_DATABASE_SYNC_URL` | `postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy_test` | Pytest 专用同步 DB |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis |
 | `SECRET_KEY` | 至少 32 字节 | 应用密钥 |
 | `JWT_SECRET` | 至少 32 字节 | JWT 密钥 |
@@ -156,6 +162,14 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `SMTP_HOST` | `127.0.0.1` | 邮件发送 SMTP |
 | `SMTP_PORT` | `25` | 邮件发送 SMTP 端口 |
 | `EMAIL_FROM` | `noreply@nyy.app` | 邮件发件人 |
+| `GEOIP_CITY_DB` | `/data/nyy/backend/var/geoip/GeoLite2-City.mmdb` | MaxMind 城市库；缺失时仅显示 IP |
+| `GEOIP_ASN_DB` | `/data/nyy/backend/var/geoip/DBIP-ASN-Lite.mmdb` | DB-IP ASN Lite MMDB，用于显示运营商 |
+| `SHARE_ACCESS_RETENTION_DAYS` | `180` | 页面访问、取链、下载和登录 IP 保留天数 |
+| `SHARE_VIEW_DEDUPE_MINUTES` | `10` | 同一游客访问同一分享的去重窗口 |
+
+IP 来源依赖 Nginx 覆盖传入的转发头：`X-Real-IP` 和 `X-Forwarded-For` 均设置为 `$remote_addr`。如果后续在 Nginx 前增加可信 CDN，需要先配置 Nginx `real_ip` 模块，再保留该覆盖策略。
+
+运营商数据来自 [DB-IP ASN Lite](https://db-ip.com/db/download/ip-to-asn-lite)，使用 CC BY 4.0 许可。管理页展示结果时必须保留指向 DB-IP 的署名链接。`scripts/update_dbip_asn.py` 可下载当前月份的数据并原子替换 MMDB；生产环境通过 `deploy/nyy-geoip-update.timer` 每月更新并重启后端以刷新内存缓存。
 
 前端关键变量：
 
@@ -261,7 +275,7 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 
 ### 6.6 管理后台
 
-文件：`backend/app/api/v1/admin.py`、`frontend/src/app/admin/page.tsx`
+文件：`backend/app/api/v1/admin/`、`frontend/src/app/admin/page.tsx`
 
 能力：
 
@@ -270,25 +284,26 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 - 分享列表：查看、封禁、解封。
 - 用户列表。
 - 举报列表。
-- 邮件发送记录。
+- 邮件发送记录与失败重试。
+- `admin@nyy.app` 收件箱：线程、搜索、星标、归档、垃圾邮件、垃圾箱、附件、回复和转发。
 - 配额配置读取与保存。
 - 豆包 Session 管理：查看 session 状态（有效/过期、sessionid 前缀、上次刷新时间、已过时长）。
 - 豆包 QR 扫码登录：在后台发起扫码流程，前端展示二维码，轮询状态（等待扫码→已扫码待确认→成功/过期/错误），成功后自动保存 session 并重载 TOS 客户端。
 
-开发账号：
-
-- Admin: `admin@nyy.app` / `88888888`
-- Test: `test@nyy.app` / `88888888`
+开发与生产账号密码不写入仓库，使用部署环境中的独立凭据。
 
 ### 6.7 邮件
 
-文件：`backend/app/services/email.py`
+文件：`backend/app/services/email.py`、`backend/app/services/mailbox.py`
 
 能力：
 
 - 注册验证码邮件发送。
 - 重置密码邮件发送。
 - VPS 邮件系统已配置 Postfix + OpenDKIM。
+- `admin@nyy.app` 外部来信投递到 `/data/nyy-runtime/mail/admin/Maildir`，每分钟增量导入 Admin。
+- 来信与附件永久保留；HTML 会移除脚本、样式、表单和远程跟踪资源。
+- 回复与转发使用独立 `mail.nyy.app` TLS 证书和现有 DKIM 发件链路。
 - 分享通知邮件功能已移除（仅保留验证码和重置密码）。
 
 运维状态：
@@ -413,7 +428,7 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `app/api/v1/auth.py` | 邮箱验证码、注册、登录、刷新、重置、me |
 | `app/api/v1/my_shares.py` | 登录用户分享管理 |
 | `app/api/v1/file_requests.py` | 文件请求 / 收文件 |
-| `app/api/v1/admin.py` | 管理后台 API |
+| `app/api/v1/admin/` | 管理后台 API |
 | `app/schemas/*.py` | Pydantic 请求 / 响应模型 |
 | `app/services/doubao_client.py` | 豆包 TOS 客户端，prepare/apply/commit/download URL |
 | `app/services/quota.py` | 配额服务 |
@@ -623,7 +638,7 @@ const blob = await downloadZip(responses).blob();
 
 待开发：
 
-- 生产部署和 systemd / Caddy 最终化。
+- 生产部署和 Nginx / PM2 / systemd timers 最终化。
 - PTR 反向解析。
 - Sentry / Prometheus / Grafana / Loki。
 - i18n。
@@ -638,9 +653,9 @@ const blob = await downloadZip(responses).blob();
 目标：
 
 - Ubuntu 24.04 VPS。
-- Caddy 2 反向代理 + 自动 HTTPS。
-- FastAPI 后端 systemd service。
-- Next.js 前端可使用 Node server 或静态策略，待最终部署方案确认。
+- Nginx 反向代理与 TLS。
+- FastAPI 与 Next.js 统一由专用 `nyy` 用户下的 PM2 管理。
+- systemd 仅运行 `nyy` 用户下的维护与导入 timer；旧 Caddyfile 和后端直启 service 仅作 legacy 参考。
 - PostgreSQL 定时备份到对象存储。
 - Redis 用于 token / quota / 临时提交状态。
 
@@ -667,5 +682,5 @@ const blob = await downloadZip(responses).blob();
 - `../docs/product/PROGRESS.md`：早期开发进展记录，部分数据已过时，但保留历史上下文。
 - `../docs/spikes/spike-cors.md`：TOS CORS 验证。
 - `../docs/brand/brand-guide.md`：品牌指南。
-- `deploy/README.md`：部署说明草案。
+- `deploy/README.md`：当前生产部署与运维指南。
 - `../docs/ui/TYPOGRAPHY_AUDIT.md`：前端字体字号审计。

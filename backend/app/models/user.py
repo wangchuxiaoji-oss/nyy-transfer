@@ -33,6 +33,12 @@ class User(Base, TimestampMixin):
             postgresql_where=text("is_admin IS TRUE"),
             sqlite_where=text("is_admin IS TRUE"),
         ),
+        Index(
+            "ix_users_email_trgm",
+            "email",
+            postgresql_using="gin",
+            postgresql_ops={"email": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

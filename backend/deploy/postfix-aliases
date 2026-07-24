@@ -1,0 +1,4 @@
+# 安装为 /etc/postfix/nyy-aliases，与 /etc/aliases 合并查询，禁止覆盖系统 aliases。
+postmaster:    nyy-mail
+admin:         nyy-mail
+abuse:         nyy-mail

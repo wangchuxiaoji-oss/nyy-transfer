@@ -16,7 +16,7 @@
 | 数据库 | PostgreSQL 16 (Docker) |
 | 缓存 | Redis 7 (Docker) |
 | 邮件 | Postfix 3.8.6 (send-only) + OpenDKIM 2048-bit |
-| 部署目标 | Ubuntu 24.04 VPS + Caddy 2 |
+| 部署目标 | Ubuntu 24.04 VPS + Nginx + PM2（专用 `nyy` 用户） |
 | 包管理 | pip (后端) / npm (前端，非 pnpm，因 exFAT 限制) |
 
 ## 已完成功能
@@ -155,7 +155,7 @@
 8. 用户配额升级（登录后从 IP 切到 user_id 维度）
 9. "我的分享"列表页（查看/管理/撤销）
 10. Admin 管理后台（配置限制项、黑名单管理）
-11. 生产部署（Caddy + systemd + Sentry）
+11. 生产部署（Nginx + PM2 + systemd timers + Sentry）
 12. 国际化（next-intl，zh-CN 默认）
 
 ## 文件索引

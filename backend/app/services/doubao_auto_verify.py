@@ -61,7 +61,7 @@ class BarkNotifier:
                 log.warning("Bark 推送失败: status=%s body=%s", response.status_code, response.text[:200])
                 return False
             return True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.warning("Bark 推送异常: %s", exc)
             return False
 
@@ -106,7 +106,7 @@ class DoubaoAutoVerifier:
             while not self._stop_event.is_set():
                 try:
                     await self.run_due_checks()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.exception("doubao auto verify loop failed: %s", exc)
                 await self._wait_or_stop(30)
         except asyncio.CancelledError:
@@ -177,7 +177,7 @@ class DoubaoAutoVerifier:
         try:
             client = create_doubao_client_from_session(target.session_file)
             await client.start()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if heartbeat_due:
                 await self._mark_failure(target, state, "登录心跳", exc, now)
             if probe_due:
@@ -192,14 +192,14 @@ class DoubaoAutoVerifier:
                 try:
                     await client.refresh_login_heartbeat(force=True)
                     await self._mark_success(target, state, "登录心跳")
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     await self._mark_failure(target, state, "登录心跳", exc, now)
 
             if probe_due:
                 try:
                     await client._prepare_upload_auth()
                     await self._mark_success(target, state, "上传探活")
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     await self._mark_failure(target, state, "上传探活", exc, now)
         finally:
             await client.close()

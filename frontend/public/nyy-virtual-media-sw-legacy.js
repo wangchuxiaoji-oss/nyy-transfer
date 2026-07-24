@@ -45,14 +45,17 @@ self.addEventListener("fetch", (event) => {
 function normalizeFile(file) {
   const chunks = [...(file.chunks || [])].sort((a, b) => a.index - b.index);
   let offset = 0;
+  const normalizedChunks = chunks.length > 0
+    ? chunks
+    : (file.downloadUrl ? [{ index: 0, size: file.fileSize, downloadUrl: file.downloadUrl, backupDownloadUrl: file.backupDownloadUrl }] : []);
   return {
     fileName: file.fileName || "media.mp4",
     contentType: file.contentType || "video/mp4",
     fileSize: Number(file.fileSize || 0),
-    chunks: chunks.map((chunk) => {
+    chunks: normalizedChunks.map((chunk) => {
       const size = Number(chunk.size || 0);
       const item = {
-        url: chunk.downloadUrl,
+        urls: [chunk.downloadUrl, chunk.backupDownloadUrl].filter(Boolean),
         start: offset,
         end: offset + size - 1,
         size,
@@ -61,6 +64,22 @@ function normalizeFile(file) {
       return item;
     }),
   };
+}
+
+async function fetchFromSources(urls, options) {
+  let lastResponse = null;
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || response.status === 206) return response;
+      lastResponse = response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error("fetch failed");
 }
 
 function postDebug(scope, event, data, targetClientId = null) {
@@ -186,7 +205,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
         else signal.addEventListener("abort", abortFromRequest, { once: true });
       }
       try {
-        const resp = await fetch(chunk.url, {
+        const resp = await fetchFromSources(chunk.urls, {
           headers: { Range: `bytes=${localStart}-${localEnd}` },
           mode: "cors",
           signal: abortController.signal,

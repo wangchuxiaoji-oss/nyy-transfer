@@ -7,12 +7,15 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     PrimaryKeyConstraint,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -73,6 +76,15 @@ class Report(Base, TimestampMixin):
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[str | None] = mapped_column(String(2000))
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    resolution_note: Mapped[str | None] = mapped_column(String(1000))
+    handled_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_reports_status_created_id", "status", "created_at", "id"),
+    )
 
 
 class FileRequest(Base, TimestampMixin):
@@ -111,11 +123,11 @@ class FileRequestFile(Base, TimestampMixin):
     content_type: Mapped[str | None] = mapped_column(String(127))
     tos_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     uploader_ip: Mapped[str | None] = mapped_column(INET)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class EmailDelivery(Base, TimestampMixin):
-    """分享链接邮件发送记录。"""
+    """分享链接邮件 outbox 与发送尝试记录。"""
 
     __tablename__ = "email_deliveries"
 
@@ -129,6 +141,28 @@ class EmailDelivery(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
     error: Mapped[str | None] = mapped_column(String(512))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivery_type: Mapped[str] = mapped_column(
+        String(32), default="share_link", server_default="share_link", nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
+    parent_delivery_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("email_deliveries.id", ondelete="SET NULL")
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str | None] = mapped_column(String(384))
+
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_email_deliveries_idempotency_key"),
+        UniqueConstraint(
+            "parent_delivery_id",
+            "attempt_number",
+            name="uq_email_deliveries_parent_attempt",
+        ),
+        Index("ix_email_deliveries_status_created_id", "status", "created_at", "id"),
+        Index("ix_email_deliveries_recipient_created", "recipient", "created_at"),
+    )
 
 
 class AuditLog(Base):
@@ -142,9 +176,79 @@ class AuditLog(Base):
     actor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
+    actor_email: Mapped[str | None] = mapped_column(String(255))
+    request_id: Mapped[str | None] = mapped_column(String(128), index=True)
     action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     target: Mapped[str | None] = mapped_column(String(128))
     payload: Mapped[dict | None] = mapped_column(JSONB)
+    target_type: Mapped[str | None] = mapped_column(String(64))
+    target_id: Mapped[str | None] = mapped_column(String(128))
+    before_value: Mapped[dict | None] = mapped_column(JSONB)
+    after_value: Mapped[dict | None] = mapped_column(JSONB)
+    reason: Mapped[str | None] = mapped_column(String(1000))
+    note: Mapped[str | None] = mapped_column(String(2000))
+    batch_id: Mapped[str | None] = mapped_column(String(128))
+    success: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    error_summary: Mapped[str | None] = mapped_column(String(1000))
+    ip: Mapped[str | None] = mapped_column(INET)
+    user_agent: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_audit_logs_created_id", "created_at", "id"),
+        Index("ix_audit_logs_target", "target_type", "target_id", "created_at"),
+        Index("ix_audit_logs_batch_action", "batch_id", "action"),
+    )
+
+
+class ArchiveBatch(Base):
+    """分享归档执行批次；dry-run 不写批次。"""
+
+    __tablename__ = "archive_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    archived_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_summary: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ArchivedShare(Base):
+    """终态分享的只读归档摘要。"""
+
+    __tablename__ = "archived_shares"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    original_share_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
+    archive_batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("archive_batches.id", ondelete="RESTRICT"), nullable=False
+    )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    code: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String(255))
+    terminal_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    metadata_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    file_summary: Mapped[list] = mapped_column(JSONB, nullable=False)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    logical_file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    stored_object_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_archived_shares_archived_id", "archived_at", "id"),
     )

@@ -12,10 +12,18 @@
 /playwright-report
 
 # 由 scripts/copy-pdf-worker.mjs 在 predev/prebuild 时自动生成
+/public/pdf.min.mjs
 /public/pdf.worker.min.mjs
+/public/pdfjs/
 
 # next.js
 /.next/
+/.next-playwright/
+/.next-production-a/
+/.next-production-b/
+/.next-production-active
+/.deploy-production.lock
+/.next-releases/
 /out/
 
 # production

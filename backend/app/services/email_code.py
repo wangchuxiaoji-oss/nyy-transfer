@@ -6,7 +6,7 @@ import hashlib
 import hmac as hmac_mod
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.config import get_settings
 from app.services.email import send_email
@@ -126,7 +126,7 @@ async def store_email_code(
     key = _code_key(purpose, email)
     ttl = settings.email_code_ttl_minutes * 60
     code_h = _code_hash(email, purpose, code)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     ip_h = hashlib.sha256((ip or "").encode()).hexdigest()[:16] if ip else ""
     ua_h = hashlib.sha256((ua or "").encode()).hexdigest()[:16] if ua else ""
     await redis.set(key, f"{code_h}:0:{now}:{ip_h}:{ua_h}", ex=ttl)

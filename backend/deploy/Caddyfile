@@ -1,11 +1,12 @@
-# Caddyfile · nyy.app（生产模板）
+# LEGACY：早期 Caddy + 静态导出模板，不属于当前生产拓扑，请勿安装。
+# 当前生产入口为 Nginx，FastAPI 与 Next.js 均由 nyy 用户下的 PM2 管理。
+# Caddyfile · nyy.app（历史模板）
 #
-# 部署：放到 /etc/caddy/Caddyfile，`sudo systemctl reload caddy`
-# Caddy 会自动签发 Let's Encrypt 证书。
+# 仅供历史参考。
 #
 # 路由策略：
 #   /api/*       → FastAPI（127.0.0.1:8000）
-#   /admin/*     → FastAPI（同上，未来可拆）
+#   /admin/*     → Next.js 管理后台
 #   /healthz     → FastAPI
 #   /readyz      → FastAPI
 #   /            → Next.js 静态导出（/var/www/nyy）
@@ -23,8 +24,8 @@ nyy.app, www.nyy.app {
         reverse_proxy 127.0.0.1:8000
     }
 
-    # API + 管理后台 → FastAPI
-    @backend path /api/* /admin/*
+    # API → FastAPI；管理后台由 Next.js 处理
+    @backend path /api/*
     handle @backend {
         reverse_proxy 127.0.0.1:8000 {
             header_up X-Real-IP {remote_host}

@@ -13,23 +13,21 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
+
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parents[1]
 DOUBAO_ROOT = ROOT.parent / "doubao-file-station"
 if str(DOUBAO_ROOT) not in sys.path:
     sys.path.insert(0, str(DOUBAO_ROOT))
 
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from urllib.parse import urlencode
-
-from doubao_file_station.client import DoubaoFileStationClient
-from doubao_file_station.signing import aws_sign_v4
-
+from doubao_file_station.client import DoubaoFileStationClient  # noqa: E402
+from doubao_file_station.signing import aws_sign_v4  # noqa: E402
 
 app = FastAPI(title="nyy CORS spike", version="0.0.1")
 app.add_middleware(

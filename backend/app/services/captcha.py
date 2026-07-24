@@ -6,7 +6,7 @@ import hashlib
 import hmac as hmac_mod
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from altcha import create_challenge, verify_solution
 
@@ -44,7 +44,7 @@ async def create_altcha_challenge(
     """创建 ALTCHA challenge 并存入 Redis。"""
     settings = get_settings()
     challenge_id = secrets.token_hex(16)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=settings.captcha_challenge_ttl_seconds)
 
     challenge = create_challenge(
@@ -126,7 +126,7 @@ async def verify_altcha_payload(
     # 6. 签发 captcha_token
     captcha_token = secrets.token_hex(32)
     token_h = _hmac_token(captcha_token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     ip_h = hashlib.sha256((ip or "").encode()).hexdigest()[:16] if ip else ""
     ua_h = hashlib.sha256((ua or "").encode()).hexdigest()[:16] if ua else ""

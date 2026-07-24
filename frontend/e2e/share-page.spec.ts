@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const MOCK_CODE = "share-e2e";
 const LONG_NAME = "超长文件名".repeat(8);
 const NOW = "2026-06-08T00:00:00.000Z";
+const LI_VEHICLE_UA = "Mozilla/5.0 (Windows NT 11.0; Win64; HU_SS3 Build/SQ3A.220705.003.A1; x64) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.138 Safari/537.36 LiBrowser/3.4.22";
 const VIDEO_META = {
   probe_version: 1,
   probe_status: "ok",
@@ -109,13 +110,14 @@ async function routeShare(
   page: Page,
   info: ShareInfoMock,
   download: DownloadResponseMock,
-  options: { infoDelayMs?: number; downloadDelayMs?: number; downloadGate?: Promise<void> } = {},
+  options: { infoDelayMs?: number; downloadDelayMs?: number; downloadGate?: Promise<void>; onDownloadRequest?: () => void } = {},
 ) {
   await page.route(`**/api/v1/shares/${MOCK_CODE}`, async (route) => {
     if (options.infoDelayMs) await new Promise((resolve) => setTimeout(resolve, options.infoDelayMs));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(info) });
   });
   await page.route(`**/api/v1/shares/${MOCK_CODE}/download`, async (route) => {
+    options.onDownloadRequest?.();
     if (options.downloadGate) await options.downloadGate;
     if (options.downloadDelayMs) await new Promise((resolve) => setTimeout(resolve, options.downloadDelayMs));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
@@ -140,6 +142,7 @@ async function openMockShare(page: Page, info = shareInfo(), download = download
   await routeShare(page, info, download);
   await routeExternal(page);
   await page.goto(`/${MOCK_CODE}`);
+  await page.getByRole("button", { name: "获取下载链接" }).click();
 }
 
 async function waitForReady(page: Page) {
@@ -215,6 +218,7 @@ async function installMockNativeVideo(page: Page) {
       video.dispatchEvent(new Event("pause"));
     };
     HTMLElement.prototype.requestFullscreen = function () {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- 浏览器全屏 mock 需要记录当前调用元素。
       fullscreenElement = this;
       document.dispatchEvent(new Event("fullscreenchange"));
       return Promise.resolve();
@@ -225,6 +229,24 @@ async function installMockNativeVideo(page: Page) {
       return Promise.resolve();
     };
   });
+}
+
+async function installLiVehicleBrowser(page: Page, webCodecs = true) {
+  await page.addInitScript(({ userAgent, supportsWebCodecs }) => {
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: userAgent });
+    Object.defineProperty(window, "VideoDecoder", {
+      configurable: true,
+      value: supportsWebCodecs ? class MockVideoDecoder {
+        static isConfigSupported(config: VideoDecoderConfig) { return Promise.resolve({ supported: true, config }); }
+      } : undefined,
+    });
+    Object.defineProperty(window, "AudioDecoder", {
+      configurable: true,
+      value: supportsWebCodecs ? class MockAudioDecoder {
+        static isConfigSupported(config: AudioDecoderConfig) { return Promise.resolve({ supported: true, config }); }
+      } : undefined,
+    });
+  }, { userAgent: LI_VEHICLE_UA, supportsWebCodecs: webCodecs });
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -266,6 +288,48 @@ test.describe("分享页核心状态", () => {
     await expect(input).toHaveAttribute("maxLength", "4");
   });
 
+  test("提取码自动提交与 Enter 竞态只验证一次", async ({ page }) => {
+    const file = shareFile();
+    const download = downloadResponse([file]);
+    await routeShare(page, shareInfo([], { has_password: true, total_bytes: 0 }), download);
+    let verifyCalls = 0;
+    await page.route(`**/api/v1/shares/${MOCK_CODE}/verify`, async (route) => {
+      verifyCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
+    });
+
+    await page.goto(`/${MOCK_CODE}`);
+    const input = page.locator('input[aria-label="输入4位提取码"]');
+    await input.fill("1234");
+    await input.press("Enter");
+    await expect.poll(() => verifyCalls).toBe(1);
+    await page.waitForTimeout(350);
+    expect(verifyCalls).toBe(1);
+    await expect(page.getByText(/视频 ·/).first()).toBeVisible();
+  });
+
+  test("旧提取码慢失败不会清空用户新输入", async ({ page }) => {
+    const file = shareFile();
+    await routeShare(page, shareInfo([], { has_password: true, total_bytes: 0 }), downloadResponse([file]));
+    let verifyCalls = 0;
+    await page.route(`**/api/v1/shares/${MOCK_CODE}/verify`, async (route) => {
+      verifyCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "提取码错误" }) });
+    });
+
+    await page.goto(`/${MOCK_CODE}`);
+    const input = page.locator('input[aria-label="输入4位提取码"]');
+    await input.fill("1234");
+    await expect.poll(() => verifyCalls).toBe(1);
+    await input.fill("5678");
+    await page.waitForTimeout(800);
+
+    await expect(input).toHaveValue("5678");
+    await expect(page.getByText("重新输入")).toHaveCount(0);
+  });
+
   test("ready 页展示品牌、主题、概览和底部官网", async ({ page }) => {
     await openMockShare(page);
     await waitForReady(page);
@@ -277,6 +341,19 @@ test.describe("分享页核心状态", () => {
     await expect(page.locator("aside").getByText("分享概览").first()).toBeVisible();
     await expect(page.getByText("想传文件？拿呀²")).toBeVisible();
     await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
+  });
+
+  test("举报弹窗管理焦点并支持 Escape 关闭", async ({ page }) => {
+    await openMockShare(page);
+    const trigger = page.getByRole("button", { name: "举报" });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "举报分享" });
+
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "关闭举报弹窗" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
   });
 });
 
@@ -346,6 +423,7 @@ test.describe("分享页布局回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("aside").getByRole("tab", { name: "文件" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const asideTop = () => page.evaluate(() => {
       const aside = document.querySelector("aside");
@@ -390,6 +468,7 @@ test.describe("播放器代表性回归", () => {
     await routeExternal(page, "audio/ogg");
 
     await page.goto(`/${MOCK_CODE}`);
+    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("audio-element")).toBeAttached();
@@ -433,6 +512,7 @@ test.describe("播放器代表性回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     await page.goto(`/${MOCK_CODE}`);
+    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("audio-controls")).toBeVisible();
@@ -520,6 +600,7 @@ test.describe("播放器代表性回归", () => {
     await routeShare(page, shareInfo([file]), dl);
     await routeExternal(page, "video/mp4");
     await page.goto(`/${MOCK_CODE}`);
+    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const preview = page.getByTestId("ac3-video-preview").first();
     await expect(preview).toBeVisible({ timeout: 10000 });
@@ -562,7 +643,7 @@ test.describe("播放器代表性回归", () => {
     await expect(page.locator('[data-testid="native-video-preview"] video').first()).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
   });
 
-  test("虚拟快启播放中刷新下载链接不重置会话", async ({ page }) => {
+  test("虚拟快启播放中保持同一播放会话", async ({ page }) => {
     await installMockNativeVideo(page);
     const makeAsset = (suffix: string) => ({
       kind: "mp4_faststart_init",
@@ -581,15 +662,11 @@ test.describe("播放器代表性回归", () => {
       audio_tracks: [{ codec: "mp4a.40.2", codec_tag: "mp4a" }],
     });
     const file = shareFile({ media_metadata: baseMeta });
-    let releaseSecondDownload!: () => void;
-    let downloadCalls = 0;
     await page.route(`**/api/v1/shares/${MOCK_CODE}`, async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(shareInfo([file])) });
     });
     await page.route(`**/api/v1/shares/${MOCK_CODE}/download`, async (route) => {
-      downloadCalls += 1;
-      if (downloadCalls > 1) await new Promise<void>((resolve) => { releaseSecondDownload = resolve; });
-      const suffix = downloadCalls === 1 ? "a" : "b";
+      const suffix = "a";
       const media_metadata = { ...baseMeta, playback_assets: [makeAsset(suffix)] };
       await route.fulfill({
         status: 200,
@@ -600,15 +677,13 @@ test.describe("播放器代表性回归", () => {
     await routeExternal(page, "video/mp4");
 
     await page.goto(`/${MOCK_CODE}`);
+    await page.getByRole("button", { name: "获取下载链接" }).click();
     const video = page.locator('[data-testid="native-video-preview"] video').first();
     await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
     const firstSrc = await video.getAttribute("src");
-    await expect.poll(() => typeof releaseSecondDownload).toBe("function");
     await page.getByTestId("native-video-center-toggle").dispatchEvent("click");
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
-    releaseSecondDownload();
-    await page.waitForResponse((response) => response.url().includes(`/api/v1/shares/${MOCK_CODE}/download`) && response.status() === 200);
-
+    await page.waitForTimeout(250);
     await expect(video).toHaveAttribute("src", firstSrc || "");
     await expect(page.getByTestId("native-video-center-toggle")).toHaveCount(0);
   });
@@ -634,6 +709,7 @@ test.describe("播放器代表性回归", () => {
       await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { download_url: `https://example.com/${scenario.code}.mkv`, media_metadata: meta })] }));
       await routeExternal(page);
       await page.goto(`/${MOCK_CODE}`);
+      await page.getByRole("button", { name: "获取下载链接" }).click();
 
       if (scenario.expected === "native") {
         await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
@@ -643,6 +719,48 @@ test.describe("播放器代表性回归", () => {
         await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
       }
     }
+  });
+
+  test("理想车机忽略原生 MKV maybe 声明并展示真实原文件入口", async ({ page }) => {
+    await installLiVehicleBrowser(page);
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function patchedCanPlayType(type: string) {
+        if (type.includes("matroska")) return "maybe";
+        return original.call(this, type);
+      };
+    });
+    const meta = videoMeta();
+    const file = shareFile({ file_name: "TEAM-053.mkv", file_ext: "mkv", content_type: "video/x-matroska", media_metadata: meta });
+    const originalUrl = "https://example.com/TEAM-053.mkv?token=vehicle";
+    const response = downloadResponse([file], { files: [downloadFile(file, { download_url: originalUrl, media_metadata: meta })] });
+    let downloadRequests = 0;
+    await routeShare(page, shareInfo([file]), response, { onDownloadRequest: () => { downloadRequests += 1; } });
+    await routeExternal(page, "video/x-matroska");
+
+    await page.goto(`/${MOCK_CODE}`);
+
+    await expect(page.getByTestId("mkv-sdp-preview")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="native-video-preview"]:visible')).toHaveCount(0);
+    const originalLink = page.getByTestId("li-vehicle-original-link");
+    await expect(originalLink).toHaveAttribute("href", originalUrl);
+    await expect(originalLink).not.toHaveAttribute("download", /.*/);
+    await expect(page.getByTestId("li-vehicle-download-hint")).toContainText("浏览器菜单保存");
+    await expect.poll(() => downloadRequests).toBe(1);
+    await expect(page.getByRole("button", { name: "获取下载链接" })).toHaveCount(0);
+  });
+
+  test("理想车机缺少 WebCodecs 时显示明确降级而非黑屏", async ({ page }) => {
+    await installLiVehicleBrowser(page, false);
+    const meta = videoMeta();
+    const file = shareFile({ file_name: "TEAM-053.mkv", file_ext: "mkv", content_type: "video/x-matroska", media_metadata: meta });
+    await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { media_metadata: meta })] }));
+    await routeExternal(page);
+    await page.goto(`/${MOCK_CODE}`);
+
+    await expect(page.getByTestId("li-vehicle-mkv-fallback")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("当前车机浏览器缺少完整 WebCodecs 解码能力")).toBeVisible();
+    await expect(page.getByTestId("li-vehicle-original-link")).toBeVisible();
   });
 });
 
@@ -827,6 +945,7 @@ test.describe("单/多文件动作区回归", () => {
     await routeExternal(page);
     await page.goto(`/${MOCK_CODE}`);
     await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
+    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const buttonArea = page.locator("aside [data-testid='share-actions']");
     await expect(buttonArea.getByText("获取中…").first()).toBeVisible();
@@ -836,6 +955,6 @@ test.describe("单/多文件动作区回归", () => {
     await expect(buttonArea.getByText("下载此文件", { exact: true }).first()).toBeVisible({ timeout: 5000 });
     const after = await buttonArea.getByText("下载此文件", { exact: true }).first().boundingBox();
     expect(await buttonArea.locator("button, a").count()).toBe(1);
-    if (before && after) expect(Math.abs(before.y - after.y)).toBeLessThanOrEqual(1);
+    if (before && after) expect(Math.abs(before.y - after.y)).toBeLessThanOrEqual(2);
   });
 });

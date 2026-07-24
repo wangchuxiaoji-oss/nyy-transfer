@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
@@ -44,7 +44,7 @@ async def create_user(email_prefix: str) -> tuple[User, dict[str, str]]:
     email = f"{email_prefix}-{uuid.uuid4().hex}@example.com"
     factory = get_session_factory()
     async with factory() as db:
-        user = User(email=email, password_hash="hash", email_verified_at=datetime.now(timezone.utc))
+        user = User(email=email, password_hash="hash", email_verified_at=datetime.now(UTC))
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -105,7 +105,7 @@ async def create_share_for_user(
                 share_id=share.id,
                 ip="127.0.0.1",
                 ua="pytest",
-                downloaded_at=datetime.now(timezone.utc),
+                downloaded_at=datetime.now(UTC),
             ))
         await db.commit()
     return code
@@ -134,7 +134,7 @@ async def create_file_request_for_user(
             owner_id=user.id,
             title=title,
             password_hash=password_hash,
-            expires_at=expires_at or datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
             max_files=max_files,
             max_bytes=max_bytes,
             revoked_at=revoked_at,
@@ -166,7 +166,7 @@ async def test_my_shares_lists_only_owner_and_supports_filters(client):
     owner, headers = await create_user("shares-owner")
     other, _ = await create_user("shares-other")
     active_code = await create_share_for_user(owner, code_prefix="a", file_name="alpha.txt", with_log=True)
-    await create_share_for_user(owner, code_prefix="b", file_name="beta.txt", revoked_at=datetime.now(timezone.utc))
+    await create_share_for_user(owner, code_prefix="b", file_name="beta.txt", revoked_at=datetime.now(UTC))
     await create_share_for_user(other, code_prefix="o", file_name="alpha.txt")
 
     resp = await client.get("/api/v1/my/shares", headers=headers, params={"q": "alpha", "status": "active"})
@@ -233,12 +233,12 @@ async def test_my_inbox_groups_only_owner_and_searches_files(client):
 @pytest.mark.asyncio
 async def test_my_inbox_status_filters_and_file_download_permission(client):
     owner, headers = await create_user("inbox-status-owner")
-    other, other_headers = await create_user("inbox-status-other")
+    _other, other_headers = await create_user("inbox-status-other")
     expired_code = await create_file_request_for_user(
         owner,
         title="过期收件",
         file_name="expired.txt",
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
     )
     await create_file_request_for_user(owner, title="有效收件", file_name="active.txt")
 
@@ -303,7 +303,7 @@ async def test_edit_file_request_updates_active_link_and_rejects_invalid_limits(
         assert req.max_files == 2
         assert req.max_bytes == 4096
         assert req.expires_at is not None
-        assert req.expires_at > datetime.now(timezone.utc)
+        assert req.expires_at > datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -312,7 +312,7 @@ async def test_edit_file_request_does_not_restore_expired_link(client):
     code = await create_file_request_for_user(
         owner,
         title="过期收件",
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
     )
 
     resp = await client.patch(

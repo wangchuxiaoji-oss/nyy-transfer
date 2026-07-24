@@ -11,7 +11,7 @@ import logging
 import re
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -28,13 +28,21 @@ from app.schemas.upload import (
     UploadInitRequest,
     UploadInitResponse,
 )
+from app.services.app_config import get_quota_config
 from app.services.doubao_client import (
     DoubaoClientError,
     get_doubao_client,
 )
-from app.services.app_config import get_quota_config
+from app.services.growth import (
+    COUPON_TARGET_TTL,
+    GrowthServiceError,
+    assert_coupon_consumed_by_share,
+    consume_retention_coupon,
+)
 from app.services.playback_assets import attach_playback_assets_for_single_object
 from app.services.quota import get_quota_snapshot
+from app.utils.client_ip import get_client_ip as _get_client_ip
+from app.utils.client_ip import get_guest_id as _get_guest_id
 from app.utils.short_code import gen_short_code
 
 log = logging.getLogger(__name__)
@@ -61,30 +69,9 @@ _MIN_NON_LAST_PART_SIZE = 5 * 1024 * 1024
 assert _PART_SIZE >= _MIN_NON_LAST_PART_SIZE, "_PART_SIZE 必须 ≥ 5MB，否则大文件 merge 会 500"
 
 _CRC32_RE = re.compile(r"^[0-9a-f]{8}$")
-_GUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
-
-
 def _is_valid_crc32(value: str) -> bool:
     """校验 CRC32 格式（8 位小写 hex）。"""
     return bool(_CRC32_RE.match(value or ""))
-
-
-def _get_client_ip(request: Request) -> str:
-    """从 X-Forwarded-For 或 client.host 获取真实 IP。"""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "0.0.0.0"
-
-
-def _get_guest_id(request: Request, ip: str) -> str:
-    """返回当前浏览器游客身份；缺失时退回旧的 IP 归属。"""
-    guest_id = (request.headers.get("x-nyy-guest-id") or "").strip()
-    if _GUEST_ID_RE.match(guest_id):
-        return guest_id
-    return f"ip:{ip}"
-
-
 def _active_share_limit_message(active_count: int, max_shares: int) -> str:
     return f"活跃分享数量已达上限（{active_count}/{max_shares}），请先撤销已有分享"
 
@@ -118,6 +105,12 @@ def _parse_uuid(value: str, field_name: str) -> uuid.UUID:
         return uuid.UUID(value)
     except (TypeError, ValueError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{field_name} 无效") from None
+
+
+def _coupon_http_exception(exc: GrowthServiceError) -> HTTPException:
+    if exc.code == "coupon_not_found":
+        return HTTPException(status.HTTP_404_NOT_FOUND, exc.message)
+    return HTTPException(status.HTTP_409_CONFLICT, exc.message)
 
 
 def _sanitize_media_metadata(value: dict | None) -> dict | None:
@@ -169,11 +162,12 @@ def _normalize_empty_dirs(paths: list[str]) -> list[str]:
 
 
 async def _count_active_shares(db, *, user_id: str | None, ip: str, guest_id: str | None = None) -> int:
-    from app.models.share import Share
     from sqlalchemy import and_, cast, func, or_, select
     from sqlalchemy.dialects.postgresql import INET
 
-    now = datetime.now(timezone.utc)
+    from app.models.share import Share
+
+    now = datetime.now(UTC)
     active_filters = (
         Share.revoked_at.is_(None),
         Share.banned_at.is_(None),
@@ -260,12 +254,13 @@ async def upload_init(
             quota_config = await get_quota_config(db)
             if body.request_code:
                 from sqlalchemy import select
+
                 from app.models.system import FileRequest
                 from app.utils.security import verify_secret
                 req = await db.scalar(select(FileRequest).where(FileRequest.code == body.request_code, FileRequest.revoked_at.is_(None)))
                 if not req:
                     raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
-                if req.expires_at and req.expires_at < datetime.now(timezone.utc):
+                if req.expires_at and req.expires_at < datetime.now(UTC):
                     raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
                 if req.password_hash and not verify_secret(body.request_password, req.password_hash):
                     raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
@@ -335,7 +330,7 @@ async def upload_init(
             )
         except DoubaoClientError as e:
             log.error("doubao init_upload failed: %s", e)
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试")
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试") from e
 
         store_uri = init_result.store_uri
         upload_url = init_result.upload_url
@@ -364,7 +359,7 @@ async def upload_init(
 
     # --- 生成 commit_token，存 Redis ---
     commit_token = secrets.token_urlsafe(32)
-    commit_token_expires_at = datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL
+    commit_token_expires_at = datetime.now(UTC) + _COMMIT_TOKEN_TTL
     if redis is not None:
         await redis.setex(
             f"nyy:commit:{commit_token}",
@@ -419,6 +414,7 @@ async def multipart_init(
         quota_config = await get_quota_config(db)
         if body.request_code:
             from sqlalchemy import select
+
             from app.models.system import FileRequest
             from app.utils.security import verify_secret
             req = await db.scalar(select(FileRequest).where(
@@ -426,7 +422,7 @@ async def multipart_init(
             ))
             if not req:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
-            if req.expires_at and req.expires_at < datetime.now(timezone.utc):
+            if req.expires_at and req.expires_at < datetime.now(UTC):
                 raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
             if req.password_hash and not verify_secret(body.request_password, req.password_hash):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
@@ -464,13 +460,13 @@ async def multipart_init(
         )
     except DoubaoClientError as e:
         log.error("multipart_init failed: %s", e)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试") from e
 
     # 生成 commit_token + 存 Redis 会话
     part_count = (body.file_size + _PART_SIZE - 1) // _PART_SIZE
     part_number_base = 1 if is_large_file else 0
     commit_token = secrets.token_urlsafe(32)
-    commit_token_expires_at = datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL
+    commit_token_expires_at = datetime.now(UTC) + _COMMIT_TOKEN_TTL
 
     session_data = {
         "ip": ip,
@@ -541,7 +537,7 @@ async def multipart_merge(
     if session.get("merged"):
         return MultipartMergeResponse(
             commit_token=body.multipart_token,
-            commit_token_expires_at=datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL,
+            commit_token_expires_at=datetime.now(UTC) + _COMMIT_TOKEN_TTL,
         )
 
     # 校验 part 数量
@@ -575,7 +571,7 @@ async def multipart_merge(
             session.get("store_uri"),
             session.get("upload_id"),
         )
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "分片合并失败，请稍后重试")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "分片合并失败，请稍后重试") from e
 
     session["merged"] = True
     await redis.setex(
@@ -585,7 +581,7 @@ async def multipart_merge(
     )
     return MultipartMergeResponse(
         commit_token=body.multipart_token,
-        commit_token_expires_at=datetime.now(timezone.utc) + _COMMIT_TOKEN_TTL,
+        commit_token_expires_at=datetime.now(UTC) + _COMMIT_TOKEN_TTL,
     )
 
 
@@ -605,6 +601,8 @@ async def upload_commit(
     redis = request.app.state.redis
     if redis is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
+    if body.retention_coupon_id and not user:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "使用留存券需要登录")
 
     empty_dirs = _normalize_empty_dirs(body.empty_dirs)
     if not body.files and not empty_dirs:
@@ -614,11 +612,12 @@ async def upload_commit(
 
     upload_batch_id = body.upload_batch_id.strip() or None
 
-    from app.db.session import get_session_factory
-    from app.models.share import Share, ShareFile, ShareLogicalFile
     from sqlalchemy import select
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.orm import selectinload
+
+    from app.db.session import get_session_factory
+    from app.models.share import Share, ShareFile, ShareLogicalFile
 
     factory = get_session_factory()
     if upload_batch_id:
@@ -629,6 +628,18 @@ async def upload_commit(
                 .where(Share.upload_batch_id == upload_batch_id)
             )
             if existing_share:
+                if body.retention_coupon_id:
+                    if not user or existing_share.owner_id != user.id:
+                        raise HTTPException(status.HTTP_404_NOT_FOUND, "留存券不存在")
+                    try:
+                        await assert_coupon_consumed_by_share(
+                            db,
+                            coupon_id=body.retention_coupon_id,
+                            owner_id=user.id,
+                            share_id=existing_share.id,
+                        )
+                    except GrowthServiceError as exc:
+                        raise _coupon_http_exception(exc) from exc
                 return _upload_commit_response(settings, existing_share)
 
     logical_file_specs: dict[str, object] = {}
@@ -671,6 +682,10 @@ async def upload_commit(
         guest_id = _get_guest_id(request, ip)
     user_id = file_infos[0].get("user_id") if file_infos else (str(user.id) if user else None)
     total_bytes = sum(f["file_size"] for f in file_infos)
+    if body.retention_coupon_id and (
+        not user or not user_id or str(user.id) != str(user_id)
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "留存券只能用于本人创建的分享")
 
     file_groups: dict[str, list[dict]] = {}
     first_seen_logical_ids: list[str] = []
@@ -686,6 +701,7 @@ async def upload_commit(
 
     # --- 活跃分享数限制 ---
     created_logical_file_count = 0
+    email_delivery_ids: list[uuid.UUID] = []
     async with factory() as db:
         quota_config = await get_quota_config(db)
         active_count = await _count_active_shares(db, user_id=user_id, ip=ip, guest_id=None if user_id else guest_id)
@@ -717,7 +733,7 @@ async def upload_commit(
             )
         except DoubaoClientError as e:
             log.error("doubao commit_upload failed for %s: %s", info["store_uri"], e)
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传确认失败，请稍后重试")
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传确认失败，请稍后重试") from e
 
     # --- 创建 Share + ShareFiles ---
     share_code = gen_short_code()
@@ -728,14 +744,40 @@ async def upload_commit(
         password_hash = hash_secret(body.password)
 
     expires_at = None
-    if body.expires_hours > 0:
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_hours)
+    if body.retention_coupon_id:
+        expires_at = datetime.now(UTC) + COUPON_TARGET_TTL
+    elif body.expires_hours > 0:
+        expires_at = datetime.now(UTC) + timedelta(hours=body.expires_hours)
 
     # 游客生成 revoke_token，登录用户不需要（可通过 /my 管理）
     import secrets
     revoke_token = secrets.token_urlsafe(24) if not user_id else None
 
     async with factory() as db:
+        if upload_batch_id:
+            from sqlalchemy import func
+
+            await db.scalar(
+                select(func.pg_advisory_xact_lock(func.hashtext(upload_batch_id)))
+            )
+            existing_share = await db.scalar(
+                select(Share)
+                .options(selectinload(Share.files), selectinload(Share.logical_files))
+                .where(Share.upload_batch_id == upload_batch_id)
+            )
+            if existing_share:
+                if body.retention_coupon_id:
+                    try:
+                        await assert_coupon_consumed_by_share(
+                            db,
+                            coupon_id=body.retention_coupon_id,
+                            owner_id=user.id,
+                            share_id=existing_share.id,
+                        )
+                    except GrowthServiceError as exc:
+                        raise _coupon_http_exception(exc) from exc
+                return _upload_commit_response(settings, existing_share)
+
         share = Share(
             code=share_code,
             owner_id=user_id,
@@ -748,6 +790,9 @@ async def upload_commit(
             expires_at=expires_at,
             max_downloads=body.max_downloads,
             revoke_token=revoke_token,
+            logical_file_count=len(file_groups),
+            stored_object_count=len(file_infos),
+            last_activity_at=datetime.now(UTC),
         )
         ordered_logical_ids = [
             str(_parse_uuid(item.logical_file_id, "logical_file_id"))
@@ -786,7 +831,7 @@ async def upload_commit(
                         client=client,
                     )
                     media_metadata = _sanitize_media_metadata(media_metadata)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.warning("playback sidecar auto-generation skipped for %s: %s", original_name, exc)
 
             logical_file = ShareLogicalFile(
@@ -814,6 +859,25 @@ async def upload_commit(
                 )
                 db.add(sf)
         db.add(share)
+        await db.flush()
+        if body.retention_coupon_id:
+            try:
+                await consume_retention_coupon(
+                    db,
+                    coupon_id=body.retention_coupon_id,
+                    owner_id=user.id,
+                    share_id=share.id,
+                )
+            except GrowthServiceError as exc:
+                raise _coupon_http_exception(exc) from exc
+        if body.recipients:
+            from app.services.email import enqueue_share_emails
+
+            email_delivery_ids = await enqueue_share_emails(
+                db,
+                share_id=share.id,
+                recipients=[str(item) for item in body.recipients],
+            )
         try:
             await db.commit()
         except IntegrityError:
@@ -844,6 +908,14 @@ async def upload_commit(
         key = info.get("_token_redis_key")
         if key:
             await redis.delete(key)
+
+    if email_delivery_ids:
+        from app.services.email import dispatch_share_email_outbox
+
+        await dispatch_share_email_outbox(
+            email_delivery_ids,
+            app_base_url=settings.app_base_url,
+        )
 
     logical_file_count = created_logical_file_count
     log.info("share created: code=%s logical_files=%d chunks=%d size=%d", share_code, logical_file_count, len(file_infos), total_bytes)

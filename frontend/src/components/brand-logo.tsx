@@ -19,7 +19,6 @@ export function BrandLogo({ className = "h-auto w-48", priority = false, src = "
   const image = (
     <picture>
       <source srcSet={webpSrc} type="image/webp" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={BRAND_NAME}

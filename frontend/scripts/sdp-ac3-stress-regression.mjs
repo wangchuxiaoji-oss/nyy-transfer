@@ -81,13 +81,6 @@ function createSeekSchedule({ rng, count, totalSeconds, finalSoakSeconds, maxSee
   })).sort((a, b) => a.atSeconds - b.atSeconds);
 }
 
-function latestEntry(entries, predicate) {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    if (predicate(entries[i])) return entries[i];
-  }
-  return null;
-}
-
 function isExpectedPageError(message) {
   return /^seek cancelled(?: \(|$)/.test(String(message));
 }

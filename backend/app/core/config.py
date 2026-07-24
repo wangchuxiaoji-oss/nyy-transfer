@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     database_sync_url: str = (
         "postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy"
     )
+    test_database_url: str = ""
+    test_database_sync_url: str = ""
 
     # Redis
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -87,6 +89,18 @@ class Settings(BaseSettings):
     debug_log_ingest_enabled: bool = False
     debug_log_dir: str = ""
 
+    # IP 来源
+    geoip_city_db: str = ""
+    geoip_asn_db: str = ""
+    share_access_retention_days: int = 180
+    share_view_dedupe_minutes: int = 10
+    admin_preview_sign_concurrency: int = 8
+    share_archive_retention_days: int = 180
+    share_archive_enabled: bool = False
+    nginx_access_log_path: str = "/var/log/nginx/nyy_access.json"
+    nginx_access_state_path: str = "runtime/nginx_access_import_state.json"
+    nginx_access_import_batch_size: int = 1000
+
     # 认证 - Token
     jwt_secret: str = Field(default="change-me-jwt-secret-at-least-32-bytes!!", min_length=32)
     jwt_algorithm: str = "HS256"
@@ -119,10 +133,11 @@ class Settings(BaseSettings):
     login_ip_failure_rate_limit: int = 30
 
     @model_validator(mode="after")
-    def validate_production_auth_secrets(self) -> "Settings":
+    def validate_production_auth_secrets(self) -> Settings:
         if self.app_env == "dev":
             return self
         defaults = {
+            "SECRET_KEY": self.secret_key,
             "JWT_SECRET": self.jwt_secret,
             "CAPTCHA_HMAC_SECRET": self.captcha_hmac_secret,
             "EMAIL_CODE_SECRET": self.email_code_secret,
@@ -130,6 +145,12 @@ class Settings(BaseSettings):
         weak = [name for name, value in defaults.items() if value.startswith("change-me")]
         if weak:
             raise ValueError(f"生产环境必须设置非默认认证密钥: {', '.join(weak)}")
+        if self.app_base_url.rstrip("/") != "https://nyy.app":
+            raise ValueError("生产环境必须设置 APP_BASE_URL=https://nyy.app")
+        if "nyy:nyy@" in self.database_url or "nyy:nyy@" in self.database_sync_url:
+            raise ValueError("生产环境必须替换默认数据库凭据")
+        if not self.doubao_file_station_api_key or self.doubao_file_station_api_key == "sk-local" or self.doubao_file_station_api_key.startswith("change-me"):
+            raise ValueError("生产环境必须设置非默认豆包 API 密钥")
         if not self.auth_cookie_secure:
             raise ValueError("生产环境必须设置 AUTH_COOKIE_SECURE=true")
         return self

@@ -25,6 +25,7 @@ class ChunkDownloadInfo(BaseModel):
     index: int
     size: int
     download_url: str
+    backup_download_url: str = ""
 
 
 class ShareFileDownload(BaseModel):
@@ -36,6 +37,7 @@ class ShareFileDownload(BaseModel):
     # 普通文件：download_url 为 TOS 签名 URL
     # 分片文件：download_url 为空，chunks 包含所有 chunk URL
     download_url: str = ""
+    backup_download_url: str = ""
     chunks: list[ChunkDownloadInfo] = Field(default_factory=list)
     media_metadata: dict[str, Any] | None = None
 
@@ -55,7 +57,7 @@ class ShareInfoResponse(BaseModel):
 
 class ShareVerifyRequest(BaseModel):
     """POST /api/v1/shares/:code/verify 请求体。"""
-    password: str = Field(..., min_length=4, max_length=4)
+    password: str = Field(..., min_length=4, max_length=4, pattern=r"^[0-9]{4}$")
 
 
 class ShareVerifyResponse(BaseModel):
@@ -70,3 +72,22 @@ class ShareDownloadResponse(BaseModel):
     files: list[ShareFileDownload]
     empty_dirs: list[str] = Field(default_factory=list)
     expires_in: int = 86400  # 24 hours
+
+
+class ShareDownloadSessionRequest(BaseModel):
+    """幂等取链请求；有提取码的分享在这里一并验证。"""
+
+    password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+
+
+class ShareInteractionRequest(BaseModel):
+    event_type: str = Field(
+        default="human_interaction",
+        pattern="^(page_rendered|human_interaction)$",
+    )
+    request_id: str = Field(
+        min_length=8,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    request_time_ms: int | None = Field(default=None, ge=0, le=600000)

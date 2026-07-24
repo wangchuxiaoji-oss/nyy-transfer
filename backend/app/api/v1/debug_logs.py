@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from app.core.config import get_settings
 from app.schemas.debug_log import DebugLogBatch
 from app.services.debug_log_store import append_debug_log_batch
+from app.utils.client_ip import get_client_ip
 from app.utils.short_code import is_valid_code
 
 router = APIRouter(prefix="/debug", tags=["debug"])
@@ -24,5 +25,4 @@ async def ingest_debug_logs(payload: DebugLogBatch, request: Request) -> dict[st
     if not is_valid_code(payload.share_code, settings.short_code_length):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid share code")
 
-    client_host = request.client.host if request.client else None
-    return append_debug_log_batch(settings, payload, client_host)
+    return append_debug_log_batch(settings, payload, get_client_ip(request))

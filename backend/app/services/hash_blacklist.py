@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+
 from redis.asyncio import Redis
 
 log = logging.getLogger(__name__)

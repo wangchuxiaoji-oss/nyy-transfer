@@ -160,6 +160,18 @@ export class PlayerEngine {
       return;
     }
 
+    if (typeof VideoDecoder === "undefined" || typeof VideoDecoder.isConfigSupported !== "function") {
+      this.handleError("SDP v2 需要 WebCodecs VideoDecoder；当前浏览器不支持视频解码");
+      return;
+    }
+
+    const videoSupport = await VideoDecoder.isConfigSupported(this.videoInfo.decoderConfig).catch(() => null);
+    if (this.disposed) return;
+    if (!videoSupport?.supported) {
+      this.handleError("当前浏览器的 WebCodecs 不支持此视频编码配置");
+      return;
+    }
+
     if (!this.audioInfo.needsAlternateDecoder) {
       if (typeof AudioDecoder === "undefined" || typeof AudioDecoder.isConfigSupported !== "function") {
         this.handleError("SDP v2 需要 WebCodecs AudioDecoder；当前浏览器不支持音频主时钟");
@@ -170,7 +182,7 @@ export class PlayerEngine {
       if (!audioSupport?.supported) {
         this.handleError("SDP v2 需要可解码音频轨；当前音频配置不受支持，已禁用 SDP");
         return;
-    }
+      }
     }
 
     // Configure video renderer

@@ -206,15 +206,20 @@ try {
   }
 
   const report = {
-    shareUrl: SHARE_URL,
-    apiUrl,
+    shareOrigin: shareUrl.origin,
+    apiOrigin: new URL(apiUrl).origin,
     generatedAt: new Date().toISOString(),
     pageErrors,
     consoleMessages: consoleMessages.slice(-50),
     results,
   };
+  const sensitiveValues = [SHARE_URL, apiUrl, code].filter(Boolean);
+  const reportJson = JSON.stringify(report, (_key, value) => {
+    if (typeof value !== "string") return value;
+    return sensitiveValues.reduce((output, sensitive) => output.split(sensitive).join("[REDACTED]"), value);
+  }, 2);
   mkdirSync(new URL(`file://${REPORT_PATH}`).pathname.split("/").slice(0, -1).join("/"), { recursive: true });
-  writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
+  writeFileSync(REPORT_PATH, reportJson);
 
   const noisyAbortMessages = consoleMessages.filter(isAbortFetchNoise);
   const failed = results.filter((item) => !item.ok);
@@ -299,12 +304,12 @@ async function probeFile(page, expectation) {
   }, undefined, { timeout: WAIT_MS }).catch(() => undefined);
 
   if (expectation.ready) {
-    await page.waitForFunction((name) => {
+    await page.waitForFunction(() => {
       const snap = window.__nyyCodecMatrixSnapshot?.();
       if (!snap) return false;
       if (snap.route === "sdp" || snap.route === "unsupported") return true;
       return snap.fileNameVisible && snap.video.readyState >= 1 && Number.isFinite(snap.video.duration) && snap.video.duration > 0 && !snap.video.errorCode;
-    }, expectation.name, { timeout: WAIT_MS }).catch(() => undefined);
+    }, undefined, { timeout: WAIT_MS }).catch(() => undefined);
   }
 
   if (expectation.audioSchedule) {

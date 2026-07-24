@@ -2,6 +2,16 @@ import { expect, test } from "@playwright/test";
 
 test.describe("首页移动端顶栏", () => {
   test("已登录态保持单行并将账号操作收进菜单", async ({ page }) => {
+    await page.route("**/api/v1/auth/bootstrap", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          auth: { status: "user", user: { id: "admin-user", email: "admin@nyy.app", plan: "free", is_admin: true, email_verified: true }, token_type: "bearer" },
+          quota: { used_bytes: 0, limit_bytes: 1024 * 1024 * 1024, remaining_bytes: 1024 * 1024 * 1024, ttl_hours: 720 },
+        }),
+      });
+    });
     await page.route("**/api/v1/auth/me", async (route) => {
       await route.fulfill({
         status: 200,
@@ -39,6 +49,13 @@ test.describe("首页移动端顶栏", () => {
   });
 
   test("登录弹窗关闭按钮使用统一控件圆角", async ({ page }) => {
+    await page.route("**/api/v1/auth/bootstrap", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ auth: { status: "guest", user: null, token_type: "bearer" }, quota: { used_bytes: 0, limit_bytes: 1024 * 1024 * 1024, remaining_bytes: 1024 * 1024 * 1024, ttl_hours: 720 } }),
+      });
+    });
     await page.route("**/api/v1/auth/refresh", async (route) => {
       await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "未登录" }) });
     });

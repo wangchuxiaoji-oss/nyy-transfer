@@ -70,7 +70,7 @@ function normalizeFile(file, id) {
   let offset = 0;
   const physicalFileSize = Number(file.fileSize || 0);
   const sidecar = file.sidecar && file.sidecar.downloadUrl ? {
-    url: file.sidecar.downloadUrl,
+    urls: [file.sidecar.downloadUrl, file.sidecar.backupDownloadUrl].filter(Boolean),
     size: Number(file.sidecar.size || 0),
     sourceMediaStart: Number(file.sidecar.sourceMediaStart || 0),
     sourceMediaEnd: Number(file.sidecar.sourceMediaEnd || physicalFileSize),
@@ -79,7 +79,7 @@ function normalizeFile(file, id) {
   const mediaStart = sidecar ? sidecar.size : 0;
   const normalizedChunks = chunks.length > 0
     ? chunks
-    : (file.downloadUrl ? [{ index: 0, size: sidecar ? sidecar.sourceMediaEnd - sidecar.sourceMediaStart : physicalFileSize, downloadUrl: file.downloadUrl }] : []);
+    : (file.downloadUrl ? [{ index: 0, size: sidecar ? sidecar.sourceMediaEnd - sidecar.sourceMediaStart : physicalFileSize, downloadUrl: file.downloadUrl, backupDownloadUrl: file.backupDownloadUrl }] : []);
   return {
     fileName: file.fileName || "media.mp4",
     contentType: file.contentType || "video/mp4",
@@ -90,7 +90,7 @@ function normalizeFile(file, id) {
     chunks: normalizedChunks.map((chunk) => {
       const size = Number(chunk.size || 0);
       const item = {
-        url: chunk.downloadUrl,
+        urls: [chunk.downloadUrl, chunk.backupDownloadUrl].filter(Boolean),
         start: mediaStart + offset,
         end: mediaStart + offset + size - 1,
         size,
@@ -216,6 +216,22 @@ async function fetchWithRetry(url, options, shouldStop) {
       await waitForRetry();
     }
   }
+  throw lastError || new Error("fetch failed");
+}
+
+async function fetchFromSources(urls, options, shouldStop) {
+  let lastResponse = null;
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const response = await fetchWithRetry(url, options, shouldStop);
+      if (response.ok || response.status === 206) return response;
+      lastResponse = response;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastResponse) return lastResponse;
   throw lastError || new Error("fetch failed");
 }
 
@@ -405,7 +421,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
         cursorEnd: globalEnd,
         plannedBytes,
       });
-      return fetchWithRetry(file.sidecar.url, {
+      return fetchFromSources(file.sidecar.urls, {
         headers: { Range: `bytes=${globalStart}-${globalEnd}` },
         mode: "cors",
         signal: abortController.signal,
@@ -491,7 +507,7 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
       if (signal) signal.removeEventListener("abort", abortFromRequest);
     };
 
-    return fetchWithRetry(chunk.url, {
+    return fetchFromSources(chunk.urls, {
       headers: { Range: `bytes=${localStart}-${localEnd}` },
       mode: "cors",
       signal: abortController.signal,

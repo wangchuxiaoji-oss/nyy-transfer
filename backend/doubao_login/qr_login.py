@@ -21,9 +21,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ BASE_HEADERS = {
 }
 
 
-def generate_device_params() -> Dict[str, str]:
+def generate_device_params() -> dict[str, str]:
     """Generate fresh device fingerprint parameters."""
     chars = string.ascii_letters + string.digits
     fp_parts = [
@@ -76,9 +76,9 @@ class QRResult:
     """Outcome of a QR login attempt."""
     status: QRStatus = QRStatus.IDLE
     qrcode_data: bytes = b""
-    cookies: Dict[str, str] = field(default_factory=dict)
+    cookies: dict[str, str] = field(default_factory=dict)
     sessionid: str = ""
-    device_params: Dict[str, str] = field(default_factory=dict)
+    device_params: dict[str, str] = field(default_factory=dict)
     error: str = ""
 
 
@@ -86,13 +86,13 @@ StatusCallback = Callable[[QRStatus, str], None]
 DoneCallback = Callable[[QRResult], None]
 
 
-def _serialize_cookies(cookies: Dict[str, str]) -> str:
+def _serialize_cookies(cookies: dict[str, str]) -> str:
     return "; ".join(f"{k}={v}" for k, v in cookies.items())
 
 
-def _parse_set_cookies(headers) -> Dict[str, str]:
+def _parse_set_cookies(headers) -> dict[str, str]:
     """Extract name=value pairs from all Set-Cookie headers."""
-    cookies: Dict[str, str] = {}
+    cookies: dict[str, str] = {}
     raw_list = headers.get_all("Set-Cookie") or []
     for raw in raw_list:
         part = raw.split(";", 1)[0].strip()
@@ -113,17 +113,17 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _http_get(
     url: str,
-    headers: Dict[str, str],
-    cookies: Dict[str, str],
+    headers: dict[str, str],
+    cookies: dict[str, str],
     follow_redirects: bool = False,
     timeout: int = 10,
-) -> Tuple[int, str, Dict[str, str]]:
+) -> tuple[int, str, dict[str, str]]:
     """
     Synchronous GET. Returns (status_code, body, new_cookies).
     When follow_redirects is True, 3xx responses are followed manually
     so that Set-Cookie headers from every hop are collected.
     """
-    all_new_cookies: Dict[str, str] = {}
+    all_new_cookies: dict[str, str] = {}
     current_url = url
     max_hops = 10
 
@@ -210,7 +210,7 @@ class QRLogin:
             if on_status:
                 on_status(QRStatus.FETCHING_QR, "Fetching QR code...")
 
-            session_cookies: Dict[str, str] = {}
+            session_cookies: dict[str, str] = {}
             csrf_token = self._get_csrf_token(session_cookies)
             logger.debug("CSRF token: %s", csrf_token[:20] + "..." if csrf_token else "(empty)")
 
@@ -236,7 +236,7 @@ class QRLogin:
         if on_done:
             on_done(result)
 
-    def _get_csrf_token(self, session_cookies: Dict[str, str]) -> str:
+    def _get_csrf_token(self, session_cookies: dict[str, str]) -> str:
         """Visit homepage + csrf_token endpoint to obtain passport_csrf_token."""
         _, _, new_ck = _http_get(BASE_URL + "/", BASE_HEADERS, {})
         session_cookies.update(new_ck)
@@ -260,7 +260,7 @@ class QRLogin:
 
         return session_cookies.get("passport_csrf_token", "")
 
-    def _get_qr_code(self, csrf_token: str, session_cookies: Dict[str, str]) -> Tuple[str, bytes]:
+    def _get_qr_code(self, csrf_token: str, session_cookies: dict[str, str]) -> tuple[str, bytes]:
         """Fetch a QR code. Returns (token, png_bytes)."""
         next_url = urllib.parse.quote("https://www.doubao.com", safe="")
         url = f"{BASE_URL}/passport/web/get_qrcode/?next={next_url}&aid={AID}"
@@ -296,7 +296,7 @@ class QRLogin:
 
         return token, qr_bytes
 
-    def _poll_qr_connect(self, token: str, csrf_token: str, session_cookies: Dict[str, str], on_status) -> QRResult:
+    def _poll_qr_connect(self, token: str, csrf_token: str, session_cookies: dict[str, str], on_status) -> QRResult:
         """Poll check_qrconnect until confirmed, expired, or timeout."""
         result = QRResult()
         last_status = ""
@@ -382,7 +382,7 @@ class QRLogin:
         result.error = "Cancelled"
         return result
 
-    def _extract_session_from_redirect(self, redirect_url: str, session_cookies: Dict[str, str]) -> Dict[str, str]:
+    def _extract_session_from_redirect(self, redirect_url: str, session_cookies: dict[str, str]) -> dict[str, str]:
         """Follow the post-login redirect chain to collect session cookies."""
         headers = dict(BASE_HEADERS)
         _, _, new_ck = _http_get(

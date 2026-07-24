@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.services.auth_audit import log_auth_event
 from app.services.captcha import create_altcha_challenge, verify_altcha_payload
+from app.utils.client_ip import get_client_ip as _get_client_ip
 
 router = APIRouter(prefix="/captcha", tags=["captcha"])
 
@@ -19,15 +20,6 @@ def _get_redis(request: Request):
     if not redis:
         raise HTTPException(503, "服务暂时不可用")
     return redis
-
-
-def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
 # ─── 请求/响应模型 ──────────────────────────────────────────────
 
 class ChallengeResponse(BaseModel):

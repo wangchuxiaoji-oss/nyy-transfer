@@ -33,7 +33,13 @@ async def get_quota_config(db: AsyncSession) -> dict[str, int]:
     return config
 
 
-async def set_quota_config(db: AsyncSession, value: dict[str, int], updated_by) -> dict[str, int]:
+async def set_quota_config(
+    db: AsyncSession,
+    value: dict[str, int],
+    updated_by,
+    *,
+    commit: bool = True,
+) -> dict[str, int]:
     config = default_quota_config()
     config.update(value)
     result = await db.execute(select(AppConfig).where(AppConfig.key == QUOTA_CONFIG_KEY))
@@ -44,7 +50,10 @@ async def set_quota_config(db: AsyncSession, value: dict[str, int], updated_by) 
     else:
         row = AppConfig(key=QUOTA_CONFIG_KEY, value=config, updated_by=updated_by)
         db.add(row)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     return config
 
 
@@ -70,7 +79,13 @@ async def get_download_config(db: AsyncSession) -> dict[str, bool | int | str]:
     return config
 
 
-async def set_download_config(db: AsyncSession, value: dict[str, bool | int | str], updated_by) -> dict[str, bool | int | str]:
+async def set_download_config(
+    db: AsyncSession,
+    value: dict[str, bool | int | str],
+    updated_by,
+    *,
+    commit: bool = True,
+) -> dict[str, bool | int | str]:
     config = default_download_config()
     config.update(value)
     result = await db.execute(select(AppConfig).where(AppConfig.key == DOWNLOAD_CONFIG_KEY))
@@ -81,5 +96,8 @@ async def set_download_config(db: AsyncSession, value: dict[str, bool | int | st
     else:
         row = AppConfig(key=DOWNLOAD_CONFIG_KEY, value=config, updated_by=updated_by)
         db.add(row)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     return config

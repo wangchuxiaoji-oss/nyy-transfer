@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # 让 alembic 能 import 到 app.*
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app import models  # noqa: F401, E402  - 触发 ORM 注册
 from app.core.config import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app import models  # noqa: F401, E402  - 触发 ORM 注册
 
 config = context.config
 
@@ -28,6 +30,16 @@ config.set_main_option("sqlalchemy.url", settings.database_sync_url)
 
 target_metadata = Base.metadata
 
+_PARTITION_TABLE_PATTERN = re.compile(
+    r"^(?:share_access_events|download_logs)_(?:\d{6}|default)$"
+)
+
+
+def include_name(name: str | None, type_: str, _parent_names: dict[str, str]) -> bool:
+    """物理分区由维护任务管理，不参与 ORM schema diff。"""
+
+    return not (type_ == "table" and name and _PARTITION_TABLE_PATTERN.fullmatch(name))
+
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
@@ -38,6 +50,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         compare_server_default=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -55,6 +68,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
+            include_name=include_name,
         )
         with context.begin_transaction():
             context.run_migrations()

@@ -2,7 +2,7 @@
 // 目的：worker 版本与已安装的主库永远一致，且不依赖外部 CDN
 //（国内网络/内网/离线均可用）。在 predev / prebuild 时自动执行。
 import { createRequire } from "node:module";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,10 +12,25 @@ const publicDir = join(here, "..", "public");
 
 // 通过解析主包定位 build 目录下的 worker，避免硬编码版本/路径
 const pkgPath = require.resolve("pdfjs-dist/package.json");
-const workerSrc = join(dirname(pkgPath), "build", "pdf.worker.min.mjs");
-const workerDest = join(publicDir, "pdf.worker.min.mjs");
+const { version } = require(pkgPath);
+const assetRoot = join(publicDir, "pdfjs", version);
+const completeMarker = join(assetRoot, ".complete");
+const moduleSrc = join(dirname(pkgPath), "legacy", "build", "pdf.min.mjs");
+const workerSrc = join(dirname(pkgPath), "legacy", "build", "pdf.worker.min.mjs");
 
 mkdirSync(publicDir, { recursive: true });
-copyFileSync(workerSrc, workerDest);
+if (!existsSync(completeMarker)) {
+  const temporaryRoot = `${assetRoot}.tmp-${process.pid}`;
+  rmSync(temporaryRoot, { recursive: true, force: true });
+  mkdirSync(temporaryRoot, { recursive: true });
+  copyFileSync(moduleSrc, join(temporaryRoot, "pdf.min.mjs"));
+  copyFileSync(workerSrc, join(temporaryRoot, "pdf.worker.min.mjs"));
+  for (const directory of ["cmaps", "iccs", "standard_fonts", "wasm"]) {
+    cpSync(join(dirname(pkgPath), directory), join(temporaryRoot, directory), { recursive: true });
+  }
+  writeFileSync(join(temporaryRoot, ".complete"), `${version}\n`);
+  rmSync(assetRoot, { recursive: true, force: true });
+  renameSync(temporaryRoot, assetRoot);
+}
 
-console.log(`[copy-pdf-worker] ${workerSrc} -> ${workerDest}`);
+console.log(`[copy-pdf-worker] pdfjs-dist ${version} -> ${assetRoot}`);

@@ -17,11 +17,11 @@ jobs:
         env:
           POSTGRES_USER: nyy
           POSTGRES_PASSWORD: nyy
-          POSTGRES_DB: nyy
+          POSTGRES_DB: nyy_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U nyy -d nyy"
+          --health-cmd "pg_isready -U nyy -d nyy_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
@@ -40,8 +40,10 @@ jobs:
     env:
       APP_ENV: dev
       APP_BASE_URL: http://127.0.0.1:3000
-      DATABASE_URL: postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy
-      DATABASE_SYNC_URL: postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy
+      DATABASE_URL: postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy_test
+      DATABASE_SYNC_URL: postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy_test
+      TEST_DATABASE_URL: postgresql+asyncpg://nyy:nyy@127.0.0.1:5432/nyy_test
+      TEST_DATABASE_SYNC_URL: postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy_test
       REDIS_URL: redis://127.0.0.1:6379/0
       SECRET_KEY: ci-secret-key-change-me-32-bytes-minimum
       JWT_SECRET: ci-jwt-secret-change-me-32-bytes-minimum

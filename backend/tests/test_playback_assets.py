@@ -1,7 +1,11 @@
 import pytest
 
 from app.services import playback_assets
-from app.services.playback_assets import SingleObjectMedia, ensure_mp4_layout_metadata, has_ac3_audio
+from app.services.playback_assets import (
+    SingleObjectMedia,
+    ensure_mp4_layout_metadata,
+    has_ac3_audio,
+)
 
 
 def box(box_type: bytes, payload_size: int) -> bytes:

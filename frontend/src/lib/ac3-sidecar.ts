@@ -7,7 +7,7 @@ const RANGE_FETCH_RETRY_COUNT = 2;
 const RANGE_FETCH_RETRY_DELAY_MS = 160;
 
 interface VirtualChunk {
-  url: string;
+  urls: string[];
   start: number;
   end: number;
   size: number;
@@ -61,13 +61,13 @@ class SidecarVirtualFile {
     if (file.is_chunked) {
       let offset = 0;
       this.chunks = [...file.chunks].sort((a, b) => a.index - b.index).map((chunk) => {
-        const item = { url: chunk.download_url, start: offset, end: offset + chunk.size - 1, size: chunk.size };
+        const item = { urls: [chunk.download_url, chunk.backup_download_url || ""].filter(Boolean), start: offset, end: offset + chunk.size - 1, size: chunk.size };
         offset += chunk.size;
         return item;
       });
       this.totalSize = offset;
     } else {
-      this.chunks = [{ url: file.download_url, start: 0, end: file.file_size - 1, size: file.file_size }];
+      this.chunks = [{ urls: [file.download_url, file.backup_download_url || ""].filter(Boolean), start: 0, end: file.file_size - 1, size: file.file_size }];
       this.totalSize = file.file_size;
     }
   }
@@ -81,7 +81,7 @@ class SidecarVirtualFile {
       if (chunk.start >= end) break;
       const localStart = Math.max(0, start - chunk.start);
       const localEnd = Math.min(chunk.size, end - chunk.start);
-      const resp = await fetchRangeWithRetry(chunk.url, localStart, localEnd - 1, signal);
+      const resp = await fetchRangeWithRetry(chunk.urls, localStart, localEnd - 1, signal);
       if (!resp.ok && resp.status !== 206) throw new Error(`Range fetch failed: HTTP ${resp.status}`);
       parts.push(await resp.arrayBuffer());
     }
@@ -126,22 +126,29 @@ async function waitForRetry(signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function fetchRangeWithRetry(url: string, start: number, end: number, signal?: AbortSignal): Promise<Response> {
+async function fetchRangeWithRetry(urls: string[], start: number, end: number, signal?: AbortSignal): Promise<Response> {
   let lastError: unknown;
-  for (let attempt = 0; attempt <= RANGE_FETCH_RETRY_COUNT; attempt += 1) {
-    if (signal?.aborted) throw makeAbortError();
-    try {
-      return await fetch(url, {
-        headers: { Range: `bytes=${start}-${end}` },
-        signal,
-      });
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err)) throw makeAbortError();
-      lastError = err;
-      if (!isTransientFetchError(err) || attempt >= RANGE_FETCH_RETRY_COUNT) break;
-      await waitForRetry(signal);
+  let lastResponse: Response | null = null;
+  for (const url of urls) {
+    for (let attempt = 0; attempt <= RANGE_FETCH_RETRY_COUNT; attempt += 1) {
+      if (signal?.aborted) throw makeAbortError();
+      try {
+        const response = await fetch(url, {
+          headers: { Range: `bytes=${start}-${end}` },
+          signal,
+        });
+        if (response.ok || response.status === 206) return response;
+        lastResponse = response;
+        break;
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) throw makeAbortError();
+        lastError = err;
+        if (!isTransientFetchError(err) || attempt >= RANGE_FETCH_RETRY_COUNT) break;
+        await waitForRetry(signal);
+      }
     }
   }
+  if (lastResponse) return lastResponse;
   throw lastError instanceof Error ? lastError : new Error("Range fetch failed");
 }
 

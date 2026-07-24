@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from argon2 import PasswordHasher
@@ -33,7 +33,7 @@ def verify_password(password: str, hashed: str) -> bool:
 def create_access_token(user_id: str, email: str) -> str:
     """生成 access token。"""
     settings = get_settings()
-    expire = datetime.now(timezone.utc) + timedelta(
+    expire = datetime.now(UTC) + timedelta(
         minutes=settings.auth_access_token_expire_minutes
     )
     payload = {

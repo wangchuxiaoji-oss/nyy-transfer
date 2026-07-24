@@ -14,7 +14,7 @@ const SHARES_RESPONSE = {
       max_downloads: 10,
       last_downloaded_at: new Date("2026-06-06T03:00:00Z").toISOString(),
       created_at: new Date("2026-06-05T03:00:00Z").toISOString(),
-      expires_at: new Date("2026-06-20T03:00:00Z").toISOString(),
+      expires_at: new Date("2027-06-20T03:00:00Z").toISOString(),
       revoked: false,
     },
   ],
@@ -29,7 +29,7 @@ const INBOX_RESPONSE = {
       code: "rq1234",
       title: "设计稿收件",
       created_at: new Date("2026-06-05T04:00:00Z").toISOString(),
-      expires_at: new Date("2026-06-20T04:00:00Z").toISOString(),
+      expires_at: new Date("2027-06-20T04:00:00Z").toISOString(),
       file_count: 1,
       total_bytes: 2048,
       max_files: 5,
@@ -145,7 +145,7 @@ test.describe("我的工作台", () => {
     await page.getByRole("button", { name: "编辑" }).click();
     await page.getByRole("checkbox", { name: "清除当前提取码" }).check();
     await page.getByLabel("下载次数").selectOption("200");
-    await page.getByRole("button", { name: "保存" }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
 
     await expect.poll(() => api.getLastPatchBody()).toMatchObject({ password: "", max_downloads: 200 });
   });
@@ -170,10 +170,10 @@ test.describe("我的工作台", () => {
 
     await page.goto("/my?tab=inbox");
     await page.getByRole("button", { name: "编辑" }).click();
-    await page.getByLabel("收件标题").fill("更新收件标题");
+    await page.getByLabel("收件标题", { exact: true }).fill("更新收件标题");
     await page.getByLabel("有效期").selectOption("24");
     await page.getByLabel("最大文件数").fill("4");
-    await page.getByRole("button", { name: "保存" }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
 
     await expect.poll(() => api.getLastRequestPatchBody()).toMatchObject({
       title: "更新收件标题",

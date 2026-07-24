@@ -9,11 +9,16 @@ import { commitFileRequest, getFileRequestInfo, uploadInit, verifyFileRequest, t
 import { formatXhrStatusError, getErrorMessage, isSuccessfulHttpStatus } from "@/lib/errors";
 import { formatSize } from "@/lib/utils";
 import { BRAND_NAME } from "@/lib/copy";
+import { ViralShareCta } from "@/components/viral-share-cta";
 
 export default function FileRequestPage() {
-  const passwordInputId = useId();
   const params = useParams();
   const code = params.code as string;
+  return <><FileRequestContent code={code} /><ViralShareCta compact /></>;
+}
+
+function FileRequestContent({ code }: { code: string }) {
+  const passwordInputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState<FileRequestInfo | null>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -76,7 +81,7 @@ export default function FileRequestPage() {
   if (!info) return <main className="nyy-product-shell type-body flex items-center justify-center px-4 text-center retro-text">{error}</main>;
 
   return (
-    <main className="nyy-product-shell flex items-center justify-center px-4 py-16">
+    <main className="nyy-product-shell flex flex-col items-center justify-center px-4 py-16">
       <div className="nyy-product-content retro-panel-strong w-full max-w-md p-8">
         <div className="text-center">
           <BrandLogo href="/" className="mx-auto h-auto w-36" priority />

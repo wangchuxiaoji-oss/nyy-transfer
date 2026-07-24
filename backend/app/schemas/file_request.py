@@ -32,7 +32,7 @@ class FileRequestInfoResponse(BaseModel):
 
 
 class FileRequestVerify(BaseModel):
-    password: str = Field(..., min_length=4, max_length=4)
+    password: str = Field(..., min_length=4, max_length=4, pattern=r"^[0-9]{4}$")
 
 
 class FileRequestEdit(BaseModel):
@@ -50,7 +50,7 @@ class FileRequestCommitFile(BaseModel):
 
 class FileRequestCommit(BaseModel):
     files: list[FileRequestCommitFile] = Field(..., min_length=1, max_length=100)
-    password: str = Field(default="", max_length=4)
+    password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 
 
 class FileRequestItem(BaseModel):

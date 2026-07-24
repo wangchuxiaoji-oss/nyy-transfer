@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 # ─── 注册 ────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    referral_share_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=16,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
 
 
 class SendCodeRequest(BaseModel):

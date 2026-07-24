@@ -1,12 +1,8 @@
-# /etc/systemd/system/nyy.service
-#
-# 部署：
-#   sudo cp deploy/nyy.service /etc/systemd/system/nyy.service
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now nyy
+# LEGACY：仅保留给旧的 /opt/nyy 单进程部署，不属于当前生产拓扑。
+# 当前生产环境由 nyy 用户下的 PM2 管理后端。文件使用 .legacy 后缀，禁止安装。
 
 [Unit]
-Description=nyy.app FastAPI backend
+Description=[LEGACY] nyy.app FastAPI backend
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
@@ -21,6 +17,7 @@ Restart=always
 RestartSec=3
 StandardOutput=journal
 StandardError=journal
+UMask=0077
 
 # 安全加固
 NoNewPrivileges=true

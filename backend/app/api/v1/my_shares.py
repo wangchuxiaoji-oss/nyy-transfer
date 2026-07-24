@@ -8,7 +8,7 @@ PATCH  /api/v1/my/shares/:code    — 编辑（密码/过期时间/下载次数�
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -51,7 +51,7 @@ class MySharesListResponse(BaseModel):
 
 
 class ShareEditRequest(BaseModel):
-    password: str | None = Field(default=None, description="新密码，空字符串表示清除密码")
+    password: str | None = Field(default=None, max_length=4, pattern=r"^(?:[0-9]{4})?$", description="新提取码，空字符串表示清除")
     expires_hours: int | None = Field(default=None, ge=0, description="从现在起的过期小时数，0=永不过期")
     max_downloads: int | None = Field(default=None, ge=0, le=200, description="最大下载次数，0=不限")
 
@@ -75,7 +75,7 @@ async def list_my_shares(
     """获取当前用户的分享列表（按创建时间倒序）。"""
     offset = (page - 1) * page_size
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     filters = [Share.owner_id == user.id]
     if q:
         like = f"%{q}%"
@@ -180,7 +180,7 @@ async def revoke_share(
     if share.revoked_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "已撤销")
 
-    share.revoked_at = datetime.now(timezone.utc)
+    share.revoked_at = datetime.now(UTC)
     await db.commit()
     return MessageResponse(message="分享已撤销")
 
@@ -215,7 +215,7 @@ async def edit_share(
         if body.expires_hours == 0:
             share.expires_at = None
         else:
-            share.expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_hours)
+            share.expires_at = datetime.now(UTC) + timedelta(hours=body.expires_hours)
 
     if body.max_downloads is not None:
         if body.max_downloads not in {0, 1, 10, 50, 100, 200}:

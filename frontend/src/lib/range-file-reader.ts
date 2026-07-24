@@ -3,6 +3,7 @@ import type { ShareFileDownload } from "./api";
 interface VirtualChunk {
   index: number;
   url: string;
+  backupUrl: string;
   start: number;
   end: number;
   size: number;
@@ -71,6 +72,7 @@ export class RangeFileReader {
         const item = {
           index: chunk.index,
           url: chunk.download_url,
+          backupUrl: chunk.backup_download_url || "",
           start: offset,
           end: offset + size - 1,
           size,
@@ -80,7 +82,14 @@ export class RangeFileReader {
       });
       this.totalSize = offset;
     } else {
-      this.chunks = [{ index: 0, url: file.download_url, start: 0, end: file.file_size - 1, size: file.file_size }];
+      this.chunks = [{
+        index: 0,
+        url: file.download_url,
+        backupUrl: file.backup_download_url || "",
+        start: 0,
+        end: file.file_size - 1,
+        size: file.file_size,
+      }];
       this.totalSize = file.file_size;
     }
   }
@@ -207,6 +216,7 @@ async function fetchChunkRange(
 
   for (let attempt = 1; attempt <= RANGE_FETCH_MAX_ATTEMPTS; attempt += 1) {
     const timeoutMs = computeReadTimeoutMs(chunk, localStart, localEnd, requestedBytes, attempt);
+    const requestUrl = chunk.backupUrl && attempt > 1 ? chunk.backupUrl : chunk.url;
     // Parent cancellation (e.g. a newer seek) is definitive — never retry.
     if (parentSignal?.aborted) {
       throw createAbortError(`${abortReasonMessage(parentSignal)} (${describeChunkRange(chunk, localStart, localEnd)})`);
@@ -215,33 +225,36 @@ async function fetchChunkRange(
     const attemptAbort = createReadAbortSignal(parentSignal, timeoutMs);
     const startedAt = performance.now();
     try {
-      const resp = await fetch(chunk.url, { headers: { Range: range }, signal: attemptAbort.signal });
+      const resp = await fetch(requestUrl, { headers: { Range: range }, signal: attemptAbort.signal });
 
       // 200 on a partial request means the CDN ignored Range — fetching the
       // whole (possibly 512MB) chunk is never acceptable. Definitive failure.
       if (resp.status === 200 && requestedBytes < chunk.size) {
         await resp.body?.cancel().catch(() => undefined);
-        report(attempt, timeoutMs, { status: 200, durationMs: performance.now() - startedAt, error: "CDN ignored Range" });
-        throw new NonRetryableRangeError(
-          `CDN ignored Range request; refusing to fetch a full large chunk (${describeChunkRange(chunk, localStart, localEnd)})`,
-        );
-      }
-
-      if (resp.ok || resp.status === 206) {
+        const canTryBackup = Boolean(chunk.backupUrl && requestUrl !== chunk.backupUrl);
+        report(attempt, timeoutMs, { status: 200, durationMs: performance.now() - startedAt, error: "CDN ignored Range", willRetry: canTryBackup });
+        if (!canTryBackup) {
+          throw new NonRetryableRangeError(
+            `CDN ignored Range request; refusing to fetch a full large chunk (${describeChunkRange(chunk, localStart, localEnd, requestUrl)})`,
+          );
+        }
+        lastError = new Error("CDN ignored Range");
+      } else if (resp.ok || resp.status === 206) {
         // Body download is part of the timed window: a stalled stream after
         // headers arrive must also count against the per-attempt deadline.
         const buf = await resp.arrayBuffer();
         if (attempt > 1) report(attempt, timeoutMs, { ok: true, status: resp.status, durationMs: performance.now() - startedAt });
         return buf;
+      } else {
+        await resp.body?.cancel().catch(() => undefined);
+        const canTryBackup = Boolean(chunk.backupUrl && requestUrl !== chunk.backupUrl);
+        if ((!isRetryableRangeStatus(resp.status) && !canTryBackup) || attempt === RANGE_FETCH_MAX_ATTEMPTS) {
+          report(attempt, timeoutMs, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}` });
+          throw new NonRetryableRangeError(`Range fetch failed: HTTP ${resp.status} (${describeChunkRange(chunk, localStart, localEnd, requestUrl)})`);
+        }
+        lastError = new Error(`HTTP ${resp.status}`);
+        report(attempt, timeoutMs, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}`, willRetry: true });
       }
-
-      await resp.body?.cancel().catch(() => undefined);
-      if (!isRetryableRangeStatus(resp.status) || attempt === RANGE_FETCH_MAX_ATTEMPTS) {
-        report(attempt, timeoutMs, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}` });
-        throw new NonRetryableRangeError(`Range fetch failed: HTTP ${resp.status} (${describeChunkRange(chunk, localStart, localEnd)})`);
-      }
-      lastError = new Error(`HTTP ${resp.status}`);
-      report(attempt, timeoutMs, { status: resp.status, durationMs: performance.now() - startedAt, error: `HTTP ${resp.status}`, willRetry: true });
     } catch (err) {
       if (err instanceof NonRetryableRangeError) throw err;
       // Distinguish OUR per-attempt timeout (retryable) from a parent cancel
@@ -260,7 +273,7 @@ async function fetchChunkRange(
         const message = attemptAbort.timedOut
           ? `Range read timeout after ${timeoutMs}ms`
           : errorMessage(err);
-        throw new Error(`Range fetch failed after ${attempt} attempt(s): ${message} (${describeChunkRange(chunk, localStart, localEnd)})`);
+        throw new Error(`Range fetch failed after ${attempt} attempt(s): ${message} (${describeChunkRange(chunk, localStart, localEnd, requestUrl)})`);
       }
       lastError = err;
     } finally {
@@ -328,8 +341,8 @@ function createReadAbortSignal(
   };
 }
 
-function describeChunkRange(chunk: VirtualChunk, localStart: number, localEnd: number): string {
-  return `chunk=${chunk.index} host=${safeHost(chunk.url)} bytes=${localStart}-${localEnd - 1}`;
+function describeChunkRange(chunk: VirtualChunk, localStart: number, localEnd: number, requestUrl = chunk.url): string {
+  return `chunk=${chunk.index} host=${safeHost(requestUrl)} bytes=${localStart}-${localEnd - 1}`;
 }
 
 function safeHost(url: string): string {

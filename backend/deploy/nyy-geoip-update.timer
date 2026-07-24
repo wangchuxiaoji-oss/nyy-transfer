@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly nyy DB-IP ASN Lite update
+
+[Timer]
+OnCalendar=*-*-03 03:20:00 UTC
+RandomizedDelaySec=1h
+Persistent=true
+Unit=nyy-geoip-update.service
+
+[Install]
+WantedBy=timers.target

@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.uploads import _get_client_ip
 from app.core.config import get_settings
 from app.core.deps import get_current_user_required
 from app.db.session import get_db, get_session_factory
@@ -36,6 +35,7 @@ from app.schemas.file_request import (
 from app.services.app_config import get_quota_config
 from app.services.doubao_client import DoubaoClientError, get_doubao_client, get_doubao_download_url
 from app.services.quota import QuotaService
+from app.utils.client_ip import get_client_ip as _get_client_ip
 from app.utils.security import hash_secret, verify_secret
 from app.utils.short_code import gen_short_code
 
@@ -68,7 +68,7 @@ async def _get_request_or_404(code: str, db: AsyncSession) -> FileRequest:
     req = await db.scalar(select(FileRequest).where(FileRequest.code == code, FileRequest.revoked_at.is_(None)))
     if not req:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
-    if req.expires_at and req.expires_at < datetime.now(timezone.utc):
+    if req.expires_at and req.expires_at < datetime.now(UTC):
         raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
     return req
 
@@ -81,7 +81,7 @@ async def _get_request_for_update_or_404(code: str, db: AsyncSession) -> FileReq
     )
     if not req:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
-    if req.expires_at and req.expires_at < datetime.now(timezone.utc):
+    if req.expires_at and req.expires_at < datetime.now(UTC):
         raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
     return req
 
@@ -107,7 +107,7 @@ async def create_file_request(
         owner_id=user.id,
         title=body.title,
         password_hash=hash_secret(body.password) if body.password else None,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=body.expires_hours),
+        expires_at=datetime.now(UTC) + timedelta(hours=body.expires_hours),
         max_files=body.max_files,
         max_bytes=body.max_bytes,
     )
@@ -157,7 +157,7 @@ async def edit_my_file_request(
     if req.revoked_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "已撤销的收件链接不可编辑")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if req.expires_at and req.expires_at <= now:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "已过期的收件链接不可编辑")
 
@@ -195,7 +195,7 @@ async def revoke_my_file_request(
     if req.revoked_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "收件链接已撤销")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     req.revoked_at = now
     await db.execute(
         update(FileRequestFile)
@@ -252,8 +252,8 @@ async def commit_file_request_upload(code: str, body: FileRequestCommit, request
                         secret_key=info["secret_key"],
                         session_token=info["session_token"],
                     )
-                except DoubaoClientError:
-                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传确认失败，请稍后重试")
+                except DoubaoClientError as exc:
+                    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传确认失败，请稍后重试") from exc
                 db.add(FileRequestFile(
                     request_id=req.id,
                     original_name=info["file_name"],
@@ -281,7 +281,7 @@ async def list_my_file_requests(
     user: User = Depends(get_current_user_required),
     db: AsyncSession = Depends(get_db),
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     filters = [FileRequest.owner_id == user.id]
     if q:
       filters.append(or_(FileRequest.code.ilike(f"%{q}%"), FileRequest.title.ilike(f"%{q}%")))
@@ -335,7 +335,7 @@ async def list_my_inbox(
     user: User = Depends(get_current_user_required),
     db: AsyncSession = Depends(get_db),
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     filters = [FileRequest.owner_id == user.id]
     if q:
         like = f"%{q}%"
