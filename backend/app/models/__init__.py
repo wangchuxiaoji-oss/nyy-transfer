@@ -32,6 +32,7 @@ from app.models.system import (
     HashBlacklist,
     IpQuota,
     Report,
+    SystemAnnouncement,
 )
 from app.models.user import User
 
@@ -61,6 +62,7 @@ __all__ = [
     "ShareEventIdempotencyKey",
     "ShareFile",
     "ShareLogicalFile",
+    "SystemAnnouncement",
     "User",
     "ViralClickEvent",
 ]

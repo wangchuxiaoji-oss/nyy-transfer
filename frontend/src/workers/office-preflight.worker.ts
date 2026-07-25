@@ -116,9 +116,17 @@ function inspectExternalRelationships(name: string, content: Uint8Array, kind: W
     const mode = decodeAttribute(/\bTargetMode\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || "");
     if (mode.toLowerCase() !== "external") continue;
     const type = decodeAttribute(/\bType\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || "");
-    if (kind === "presentation" || !type.toLowerCase().endsWith("/hyperlink")) {
-      throw new Error("Office 文档包含外部媒体资源，请下载后查看");
-    }
+    const target = decodeAttribute(/\bTarget\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || "").trim();
+    const scheme = /^([a-z][a-z\d+.-]*):/i.exec(target)?.[1]?.toLowerCase() || "";
+    const windowsLocalPath = /^[a-z]:[\\/]/i.test(target);
+    const packageRelativeTarget = !scheme && !windowsLocalPath && !/^[\\/]{2}/.test(target);
+    const localFileTarget = scheme === "file" || windowsLocalPath;
+    if (packageRelativeTarget || localFileTarget) continue;
+
+    const hyperlink = type.toLowerCase().endsWith("/hyperlink");
+    const safeHyperlinkScheme = ["http", "https", "mailto", "tel"].includes(scheme);
+    if (kind !== "presentation" && hyperlink && safeHyperlinkScheme) continue;
+    throw new Error("Office 文档包含会联网加载的外部资源，请下载后查看");
   }
 }
 

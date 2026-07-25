@@ -76,10 +76,6 @@ class Settings(BaseSettings):
     # Bark 推送，建议填写完整地址：https://api.day.app/<key>
     bark_push_url: str = ""
 
-    # Captcha
-    hcaptcha_site_key: str = ""
-    hcaptcha_secret: str = ""
-
     # Email
     smtp_host: str = "127.0.0.1"
     smtp_port: int = 25

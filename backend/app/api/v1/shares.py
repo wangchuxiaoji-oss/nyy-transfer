@@ -7,13 +7,20 @@ GET  /api/v1/shares/:code/download — 获取下载 URL（计数 +1）
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import re
 import time
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+import httpx
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -53,6 +60,137 @@ router = APIRouter(prefix="/shares", tags=["shares"])
 _EMPTY_URI_PREFIX = "nyy-empty://"
 _EMPTY_FILE_DATA_URL = "data:application/octet-stream;base64,"
 _DOWNLOAD_SESSION_TTL = timedelta(minutes=5)
+_WECHAT_PROXY_CACHE_DIR = Path("/data/nyy-runtime/download-proxy-cache")
+_WECHAT_PROXY_CACHE_TTL_SECONDS = 6 * 60 * 60
+_WECHAT_PROXY_CACHE_MAX_BYTES = 10 * 1024**3
+_WECHAT_PROXY_CACHE_PRUNE_LOCK = asyncio.Lock()
+_WECHAT_PROXY_FILE_LOCKS: dict[UUID, asyncio.Lock] = {}
+
+
+def _is_wechat_user_agent(user_agent: str) -> bool:
+    return bool(re.search(r"MicroMessenger|\bwxwork/", user_agent, re.IGNORECASE))
+
+
+def _attach_same_origin_download_urls(
+    response: ShareDownloadResponse,
+    share: Share,
+    request_id: str,
+) -> None:
+    logical_files = sorted(share.logical_files, key=lambda item: item.sort_index)
+    for logical_file, download in zip(logical_files, response.files, strict=False):
+        if logical_file.chunk_total != 1 or len(logical_file.files) != 1:
+            continue
+        download.proxy_download_url = (
+            f"/api/v1/shares/{share.code}/download-proxy/{logical_file.id}"
+            f"?session={request_id}"
+        )
+
+
+def _download_content_disposition(file_name: str) -> str:
+    extension = file_name.rsplit(".", 1)[1] if "." in file_name else "bin"
+    safe_extension = re.sub(r"[^A-Za-z0-9]", "", extension)[:16] or "bin"
+    return f"attachment; filename=download.{safe_extension}; filename*=UTF-8''{quote(file_name, safe='')}"
+
+
+def _create_proxy_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(connect=15.0, read=None, write=15.0, pool=15.0),
+    )
+
+
+def _prune_proxy_cache(required_bytes: int) -> None:
+    _WECHAT_PROXY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    cached_files: list[tuple[Path, os.stat_result]] = []
+    for entry in _WECHAT_PROXY_CACHE_DIR.iterdir():
+        try:
+            if entry.is_symlink():
+                entry.unlink(missing_ok=True)
+                continue
+            file_stat = entry.stat()
+        except FileNotFoundError:
+            continue
+        if not entry.is_file():
+            continue
+        age = now - file_stat.st_mtime
+        if entry.name.endswith(".part"):
+            if age > 60 * 60:
+                entry.unlink(missing_ok=True)
+            continue
+        if age > _WECHAT_PROXY_CACHE_TTL_SECONDS:
+            entry.unlink(missing_ok=True)
+            continue
+        cached_files.append((entry, file_stat))
+
+    total_bytes = sum(file_stat.st_size for _, file_stat in cached_files)
+    for entry, file_stat in sorted(cached_files, key=lambda item: item[1].st_mtime):
+        if total_bytes + required_bytes <= _WECHAT_PROXY_CACHE_MAX_BYTES:
+            break
+        entry.unlink(missing_ok=True)
+        total_bytes -= file_stat.st_size
+
+
+async def _ensure_proxy_cache_file(
+    logical_file_id: UUID,
+    file_name: str,
+    file_size: int,
+    store_uri: str,
+) -> Path:
+    suffix = Path(file_name).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,16}", suffix):
+        suffix = ".bin"
+    target = _WECHAT_PROXY_CACHE_DIR / f"{logical_file_id}{suffix}"
+    if target.is_file() and target.stat().st_size == file_size:
+        return target
+
+    file_lock = _WECHAT_PROXY_FILE_LOCKS.setdefault(logical_file_id, asyncio.Lock())
+    async with file_lock:
+        if target.is_file() and target.stat().st_size == file_size:
+            return target
+        async with _WECHAT_PROXY_CACHE_PRUNE_LOCK:
+            await asyncio.to_thread(_prune_proxy_cache, file_size)
+        resolver = DoubaoDownloadUrlResolver()
+        try:
+            urls = await resolver.get_download_urls(store_uri, expire_seconds=900)
+        except Exception as exc:
+            log.warning("wechat download cache sign failed: %s", exc)
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "暂时无法准备下载，请稍后重试") from exc
+
+        client = _create_proxy_http_client()
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.part")
+        upstream = None
+        try:
+            upstream = await client.send(
+                client.build_request("GET", urls.main_url, headers={"Accept-Encoding": "identity"}),
+                stream=True,
+            )
+            if upstream.status_code != status.HTTP_200_OK:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "文件源暂时不可用，请稍后重试")
+            downloaded = 0
+            with temporary.open("wb") as output:
+                async for chunk in upstream.aiter_raw():
+                    downloaded += len(chunk)
+                    if downloaded > file_size:
+                        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "文件源返回大小异常，请稍后重试")
+                    await asyncio.to_thread(output.write, chunk)
+                await asyncio.to_thread(output.flush)
+                await asyncio.to_thread(os.fsync, output.fileno())
+            if downloaded != file_size:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "文件源返回不完整，请稍后重试")
+            await asyncio.to_thread(os.replace, temporary, target)
+            await asyncio.to_thread(os.chmod, target, 0o644)
+            return target
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("wechat download cache fill failed: %s", exc)
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "文件源暂时不可用，请稍后重试") from exc
+        finally:
+            if upstream is not None:
+                await upstream.aclose()
+            await client.aclose()
+            temporary.unlink(missing_ok=True)
 
 
 async def _record_link_issued(
@@ -286,7 +424,12 @@ async def record_share_interaction(
     response.status_code = status.HTTP_204_NO_CONTENT
 
 
-async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
+async def _get_share_or_404(
+    code: str,
+    db: AsyncSession,
+    *,
+    enforce_download_limit: bool = False,
+) -> Share:
     """按短码查 Share + files，不存在 / 已撤销 / 已过期则 404。"""
     stmt = (
         select(Share)
@@ -299,7 +442,7 @@ async def _get_share_or_404(code: str, db: AsyncSession) -> Share:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "分享不存在或已被删除")
     if share.expires_at and share.expires_at < datetime.now(UTC):
         raise HTTPException(status.HTTP_410_GONE, "分享已过期")
-    if share.max_downloads > 0 and share.download_count >= share.max_downloads:
+    if enforce_download_limit and share.max_downloads > 0 and share.download_count >= share.max_downloads:
         raise HTTPException(status.HTTP_410_GONE, "下载次数已用完")
     return share
 
@@ -526,7 +669,7 @@ async def verify_share(
     from app.db.session import get_session_factory
 
     async with get_session_factory()() as db:
-        share = await _get_share_or_404(code, db)
+        share = await _get_share_or_404(code, db, enforce_download_limit=True)
 
         if not share.password_hash:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "该分享未设置提取码")
@@ -562,7 +705,7 @@ async def download_share(
     from app.db.session import get_session_factory
 
     async with get_session_factory()() as db:
-        share = await _get_share_or_404(code, db)
+        share = await _get_share_or_404(code, db, enforce_download_limit=True)
 
         if share.password_hash:
             raise HTTPException(
@@ -621,7 +764,7 @@ async def create_download_session(
         now = datetime.now(UTC)
         if share.expires_at and share.expires_at < now:
             raise HTTPException(status.HTTP_410_GONE, "分享已过期")
-        if share.max_downloads > 0 and share.download_count >= share.max_downloads:
+        if body.intent == "download" and share.max_downloads > 0 and share.download_count >= share.max_downloads:
             raise HTTPException(status.HTTP_410_GONE, "下载次数已用完")
         if share.password_hash:
             if not body.password:
@@ -635,16 +778,20 @@ async def create_download_session(
 
         downloads = await _get_download_urls(share.logical_files)
         response = ShareDownloadResponse(files=downloads, empty_dirs=share.empty_dirs or [])
-        reserved = await _reserve_download_link(
-            db,
-            share,
-            request,
-            request_id=normalized_request_id,
-            response_metadata={
-                "file_count": len(downloads),
-                "empty_dir_count": len(share.empty_dirs or []),
-            },
-        )
+        reserved = False
+        if body.intent == "download":
+            reserved = await _reserve_download_link(
+                db,
+                share,
+                request,
+                request_id=normalized_request_id,
+                response_metadata={
+                    "file_count": len(downloads),
+                    "empty_dir_count": len(share.empty_dirs or []),
+                },
+            )
+            if body.delivery == "same_origin" and _is_wechat_user_agent(request.headers.get("user-agent", "")):
+                _attach_same_origin_download_urls(response, share, normalized_request_id)
         await db.commit()
         share_id = share.id
 
@@ -658,6 +805,75 @@ async def create_download_session(
             request_time_ms=round((time.perf_counter() - started_at) * 1000),
         )
     return response
+
+
+@router.api_route(
+    "/{code}/download-proxy/{logical_file_id}",
+    methods=["GET", "HEAD"],
+    summary="同域缓存下载",
+)
+async def proxy_share_download(
+    code: str,
+    logical_file_id: UUID,
+    request: Request,
+    session: str = Query(
+        ...,
+        min_length=8,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
+):
+    from app.db.session import get_session_factory
+
+    now = datetime.now(UTC)
+    async with get_session_factory()() as db:
+        result = await db.execute(
+            select(Share)
+            .options(selectinload(Share.logical_files).selectinload(ShareLogicalFile.files))
+            .where(
+                Share.code == code,
+                Share.revoked_at.is_(None),
+                Share.banned_at.is_(None),
+                or_(Share.expires_at.is_(None), Share.expires_at > now),
+            )
+        )
+        share = result.scalar_one_or_none()
+        if share is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "分享不存在或已失效")
+        download_session = await db.scalar(
+            select(DownloadSession).where(
+                DownloadSession.share_id == share.id,
+                DownloadSession.request_id == session,
+                DownloadSession.expires_at > now,
+            )
+        )
+        if download_session is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "下载授权已失效，请返回分享页重试")
+        logical_file = next((item for item in share.logical_files if item.id == logical_file_id), None)
+        if logical_file is None or logical_file.chunk_total != 1 or len(logical_file.files) != 1:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在或不支持同域下载")
+        stored_file = logical_file.files[0]
+        file_name = logical_file.original_name
+        file_size = logical_file.size
+        content_type = logical_file.content_type or "application/octet-stream"
+        store_uri = stored_file.tos_uri
+
+    cached_file = await _ensure_proxy_cache_file(
+        logical_file.id,
+        file_name,
+        file_size,
+        store_uri,
+    )
+    return Response(
+        status_code=status.HTTP_200_OK,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": _download_content_disposition(file_name),
+            "Content-Type": content_type,
+            "X-Accel-Redirect": f"/_internal-download-cache/{cached_file.name}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/{code}/report", response_model=MessageResponse, summary="举报分享")

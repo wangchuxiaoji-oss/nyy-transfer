@@ -38,6 +38,7 @@ class ShareFileDownload(BaseModel):
     # 分片文件：download_url 为空，chunks 包含所有 chunk URL
     download_url: str = ""
     backup_download_url: str = ""
+    proxy_download_url: str = ""
     chunks: list[ChunkDownloadInfo] = Field(default_factory=list)
     media_metadata: dict[str, Any] | None = None
 
@@ -78,6 +79,8 @@ class ShareDownloadSessionRequest(BaseModel):
     """幂等取链请求；有提取码的分享在这里一并验证。"""
 
     password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+    intent: str = Field(default="download", pattern="^(preview|download)$")
+    delivery: str = Field(default="direct", pattern="^(direct|same_origin)$")
 
 
 class ShareInteractionRequest(BaseModel):

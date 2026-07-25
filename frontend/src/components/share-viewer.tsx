@@ -44,6 +44,7 @@ type FileType = "video" | "image" | "pdf" | "audio" | "text" | "document" | "spr
 type DownloadLinksState = "idle" | "loading" | "ready" | "error";
 type MobilePanel = "files" | "overview" | "scan";
 type DownloadTaskState = "idle" | "running" | "completed";
+type WeChatEnvironment = "wechat" | "wecom";
 
 interface ShareViewerProps {
   code: string;
@@ -86,6 +87,13 @@ function isDocumentStage(type: FileType): boolean {
   return ["pdf", "text", "document", "spreadsheet", "presentation"].includes(type);
 }
 
+function shouldAutoPrepareSingleDocument(share: ShareInfo): boolean {
+  if (share.files.length !== 1 || share.files[0].is_chunked) return false;
+  const fileName = share.files[0].file_name;
+  const type = classifyFile(fileName);
+  return ["pdf", "document", "spreadsheet", "presentation"].includes(type) || isOfficeDownloadOnly(fileName);
+}
+
 // URL 安全校验（防止 javascript: 等 XSS 协议）
 function isSafeUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
@@ -110,6 +118,12 @@ function isAnalyzableAudioUrl(url: string): boolean {
 
 function isLiVehicleBrowser(userAgent: string): boolean {
   return /LiBrowser\/[\d.]+|\bHU_SS\d*\b/i.test(userAgent);
+}
+
+function detectWeChatEnvironment(userAgent: string): WeChatEnvironment | null {
+  if (/\bwxwork\//i.test(userAgent)) return "wecom";
+  if (/MicroMessenger/i.test(userAgent)) return "wechat";
+  return null;
 }
 
 function hasSafeAudioSource(file: ShareFileDownload): boolean {
@@ -1299,6 +1313,8 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const [downloadConfig, setDownloadConfig] = useState<DownloadConfig>(() => defaultDownloadConfig());
   const [directoryDownloadSupported, setDirectoryDownloadSupported] = useState(false);
   const [liVehicleBrowser, setLiVehicleBrowser] = useState(false);
+  const [weChatEnvironment, setWeChatEnvironment] = useState<WeChatEnvironment | null>(null);
+  const [weChatNoticeDismissed, setWeChatNoticeDismissed] = useState(false);
   const [qr, setQr] = useState("");
   const [reported, setReported] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -1326,7 +1342,9 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     const request = isAdminPreview ? getAdminShareView(code) : getShareInfo(code);
     request
       .then((data) => {
-        const shouldAutoFetch = isAdminPreview || (!data.has_password && isLiVehicleBrowser(navigator.userAgent));
+        const shouldAutoFetch = isAdminPreview || (!data.has_password && (
+          isLiVehicleBrowser(navigator.userAgent) || shouldAutoPrepareSingleDocument(data)
+        ));
         setShare(data);
         if (isAdminPreview) setAdminStatus((data as AdminShareView).status);
         setMobilePanel(getDefaultMobilePanel(data));
@@ -1373,7 +1391,25 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   useEffect(() => {
     setDirectoryDownloadSupported(supportsDirectoryPicker());
     setLiVehicleBrowser(isLiVehicleBrowser(navigator.userAgent));
+    const environment = detectWeChatEnvironment(navigator.userAgent);
+    setWeChatEnvironment(environment);
+    if (environment) {
+      try {
+        setWeChatNoticeDismissed(sessionStorage.getItem("nyy-wechat-download-notice-dismissed") === "1");
+      } catch {
+        setWeChatNoticeDismissed(false);
+      }
+    }
   }, []);
+
+  const dismissWeChatNotice = () => {
+    setWeChatNoticeDismissed(true);
+    try {
+      sessionStorage.setItem("nyy-wechat-download-notice-dismissed", "1");
+    } catch {
+      return;
+    }
+  };
 
   useEffect(() => {
     if (!reportOpen) return;
@@ -1439,7 +1475,9 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     if (autoFetchStartedRef.current) return;
     autoFetchStartedRef.current = true;
     try {
-      const res = isAdminPreview ? await getAdminShareContent(code) : await downloadShare(code, createLinkRequestId());
+      const res = isAdminPreview
+        ? await getAdminShareContent(code)
+        : await downloadShare(code, createLinkRequestId(), { intent: "preview" });
       setDownloads(res.files);
       setDownloadState("ready");
     } catch (err) {
@@ -1467,7 +1505,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     setPwVerifying(true);
     setPwError("");
     try {
-      const res = await verifyShare(code, latestPw, createLinkRequestId());
+      const res = await verifyShare(code, latestPw, createLinkRequestId(), { intent: "preview" });
       setDownloads(res.files);
       setShare((current) => current ? {
         ...current,
@@ -1536,25 +1574,33 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   }, [pageState, pwShake, pwDissolving]);
 
   // ===== 获取下载 URL（密码已验证或无密码时） =====
-  const fetchDownloadUrls = async (): Promise<{ files: ShareFileDownload[]; emptyDirs: string[] } | null> => {
+  const fetchDownloadUrls = async (
+    intent: "preview" | "download" = "preview",
+  ): Promise<{ files: ShareFileDownload[]; emptyDirs: string[] } | null> => {
     const requestId = createLinkRequestId();
+    const updatePreviewState = intent === "preview";
+    const delivery = intent === "download"
+      && typeof navigator !== "undefined"
+      && detectWeChatEnvironment(navigator.userAgent)
+      ? "same_origin"
+      : "direct";
     try {
-      setDownloadState("loading");
+      if (updatePreviewState) setDownloadState("loading");
       if (isAdminPreview) {
         const res = await getAdminShareContent(code);
-        setDownloadState("ready");
+        if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else if (share?.has_password) {
-        const res = await verifyShare(code, pwLatestRef.current, requestId);
-        setDownloadState("ready");
+        const res = await verifyShare(code, pwLatestRef.current, requestId, { intent, delivery });
+        if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else {
-        const res = await downloadShare(code, requestId);
-        setDownloadState("ready");
+        const res = await downloadShare(code, requestId, { intent, delivery });
+        if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       }
     } catch (err) {
-      setDownloadState("error");
+      if (updatePreviewState) setDownloadState("error");
       const message = getErrorMessage(err, "获取下载链接失败");
       setPwError(message);
       showToast({ title: message, type: "error" });
@@ -1567,7 +1613,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     if (!share) return;
     setDownloading(true);
     setPwError("");
-    const res = await fetchDownloadUrls();
+    const res = await fetchDownloadUrls("preview");
     if (!res) { setDownloading(false); return; }
     setDownloads(res.files);
     setDownloading(false);
@@ -1575,9 +1621,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
 
   const handleDownloadAll = async () => {
     if (!share) return;
-    const filesToDownload = downloads;
-    const emptyDirs = share.empty_dirs;
-    if (filesToDownload.length === 0 && emptyDirs.length === 0) return;
+    if (downloads.length === 0 && share.empty_dirs.length === 0) return;
     if (!downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled || !directoryDownloadSupported) {
       showToast({
         title: !downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled
@@ -1595,6 +1639,17 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       showToast({ title: getErrorMessage(err, "无法选择保存文件夹"), type: "error" });
       return;
+    }
+    const downloadResponse = await fetchDownloadUrls("download");
+    if (!downloadResponse) return;
+    const filesToDownload = downloadResponse.files.map((file) => file.proxy_download_url ? {
+      ...file,
+      download_url: new URL(file.proxy_download_url, window.location.origin).toString(),
+      backup_download_url: "",
+    } : file);
+    const emptyDirs = downloadResponse.emptyDirs;
+    if (!isAdminPreview) {
+      setShare((current) => current ? { ...current, download_count: current.download_count + 1 } : current);
     }
     downloadAbortRef.current?.abort();
     const abortController = new AbortController();
@@ -1675,24 +1730,42 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   };
 
   // 下载单个文件（文件列表行内图标使用）
-  const downloadOneFile = async (file: ShareFileDownload) => {
-    if (!file.is_chunked && !isSafeUrl(file.download_url)) { showToast({ title: "下载链接无效", type: "error" }); return; }
-    if (file.is_chunked && !file.chunks.every((chunk) => isSafeUrl(chunk.download_url))) { showToast({ title: "下载链接无效", type: "error" }); return; }
-    if (liVehicleBrowser && !file.is_chunked) {
-      window.location.assign(file.download_url);
+  const downloadOneFile = async (file: ShareFileDownload | undefined, fileIndex = 0) => {
+    setDownloading(true);
+    let downloadFile = file;
+    if (!isAdminPreview) {
+      const downloadResponse = await fetchDownloadUrls("download");
+      if (!downloadResponse) {
+        setDownloading(false);
+        return;
+      }
+      downloadFile = downloadResponse.files[Math.min(fileIndex, downloadResponse.files.length - 1)];
+      if (downloadFile?.proxy_download_url) {
+        downloadFile = {
+          ...downloadFile,
+          download_url: new URL(downloadFile.proxy_download_url, window.location.origin).toString(),
+          backup_download_url: "",
+        };
+      }
+      setShare((current) => current ? { ...current, download_count: current.download_count + 1 } : current);
+    }
+    if (!downloadFile) { setDownloading(false); return; }
+    if (!downloadFile.is_chunked && !isSafeUrl(downloadFile.download_url)) { setDownloading(false); showToast({ title: "下载链接无效", type: "error" }); return; }
+    if (downloadFile.is_chunked && !downloadFile.chunks.every((chunk) => isSafeUrl(chunk.download_url))) { setDownloading(false); showToast({ title: "下载链接无效", type: "error" }); return; }
+    if (liVehicleBrowser && !downloadFile.is_chunked) {
+      window.location.assign(downloadFile.download_url);
       return;
     }
     downloadAbortRef.current?.abort();
     const abortController = new AbortController();
     downloadAbortRef.current = abortController;
     let lastProgress: SmartDownloadProgress | null = null;
-    setDownloading(true);
     setDownloadProgress(null);
-    setDownloadProgressFile(file);
+    setDownloadProgressFile(downloadFile);
     setDownloadTaskState("running");
-    setDownloadPreviewSuspended(shouldSuspendPreviewForDownload(file));
+    setDownloadPreviewSuspended(shouldSuspendPreviewForDownload(downloadFile));
     try {
-      await downloadSmart(file, {
+      await downloadSmart(downloadFile, {
         config: downloadConfig,
         signal: abortController.signal,
         onProgress: (progress) => {
@@ -1726,6 +1799,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
       setDownloadPreviewSuspended(false);
       setDownloading(false);
     }
+  };
+
+  const handleSingleDocumentDownload = async () => {
+    setPwError("");
+    await downloadOneFile(downloads[0], 0);
   };
 
   const handleCancelDownload = () => {
@@ -2071,6 +2149,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   // ===== Ready 状态：4C 主布局 =====
   const isSingle = share.files.length === 1 && share.empty_dirs.length === 0;
   const hasOnlyEmptyDirs = share.files.length === 0 && share.empty_dirs.length > 0;
+  const autoPreparesSingleDocument = shouldAutoPrepareSingleDocument(share);
 
   const effectiveFiles = downloads.length > 0 ? downloads : share.files;
   const contentSummary = getShareContentSummary(share);
@@ -2078,8 +2157,8 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const downloadLabel = getDownloadLabel(share);
   const showMultiDownloadActions = !isSingle && !hasOnlyEmptyDirs && downloadState === "ready" && !!selectedFile;
   const showLinkFetchButton =
-    (isSingle && (downloadState === "idle" || downloadState === "error")) ||
-    (!isSingle && !hasOnlyEmptyDirs && !showMultiDownloadActions);
+    (isSingle && !autoPreparesSingleDocument && (downloadState === "idle" || downloadState === "error")) ||
+    (!isSingle && !autoPreparesSingleDocument && !hasOnlyEmptyDirs && !showMultiDownloadActions);
   const canBatchSaveToDirectory = downloadConfig.smart_download_enabled && downloadConfig.filesystem_access_enabled && directoryDownloadSupported;
   const batchDownloadLabel = canBatchSaveToDirectory ? "保存到文件夹" : "请逐个下载";
   const batchDownloadBusyLabel = canBatchSaveToDirectory ? "保存中…" : "请逐个下载";
@@ -2095,7 +2174,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
       downloadsReady={downloads.length > 0}
       selectedIndex={selectedIdx}
       onSelectFile={setSelectedIdx}
-      onDownloadFile={(file) => { void downloadOneFile(file); }}
+      onDownloadFile={(file) => { void downloadOneFile(file, Math.max(0, effectiveFiles.findIndex((item) => item.file_name === file.file_name && item.file_size === file.file_size))); }}
       formatSize={formatSize}
       variant={variant}
     />
@@ -2144,7 +2223,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
         <p className={`mt-2 text-xs leading-5 ${s.tMuted}`}>{message}</p>
       </div>
       {selectedFile && (
-        <button type="button" onClick={() => { void downloadOneFile(selectedFile); }} className={`${s.glowBtn} min-h-[44px] px-4 py-3 font-tech text-xs tracking-widest`}>
+        <button type="button" onClick={() => { void downloadOneFile(selectedFile, selectedIdx); }} className={`${s.glowBtn} min-h-[44px] px-4 py-3 font-tech text-xs tracking-widest`}>
           下载查看
         </button>
       )}
@@ -2203,18 +2282,18 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                     </div>
                   ) : selectedType === "video" && (
                     isMkvFile(selectedFile) ? (
-                      <MkvVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} debugLog={appendDebugLog} />
+                      <MkvVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }} debugLog={appendDebugLog} />
                     ) : needsSdpPlayer(selectedFile) ? (
                       <SelfDevelopPlayer file={selectedFile} className={s.sdpFill} debugLog={appendDebugLog} />
                     ) : isAc3Mp4(selectedFile) ? (
-                      <Ac3VideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
+                      <Ac3VideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }} />
                     ) : isEac3Mp4(selectedFile) ? (
                       <UnsupportedVideoPreview
                         message="当前客户端解码器尚不支持 E-AC-3 音频；为避免误播无声视频，请先下载后使用本地播放器查看。"
-                        onDownload={() => { void downloadOneFile(selectedFile); }}
+                        onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }}
                       />
                     ) : (
-                      <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
+                      <NativeVideoPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }} />
                     )
                   )}
                   {/* 图片 */}
@@ -2241,7 +2320,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                           fileName={selectedFile.file_name}
                           fileSize={selectedFile.file_size}
                           className="h-full w-full"
-                          onDownload={() => { void downloadOneFile(selectedFile); }}
+                          onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }}
                         />
                       : renderPreviewFallback("该文档使用分片存储或预览链接无效，请下载后查看。")
                   )}
@@ -2255,7 +2334,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                           fileName={selectedFile.file_name}
                           fileSize={selectedFile.file_size}
                           className="h-full w-full"
-                          onDownload={() => { void downloadOneFile(selectedFile); }}
+                          onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }}
                         />
                       : renderPreviewFallback("该表格使用分片存储或预览链接无效，请下载后查看。")
                   )}
@@ -2269,13 +2348,13 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                           fileName={selectedFile.file_name}
                           fileSize={selectedFile.file_size}
                           className="h-full w-full"
-                          onDownload={() => { void downloadOneFile(selectedFile); }}
+                          onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }}
                         />
                       : renderPreviewFallback("该演示文稿使用分片存储或预览链接无效，请下载后查看。")
                   )}
                   {/* 音频 */}
                   {!downloadPreviewSuspended && selectedType === "audio" && (
-                    <AudioPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile); }} />
+                    <AudioPreview file={selectedFile} onDownload={() => { void downloadOneFile(selectedFile, selectedIdx); }} />
                   )}
                   {/* 文本 */}
                   {!downloadPreviewSuspended && selectedType === "text" && (
@@ -2306,7 +2385,13 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                   <div className="text-center">
                     <BrandLogo className="w-20 h-auto mx-auto mb-4 opacity-30" />
                     <p className={`font-tech text-xs tracking-widest ${s.tMuted}`}>
-                      {hasOnlyEmptyDirs ? "该分享仅包含空文件夹" : "选择一个文件开始预览"}
+                      {hasOnlyEmptyDirs
+                        ? "该分享仅包含空文件夹"
+                        : autoPreparesSingleDocument && downloadState === "loading"
+                          ? "正在加载文档预览…"
+                          : autoPreparesSingleDocument && downloadState === "error"
+                            ? "预览加载失败，可直接下载文件"
+                            : "选择一个文件开始预览"}
                     </p>
                   </div>
                 </div>
@@ -2351,7 +2436,14 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                   {downloading ? batchDownloadBusyLabel : batchDownloadLabel}
                 </button>
               )}
-              {isSingle && downloadState === "ready" && downloads[0] && (
+              {isSingle && autoPreparesSingleDocument && (
+                <button onClick={() => { void handleSingleDocumentDownload(); }} disabled={downloading || downloadState === "loading"}
+                  className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
+                  <Download className="w-4 h-4" />
+                  {downloading ? "下载中…" : downloadState === "loading" ? "正在准备预览…" : "下载此文件"}
+                </button>
+              )}
+              {isSingle && !autoPreparesSingleDocument && downloadState === "ready" && downloads[0] && (
                 liVehicleBrowser && !downloads[0].is_chunked && isSafeUrl(downloads[0].download_url) ? (
                   <div className="col-span-2" data-testid="li-vehicle-download-actions">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -2359,6 +2451,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                         data-testid="li-vehicle-original-link"
                         href={downloads[0].download_url}
                         referrerPolicy="no-referrer"
+                        aria-disabled={downloading}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (!downloading) void downloadOneFile(downloads[0], 0);
+                        }}
                         className={`${s.glowBtn} flex min-w-0 items-center justify-center gap-2 px-4 py-3.5 font-tech text-xs tracking-widest`}
                       >
                         <Download className="h-4 w-4 shrink-0" />
@@ -2377,14 +2474,14 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                     </p>
                   </div>
                 ) : (
-                  <button onClick={() => { if (downloads[0]) void downloadOneFile(downloads[0]); }} disabled={downloading || !downloads[0]}
+                  <button onClick={() => { if (downloads[0]) void downloadOneFile(downloads[0], 0); }} disabled={downloading || !downloads[0]}
                     className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2`}>
                     <Download className="w-4 h-4" />
                     {downloading ? "下载中…" : "下载此文件"}
                   </button>
                 )
               )}
-              {isSingle && downloadState === "loading" && (
+              {isSingle && !autoPreparesSingleDocument && downloadState === "loading" && (
                 <button disabled
                   className={`${s.glowBtn} col-span-2 w-full py-3.5 font-tech text-xs tracking-widest flex items-center justify-center gap-2 opacity-50 cursor-not-allowed`}>
                   <Download className="w-4 h-4" />
@@ -2393,7 +2490,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
               )}
               {showMultiDownloadActions && (
                 <>
-                  <button onClick={() => { if (selectedFile) void downloadOneFile(selectedFile); }} disabled={downloading || !selectedFile}
+                  <button onClick={() => { if (selectedFile) void downloadOneFile(selectedFile, selectedIdx); }} disabled={downloading || !selectedFile}
                     className={`${s.glowBtn} min-w-0 w-full py-3.5 font-tech text-[11px] tracking-[0.08em] sm:text-xs sm:tracking-widest flex items-center justify-center gap-2`}>
                     <Download className="w-4 h-4 shrink-0" />
                     <span className="truncate">下载当前文件</span>
@@ -2420,6 +2517,20 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                 />
               )}
             </div>
+
+            {weChatEnvironment && !weChatNoticeDismissed && selectedMeta && !selectedMeta.is_chunked && (
+              <div data-testid="wechat-download-notice" role="status" className="relative rounded-2xl border border-amber-400/25 bg-amber-400/8 px-4 py-3 pr-11 shadow-[0_0_24px_rgba(251,191,36,0.07)]">
+                <p className={`font-tech text-[11px] font-bold tracking-[0.08em] ${s.tPrimary}`}>
+                  {weChatEnvironment === "wecom" ? "企业微信下载提示" : "微信下载提示"}
+                </p>
+                <p className={`mt-1 text-[11px] leading-5 ${s.tMuted}`}>
+                  接收页下载中可能暂时显示 0 B，当前文件实际为 {formatSize(selectedMeta.file_size)}。暂停时通常会刷新大小，不影响文件完整性或继续下载。
+                </p>
+                <button type="button" onClick={dismissWeChatNotice} aria-label="关闭微信下载提示" className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/10 ${s.tMuted}`}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
 
             {/* 移动端：文件 / 概览 / 扫码选项卡 */}
             <div className={`${s.glass} p-3 sm:hidden`}>

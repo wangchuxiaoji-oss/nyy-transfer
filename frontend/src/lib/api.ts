@@ -202,6 +202,7 @@ export interface ShareFileDownload {
   is_chunked: boolean;
   download_url: string;
   backup_download_url?: string;
+  proxy_download_url?: string;
   chunks: ChunkDownloadInfo[];
   media_metadata?: MediaMetadata | null;
 }
@@ -222,7 +223,6 @@ export async function uploadInit(params: {
   file_size: number;
   file_ext: string;
   content_type?: string;
-  captcha_token?: string;
   chunk_index?: number;
   chunk_total?: number;
   logical_file_id?: string;
@@ -257,7 +257,7 @@ export async function uploadCommit(params: {
 
 export async function multipartInit(body: {
   file_name: string; file_size: number; file_ext: string; content_type: string;
-  logical_file_id: string; captcha_token?: string;
+  logical_file_id: string;
   request_code?: string; request_password?: string;
 }): Promise<MultipartInitResponse> {
   const res = await authFetch(`${API_BASE}/api/v1/uploads/multipart-init`, {
@@ -303,11 +303,21 @@ export async function recordShareInteraction(code: string, eventType: ShareInter
   throw error;
 }
 
-export async function verifyShare(code: string, password: string, requestId = createLinkRequestId()): Promise<ShareDownloadResponse> {
+interface ShareSessionOptions {
+  intent?: "preview" | "download";
+  delivery?: "direct" | "same_origin";
+}
+
+export async function verifyShare(
+  code: string,
+  password: string,
+  requestId = createLinkRequestId(),
+  options: ShareSessionOptions = {},
+): Promise<ShareDownloadResponse> {
   const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
     method: "POST",
     headers: { "X-NYY-Link-Request-ID": requestId },
-    body: JSON.stringify({ password, request_id: requestId }),
+    body: JSON.stringify({ password, request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct" }),
   });
   if (response.ok) return response.json();
   const error = await createHttpError(response, { fallback: "提取码验证失败" });
@@ -320,11 +330,15 @@ export async function verifyShare(code: string, password: string, requestId = cr
   return handleResponse(legacyResponse, "提取码验证失败");
 }
 
-export async function downloadShare(code: string, requestId = createLinkRequestId()): Promise<ShareDownloadResponse> {
+export async function downloadShare(
+  code: string,
+  requestId = createLinkRequestId(),
+  options: ShareSessionOptions = {},
+): Promise<ShareDownloadResponse> {
   const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
     method: "POST",
     headers: { "X-NYY-Link-Request-ID": requestId },
-    body: JSON.stringify({ request_id: requestId }),
+    body: JSON.stringify({ request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct" }),
   });
   if (response.ok) return response.json();
   const error = await createHttpError(response, { fallback: "获取下载链接失败" });

@@ -8,6 +8,7 @@ from datetime import date, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -16,11 +17,12 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import Base, TimestampMixin, utcnow
 
 
 class IpQuota(Base):
@@ -55,6 +57,77 @@ class AppConfig(Base, TimestampMixin):
     value: Mapped[dict] = mapped_column(JSONB, nullable=False)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class SystemAnnouncement(Base, TimestampMixin):
+    """面向用户的版本更新、维护进度与事故公告。"""
+
+    __tablename__ = "system_announcements"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    version: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    details: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="draft", server_default="draft", nullable=False
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    visible_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('release', 'maintenance', 'incident')",
+            name="system_announcement_category",
+        ),
+        CheckConstraint(
+            "priority IN ('normal', 'important', 'critical')",
+            name="system_announcement_priority",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="system_announcement_status",
+        ),
+        CheckConstraint(
+            "state IN ('released', 'scheduled', 'in_progress', 'completed', "
+            "'investigating', 'monitoring', 'resolved', 'cancelled')",
+            name="system_announcement_state",
+        ),
+        Index(
+            "ix_system_announcements_status_published_id",
+            "status",
+            "published_at",
+            "id",
+        ),
+        Index(
+            "ix_system_announcements_category_state_published",
+            "category",
+            "state",
+            "published_at",
+        ),
     )
 
 

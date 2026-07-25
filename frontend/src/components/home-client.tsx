@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatDebugLine, type DebugLogFn } from "@/lib/debug";
 import { BRAND_NAME } from "@/lib/copy";
 import { recordGrowthLanding } from "@/lib/growth";
+import { SystemAnnouncementCenter } from "@/components/system-announcement-center";
 
 interface DebugEntry {
   elapsedMs: number;
@@ -383,6 +384,7 @@ export function HomeClient() {
           )}
         </nav>
       </header>
+      <SystemAnnouncementCenter />
 
       {/* 主操作面板（紧跟 Hero 之后，用户滚动即可触达） */}
       <section id="upload-section" className="glass-card mt-8 w-full max-w-3xl scroll-mt-[calc(env(safe-area-inset-top)+5rem)]" aria-label="文件操作">

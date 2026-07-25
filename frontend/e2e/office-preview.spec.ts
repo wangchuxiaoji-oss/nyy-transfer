@@ -5,9 +5,11 @@ type OfficeExtension = keyof typeof OFFICE_FIXTURE_MIME;
 type OfficeKind = "document" | "spreadsheet" | "presentation";
 
 interface ShareMockOptions {
+  code?: string;
   extension: string;
   contentType: string;
   body: Buffer;
+  emptyDirs?: string[];
   fileSize?: number;
   externalDelayMs?: number;
   externalStatus?: number;
@@ -17,11 +19,15 @@ interface ShareMockOptions {
 interface ShareMockResult {
   code: string;
   fileName: string;
+  downloadSessions: () => number;
+  sessionIntents: () => string[];
+  sessionDeliveries: () => string[];
   externalRequests: () => number;
   backupRequests: () => number;
 }
 
 const NOW = "2026-07-24T00:00:00.000Z";
+const WECHAT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_5_2 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.75";
 const SUPPORTED_KINDS: Record<OfficeExtension, OfficeKind> = {
   docx: "document",
   xls: "spreadsheet",
@@ -37,19 +43,23 @@ const READY_MARKERS: Record<OfficeExtension, string> = {
 
 let mockSerial = 0;
 
-function fixture(extension: OfficeExtension, options: { compressed?: boolean; long?: boolean; dangerous?: boolean; external?: boolean; externalCss?: boolean } = {}): Buffer {
+function fixture(extension: OfficeExtension, options: { compressed?: boolean; long?: boolean; dangerous?: boolean; external?: boolean; localExternal?: boolean; externalCss?: boolean } = {}): Buffer {
   return Buffer.from(createOfficeFixture(extension, options));
 }
 
 async function routeShare(page: Page, options: ShareMockOptions): Promise<ShareMockResult> {
   mockSerial += 1;
-  const code = `office-${options.extension}-${mockSerial}`;
+  const code = options.code || `office-${options.extension}-${mockSerial}`;
   const fileName = `预览样例.${options.extension}`;
   const fileSize = options.fileSize ?? options.body.byteLength;
   const downloadUrl = `https://office-fixtures.test/${code}/${encodeURIComponent(fileName)}`;
   const backupUrl = `https://office-backup.test/${code}/${encodeURIComponent(fileName)}`;
+  const emptyDirs = options.emptyDirs ?? ["fixture-empty/"];
   let externalRequestCount = 0;
   let backupRequestCount = 0;
+  let downloadSessionCount = 0;
+  const sessionIntents: string[] = [];
+  const sessionDeliveries: string[] = [];
 
   const shareFile = {
     file_name: fileName,
@@ -98,7 +108,7 @@ async function routeShare(page: Page, options: ShareMockOptions): Promise<ShareM
       body: JSON.stringify({
         code,
         files: [shareFile],
-        empty_dirs: ["fixture-empty/"],
+        empty_dirs: emptyDirs,
         total_bytes: fileSize,
         created_at: NOW,
         expires_at: null,
@@ -109,10 +119,14 @@ async function routeShare(page: Page, options: ShareMockOptions): Promise<ShareM
     });
   });
   await page.route(`**/api/v1/shares/${code}/download-session`, async (route) => {
+    downloadSessionCount += 1;
+    const request = route.request().postDataJSON() as { intent?: string; delivery?: string };
+    sessionIntents.push(request.intent || "download");
+    sessionDeliveries.push(request.delivery || "direct");
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ files: [downloadFile], empty_dirs: ["fixture-empty/"], expires_in: 3600 }),
+      body: JSON.stringify({ files: [downloadFile], empty_dirs: emptyDirs, expires_in: 3600 }),
     });
   });
   await page.route(downloadUrl, async (route) => {
@@ -131,13 +145,21 @@ async function routeShare(page: Page, options: ShareMockOptions): Promise<ShareM
     });
   }
 
-  return { code, fileName, externalRequests: () => externalRequestCount, backupRequests: () => backupRequestCount };
+  return {
+    code,
+    fileName,
+    downloadSessions: () => downloadSessionCount,
+    sessionIntents: () => [...sessionIntents],
+    sessionDeliveries: () => [...sessionDeliveries],
+    externalRequests: () => externalRequestCount,
+    backupRequests: () => backupRequestCount,
+  };
 }
 
 async function routeOfficeShare(
   page: Page,
   extension: OfficeExtension,
-  options: Omit<Partial<ShareMockOptions>, "extension" | "contentType" | "body"> & { body?: Buffer; compressed?: boolean; long?: boolean; dangerous?: boolean; external?: boolean; externalCss?: boolean } = {},
+  options: Omit<Partial<ShareMockOptions>, "extension" | "contentType" | "body"> & { body?: Buffer; compressed?: boolean; long?: boolean; dangerous?: boolean; external?: boolean; localExternal?: boolean; externalCss?: boolean } = {},
 ): Promise<ShareMockResult> {
   return routeShare(page, {
     extension,
@@ -147,9 +169,12 @@ async function routeOfficeShare(
       long: options.long,
       dangerous: options.dangerous,
       external: options.external,
+      localExternal: options.localExternal,
       externalCss: options.externalCss,
     }),
+    code: options.code,
     fileSize: options.fileSize,
+    emptyDirs: options.emptyDirs,
     externalDelayMs: options.externalDelayMs,
     externalStatus: options.externalStatus,
     backupStatus: options.backupStatus,
@@ -158,7 +183,6 @@ async function routeOfficeShare(
 
 async function openShare(page: Page, mock: ShareMockResult): Promise<Locator> {
   await page.goto(`/${mock.code}`);
-  await page.getByRole("button", { name: "获取下载链接" }).click();
   return page.getByTestId("office-preview");
 }
 
@@ -237,6 +261,43 @@ async function installStateRecorder(page: Page) {
 }
 
 test.describe("Office 预览分类与回退", () => {
+  test("单个 Word 首屏自动加载预览且只保留直接下载入口", async ({ page }) => {
+    const mock = await routeOfficeShare(page, "docx", { emptyDirs: [] });
+    const preview = await openShare(page, mock);
+
+    await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 10000 });
+    await expect(page.getByRole("button", { name: "获取下载链接" })).toHaveCount(0);
+    await expect(page.locator("aside").getByRole("button", { name: "下载此文件" })).toBeVisible();
+    expect(mock.downloadSessions()).toBe(1);
+    expect(mock.sessionIntents()).toEqual(["preview"]);
+
+    await page.locator("aside").getByRole("button", { name: "下载此文件" }).click();
+    await expect.poll(() => mock.sessionIntents()).toEqual(["preview", "download"]);
+  });
+
+  test("微信环境显示兼容提示并仅在明确下载时请求同域交付", async ({ page }) => {
+    await page.addInitScript((userAgent) => {
+      Object.defineProperty(navigator, "userAgent", { configurable: true, value: userAgent });
+    }, WECHAT_UA);
+    const mock = await routeOfficeShare(page, "docx", { emptyDirs: [] });
+    await page.goto(`/${mock.code}`);
+    await expect(page.getByTestId("office-preview")).toHaveAttribute("data-state", "ready", { timeout: 10000 });
+    const notice = page.getByTestId("wechat-download-notice");
+    await expect(notice).toContainText("微信下载提示");
+    await expect(notice).toContainText("0 B");
+    expect(mock.sessionIntents()).toEqual(["preview"]);
+    expect(mock.sessionDeliveries()).toEqual(["direct"]);
+
+    await page.locator("aside").getByRole("button", { name: "下载此文件" }).click();
+    await expect.poll(() => mock.sessionIntents()).toEqual(["preview", "download"]);
+    expect(mock.sessionDeliveries()).toEqual(["direct", "same_origin"]);
+
+    await page.getByRole("button", { name: "关闭微信下载提示" }).click();
+    await expect(notice).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId("wechat-download-notice")).toHaveCount(0);
+  });
+
   for (const extension of Object.keys(SUPPORTED_KINDS) as OfficeExtension[]) {
     test(`${extension} 分类后进入对应 Office 预览`, async ({ page }) => {
       const mock = await routeOfficeShare(page, extension);
@@ -257,7 +318,6 @@ test.describe("Office 预览分类与回退", () => {
         const contentType = extension.startsWith("xls") ? "application/vnd.ms-excel" : "application/octet-stream";
         const mock = await routeShare(page, { extension, contentType, body: Buffer.from("unsupported") });
         await page.goto(`/${mock.code}`);
-        await page.getByRole("button", { name: "获取下载链接" }).click();
 
         await expect(page.getByTestId("office-preview")).toHaveCount(0);
         const fallback = page.getByTestId("office-preview-fallback");
@@ -304,7 +364,6 @@ test("浅色 PDF 舞台无黑底、隐藏滚动条并释放离屏画布", async 
     body: createPdfFixture(12),
   });
   await page.goto(`/${mock.code}`);
-  await page.getByRole("button", { name: "获取下载链接" }).click();
   const stage = page.getByTestId("preview-stage");
   const scroller = page.getByTestId("pdf-preview-scroll");
   await expect(stage).toHaveAttribute("data-preview-kind", "document");
@@ -331,7 +390,6 @@ test("PDF 页面尺寸异常时拒绝创建超大画布", async ({ page }) => {
     body: createPdfFixture(1, { width: 1, height: 100_000_000 }),
   });
   await page.goto(`/${mock.code}`);
-  await page.getByRole("button", { name: "获取下载链接" }).click();
 
   await expect(page.getByTestId("pdf-preview-scroll").getByRole("alert")).toContainText("PDF 页面尺寸异常", { timeout: 15000 });
 });
@@ -345,7 +403,6 @@ test("PDF 主预览源失败后自动切换备用源", async ({ page }) => {
     backupStatus: 200,
   });
   await page.goto(`/${mock.code}`);
-  await page.getByRole("button", { name: "获取下载链接" }).click();
 
   await expect(page.getByTestId("pdf-preview-scroll").locator("canvas").first()).toBeVisible({ timeout: 15000 });
   expect(mock.externalRequests()).toBe(1);
@@ -452,6 +509,23 @@ test.describe("Office 预览状态", () => {
 
     await expect(preview).toHaveAttribute("data-state", "error", { timeout: 10000 });
     await expect(preview).toContainText(/外部媒体|外部资源|无法预览/);
+  });
+
+  test("Word、Excel、PPT 的本地文件关系使用包内缓存安全预览", async ({ page }) => {
+    const scenarios: Array<{ extension: OfficeExtension; marker: string }> = [
+      { extension: "docx", marker: "Office DOCX fixture" },
+      { extension: "xlsx", marker: "Office XLSX fixture" },
+      { extension: "pptx", marker: "Office PPTX fixture" },
+    ];
+    for (const scenario of scenarios) {
+      await test.step(scenario.extension, async () => {
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+        const preview = await openShare(page, await routeOfficeShare(page, scenario.extension, { localExternal: true }));
+
+        await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 20000 });
+        await expect(preview).toContainText(scenario.marker);
+      });
+    }
   });
 
   test("DOCX 注入的外部 CSS 不会发起网络请求", async ({ page }) => {

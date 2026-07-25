@@ -16,8 +16,9 @@ test("公开分享分层埋点且用户取链优先 POST 并携带幂等 ID", as
   await page.route(`**/api/v1/shares/${CODE}/download-session`, async (route) => {
     downloadCalls += 1;
     expect(route.request().method()).toBe("POST");
-    const body = route.request().postDataJSON() as { request_id: string };
+    const body = route.request().postDataJSON() as { request_id: string; intent: string };
     expect(route.request().headers()["x-nyy-link-request-id"]).toBe(body.request_id);
+    expect(body.intent).toBe("preview");
     requestIds.push(body.request_id);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [{ file_name: "contract.txt", file_size: 12, content_type: "text/plain", is_chunked: false, download_url: "https://example.com/contract.txt", chunks: [], media_metadata: null }], empty_dirs: [], expires_in: 3600 }) });
   });

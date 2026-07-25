@@ -622,6 +622,7 @@ function Footer() {
       <nav aria-label="页脚导航" className="flex flex-wrap gap-x-5 gap-y-3">
         <Link href="/how-it-works" className="hover:text-orange-500">工作原理</Link>
         <Link href="/security" className="hover:text-orange-500">安全</Link>
+        <Link href="/updates" className="hover:text-orange-500">最近更新</Link>
         <Link href="/about" className="hover:text-orange-500">关于</Link>
         <Link href="/contact" className="hover:text-orange-500">联系</Link>
         <Link href="/privacy" className="hover:text-orange-500">隐私</Link>

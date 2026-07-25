@@ -16,6 +16,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.admin import (
+    announcements,
     archive,
     audit,
     config,
@@ -31,6 +32,7 @@ from app.api.v1.admin import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 router.include_router(stats.router)
+router.include_router(announcements.router)
 router.include_router(shares.router)
 router.include_router(users.router)
 router.include_router(reports.router)

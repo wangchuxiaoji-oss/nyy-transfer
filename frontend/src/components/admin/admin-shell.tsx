@@ -52,13 +52,14 @@ import { AdminListToolbar } from "./admin-list-toolbar";
 import { AdminBanDialog } from "./admin-ban-dialog";
 import { AdminLoading, AdminSectionError } from "./admin-ui";
 import { AdminMailbox } from "./admin-mailbox";
+import { AdminAnnouncementsPanel } from "./admin-announcements-panel";
 
 const ADMIN_PATH = "/admin";
 const PAGE_SIZE = 20;
 type AuthState = "checking" | "authenticated" | "anonymous" | "error";
 
 const TAB_TITLES: Record<AdminTab, [string, string]> = {
-  overview: ["运营总览", "优先处理异常与待办"], shares: ["分享管理", "高密度审核与来源调查"], reports: ["举报队列", "预览、处置与封禁联动"], users: ["用户管理", "账号状态与来源核查"], emails: ["邮件队列", "失败投递与重试入口"], mailbox: ["收件箱", "支持线程、附件与完整处置的邮件工作台"], quota: ["配额配置", "游客与注册用户规则"], download: ["下载配置", "浏览器保存行为"], doubao: ["豆包 Session", "生产凭据验证与刷新"], diagnostics: ["系统诊断", "开发与维护工具"],
+  overview: ["运营总览", "优先处理异常与待办"], shares: ["分享管理", "高密度审核与来源调查"], reports: ["举报队列", "预览、处置与封禁联动"], users: ["用户管理", "账号状态与来源核查"], emails: ["邮件队列", "失败投递与重试入口"], mailbox: ["收件箱", "支持线程、附件与完整处置的邮件工作台"], announcements: ["更新发布", "版本、维护与服务事件通知"], quota: ["配额配置", "游客与注册用户规则"], download: ["下载配置", "浏览器保存行为"], doubao: ["豆包 Session", "生产凭据验证与刷新"], diagnostics: ["系统诊断", "开发与维护工具"],
 };
 
 function createRequestId(): string {
@@ -130,7 +131,7 @@ export function AdminShell() {
     if (authState !== "authenticated") return;
     const serial = ++requestSerialRef.current;
     setModuleError("");
-    if (query.tab === "doubao" || query.tab === "diagnostics" || query.tab === "mailbox") {
+    if (query.tab === "doubao" || query.tab === "diagnostics" || query.tab === "mailbox" || query.tab === "announcements") {
       setModuleLoading(false);
       return;
     }
@@ -299,6 +300,7 @@ export function AdminShell() {
   else if (query.tab === "download" && downloadConfig) moduleContent = <AdminDownloadPanel initial={downloadConfig} saving={pendingKeys.has("config:download")} onSave={saveDownload} />;
   else if (query.tab === "doubao") moduleContent = <AdminDoubaoPanel />;
   else if (query.tab === "mailbox") moduleContent = <AdminMailbox onError={handleDataError} refreshToken={mailboxRefreshToken} />;
+  else if (query.tab === "announcements") moduleContent = <AdminAnnouncementsPanel />;
   else if (query.tab === "diagnostics") moduleContent = <AdminDiagnosticsPanel />;
   else moduleContent = <AdminLoading />;
 

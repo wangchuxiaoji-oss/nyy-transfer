@@ -5,6 +5,7 @@ export type AdminTab =
   | "users"
   | "emails"
   | "mailbox"
+  | "announcements"
   | "quota"
   | "download"
   | "doubao"
@@ -40,6 +41,7 @@ export const ADMIN_TAB_KEYS: AdminTab[] = [
   "users",
   "emails",
   "mailbox",
+  "announcements",
   "quota",
   "download",
   "doubao",

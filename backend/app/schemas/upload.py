@@ -16,7 +16,6 @@ class UploadInitRequest(BaseModel):
     file_size: int = Field(..., ge=0, le=10 * 1024 * 1024 * 1024)
     file_ext: str = Field(default="", max_length=16)
     content_type: str = Field(default="", max_length=127)
-    captcha_token: str = Field(default="", max_length=4096)
     # 大文件分片字段（普通文件不传或传默认值）
     chunk_index: int = Field(default=0, ge=0)
     chunk_total: int = Field(default=1, ge=1, le=50)  # 10GB / 512MB ≈ 20, 留余量
@@ -97,7 +96,6 @@ class MultipartInitRequest(BaseModel):
     file_size: int = Field(..., gt=0, le=10 * 1024 * 1024 * 1024)
     file_ext: str = Field(default="", max_length=16)
     content_type: str = Field(default="", max_length=127)
-    captcha_token: str = Field(default="", max_length=4096)
     logical_file_id: str = Field(..., min_length=1, max_length=36)
     request_code: str = Field(default="", max_length=16)
     request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")

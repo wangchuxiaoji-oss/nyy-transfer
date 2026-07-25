@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, AlertTriangle, Database, Download, Gauge, Inbox, LayoutDashboard, Mail, Share2, Users, type LucideIcon } from "lucide-react";
+import { Activity, AlertTriangle, BellRing, Database, Download, Gauge, Inbox, LayoutDashboard, Mail, Share2, Users, type LucideIcon } from "lucide-react";
 import type { AdminTab } from "@/lib/admin-query-state";
 
 interface AdminNavigationProps {
@@ -18,6 +18,7 @@ const GROUPS: Array<{ label: string; items: Array<{ key: AdminTab; label: string
       { key: "users", label: "用户", Icon: Users },
       { key: "emails", label: "邮件", Icon: Mail },
       { key: "mailbox", label: "收件箱", Icon: Inbox },
+      { key: "announcements", label: "更新发布", Icon: BellRing },
     ],
   },
   {

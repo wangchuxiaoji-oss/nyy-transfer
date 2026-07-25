@@ -223,8 +223,7 @@ async def upload_init(
     request: Request,
     user: User | None = Depends(get_current_user_optional),
 ):
-    """Step 1: 校验配额 + hCaptcha，调豆包 prepare/apply，返回 TOS 上传凭证。"""
-    settings = get_settings()
+    """Step 1: 校验配额，调豆包 prepare/apply，返回 TOS 上传凭证。"""
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
@@ -237,11 +236,6 @@ async def upload_init(
     # 单个 chunk 不能超过 1GB（TOS 限制）
     if body.file_size > _ONE_GB:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "单个分片不能超过 1GB")
-
-    # --- hCaptcha 校验（dev 环境跳过） ---
-    if not settings.is_dev and settings.hcaptcha_secret:
-        if not body.captcha_token:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先完成人机验证")
 
     # --- 配额检查 ---
     redis = request.app.state.redis
@@ -387,7 +381,6 @@ async def multipart_init(
     user: User | None = Depends(get_current_user_optional),
 ):
     """Step 1-alt: 大文件 multipart 上传初始化，返回 uploadID + TOS 凭证。"""
-    settings = get_settings()
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
@@ -395,11 +388,6 @@ async def multipart_init(
     is_large_file = body.file_size > _LARGE_FILE_SIZE
     if is_large_file and not user:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "上传超过 1GB 的文件需要登录")
-
-    # hCaptcha 校验（dev 环境跳过）
-    if not settings.is_dev and settings.hcaptcha_secret:
-        if not body.captcha_token:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先完成人机验证")
 
     # 配额检查
     redis = request.app.state.redis

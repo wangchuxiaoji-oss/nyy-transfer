@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
@@ -112,6 +114,76 @@ async def test_upload_init_success(client, redis, _raise_share_limit):
     token_data = json.loads(stored)
     assert token_data["file_name"] == "test.bin"
     assert token_data["file_size"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_upload_init_succeeds_in_production_without_legacy_captcha(
+    client, redis, _raise_share_limit
+):
+    """生产环境上传不应依赖已移除且从未校验的 hCaptcha 字段。"""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    original_app_env = settings.app_env
+    settings.app_env = "production"
+    try:
+        with patch(
+            "app.api.v1.uploads.get_doubao_client",
+            new_callable=AsyncMock,
+        ) as mock_get:
+            mock_client = AsyncMock()
+            mock_client.init_upload.return_value = _mock_init_result()
+            mock_get.return_value = mock_client
+
+            response = await client.post(
+                "/api/v1/uploads/init",
+                json={
+                    "file_name": "production.txt",
+                    "file_size": 32,
+                    "file_ext": "txt",
+                },
+            )
+    finally:
+        settings.app_env = original_app_env
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_multipart_init_succeeds_in_production_without_legacy_captcha(
+    client, redis, _raise_share_limit
+):
+    """生产环境 multipart 初始化与普通上传使用相同的无伪验证码契约。"""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    original_app_env = settings.app_env
+    settings.app_env = "production"
+    try:
+        with patch(
+            "app.api.v1.uploads.get_doubao_client",
+            new_callable=AsyncMock,
+        ) as mock_get:
+            mock_client = AsyncMock()
+            mock_client.init_upload.return_value = _mock_init_result()
+            mock_client.init_multipart.return_value = "upload-id"
+            mock_get.return_value = mock_client
+
+            response = await client.post(
+                "/api/v1/uploads/multipart-init",
+                json={
+                    "file_name": "production.bin",
+                    "file_size": 512 * 1024 * 1024 + 1,
+                    "file_ext": "bin",
+                    "content_type": "application/octet-stream",
+                    "logical_file_id": str(uuid.uuid4()),
+                },
+            )
+    finally:
+        settings.app_env = original_app_env
+
+    assert response.status_code == 200
+    assert response.json()["upload_id"] == "upload-id"
 
 
 @pytest.mark.asyncio
@@ -542,17 +614,35 @@ async def test_download_session_rechecks_authorization_and_stores_no_signed_url(
     assert public_info.json()["total_bytes"] == 0
 
     request_headers = {"X-NYY-Link-Request-ID": f"session-{uuid.uuid4().hex}"}
+    preview_headers = {"X-NYY-Link-Request-ID": f"preview-{uuid.uuid4().hex}"}
     with patch("app.api.v1.shares.DoubaoDownloadUrlResolver") as resolver_class:
         resolver = AsyncMock()
         resolver.get_download_urls.side_effect = [
+            DownloadUrlResult(main_url="https://download.test/preview", backup_url=""),
             DownloadUrlResult(main_url="https://download.test/first", backup_url=""),
             DownloadUrlResult(main_url="https://download.test/fresh", backup_url=""),
         ]
         resolver_class.return_value = resolver
+        preview = await client.post(
+            f"/api/v1/shares/{code}/download-session",
+            headers=preview_headers,
+            json={"password": "1234", "intent": "preview"},
+        )
+        assert preview.status_code == 200
+        assert preview.json()["files"][0]["download_url"].endswith("/preview")
+        async with factory() as db:
+            preview_share = await db.scalar(select(Share).where(Share.code == code))
+            preview_session = await db.scalar(select(DownloadSession).where(
+                DownloadSession.share_id == preview_share.id,
+                DownloadSession.request_id == preview_headers["X-NYY-Link-Request-ID"],
+            ))
+            assert preview_share.download_count == 0
+            assert preview_session is None
+
         first = await client.post(
             f"/api/v1/shares/{code}/download-session",
-            headers=request_headers,
-            json={"password": "1234"},
+            headers={**request_headers, "User-Agent": "Mozilla/5.0 MicroMessenger/8.0.75"},
+            json={"password": "1234", "delivery": "same_origin"},
         )
         replay = await client.post(
             f"/api/v1/shares/{code}/download-session",
@@ -568,6 +658,9 @@ async def test_download_session_rechecks_authorization_and_stores_no_signed_url(
     assert first.status_code == 200
     assert replay.status_code == 200
     assert first.json()["files"][0]["download_url"].endswith("/first")
+    assert first.json()["files"][0]["proxy_download_url"].startswith(
+        f"/api/v1/shares/{code}/download-proxy/"
+    )
     assert replay.json()["files"][0]["download_url"].endswith("/fresh")
     assert wrong_password.status_code == 403
 
@@ -599,6 +692,117 @@ async def test_download_session_rechecks_authorization_and_stores_no_signed_url(
         json={"password": "1234"},
     )
     assert exhausted.status_code == 410, exhausted.text
+
+
+@pytest.mark.asyncio
+async def test_same_origin_proxy_requires_download_session_and_serves_cached_file(client):
+    from app.db.session import get_session_factory
+
+    code = f"wp{uuid.uuid4().hex[:8]}"
+    request_id = f"mvp-{uuid.uuid4().hex}"
+    share = Share(
+        code=code,
+        total_bytes=64,
+        download_count=1,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    logical = ShareLogicalFile(
+        share=share,
+        original_name="年度述职.pptx",
+        size=64,
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        chunk_total=1,
+        sort_index=0,
+    )
+    share_file = ShareFile(
+        share=share,
+        logical_file=logical,
+        original_name="年度述职.pptx",
+        size=64,
+        content_type=logical.content_type,
+        tos_uri="tos-cn-i-test/annual-review.pptx",
+        chunk_index=0,
+        chunk_total=1,
+    )
+    factory = get_session_factory()
+    async with factory() as db:
+        db.add_all([share, logical, share_file])
+        await db.flush()
+        db.add(DownloadSession(
+            share_id=share.id,
+            request_id=request_id,
+            response_payload={"file_count": 1, "empty_dir_count": 0},
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        ))
+        await db.commit()
+        logical_id = logical.id
+
+    cached_file = Path(f"/data/nyy-runtime/download-proxy-cache/{logical_id}.pptx")
+    with patch("app.api.v1.shares._ensure_proxy_cache_file", new_callable=AsyncMock, return_value=cached_file):
+        head_response = await client.head(
+            f"/api/v1/shares/{code}/download-proxy/{logical_id}",
+            params={"session": request_id},
+        )
+    assert head_response.status_code == 200
+    assert head_response.content == b""
+    assert head_response.headers["cache-control"] == "private, no-store"
+    assert head_response.headers["content-type"] == logical.content_type
+    assert "filename*=UTF-8''" in head_response.headers["content-disposition"]
+    assert head_response.headers["x-accel-redirect"] == f"/_internal-download-cache/{logical_id}.pptx"
+
+    with patch("app.api.v1.shares._ensure_proxy_cache_file", new_callable=AsyncMock, return_value=cached_file):
+        response = await client.get(
+            f"/api/v1/shares/{code}/download-proxy/{logical_id}",
+            params={"session": request_id},
+            headers={"Range": "bytes=0-3"},
+        )
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+    assert response.headers["x-accel-redirect"] == f"/_internal-download-cache/{logical_id}.pptx"
+
+    invalid = await client.get(
+        f"/api/v1/shares/{code}/download-proxy/{logical_id}",
+        params={"session": f"missing-{uuid.uuid4().hex}"},
+    )
+    assert invalid.status_code == 403
+
+
+def test_wechat_user_agent_detection_is_case_insensitive_and_non_authoritative():
+    from app.api.v1.shares import _is_wechat_user_agent
+
+    assert _is_wechat_user_agent("Mozilla/5.0 MicroMessenger/8.0.75") is True
+    assert _is_wechat_user_agent("Mozilla/5.0 wxwork/4.1.36") is True
+    assert _is_wechat_user_agent("mozilla/5.0 micromessenger/8.0.60") is True
+    assert _is_wechat_user_agent("Mozilla/5.0 Mobile Safari/604.1") is False
+
+
+def test_proxy_cache_prunes_expired_and_oldest_files(tmp_path):
+    from app.api.v1.shares import _prune_proxy_cache
+
+    expired = tmp_path / "expired.bin"
+    oldest = tmp_path / "oldest.bin"
+    newest = tmp_path / "newest.bin"
+    expired.write_bytes(b"x" * 2)
+    oldest.write_bytes(b"x" * 6)
+    newest.write_bytes(b"x" * 3)
+    now = datetime.now(UTC).timestamp()
+    os.utime(expired, (now - 30, now - 30))
+    os.utime(oldest, (now - 8, now - 8))
+    os.utime(newest, (now - 2, now - 2))
+
+    with (
+        patch("app.api.v1.shares._WECHAT_PROXY_CACHE_DIR", tmp_path),
+        patch("app.api.v1.shares._WECHAT_PROXY_CACHE_TTL_SECONDS", 10),
+        patch("app.api.v1.shares._WECHAT_PROXY_CACHE_MAX_BYTES", 10),
+    ):
+        _prune_proxy_cache(required_bytes=5)
+
+    assert expired.exists() is False
+    assert oldest.exists() is False
+    assert newest.exists() is True
 
 
 @pytest.mark.asyncio

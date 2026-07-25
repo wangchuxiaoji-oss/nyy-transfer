@@ -2,6 +2,7 @@ import { authFetch, API_BASE } from "./auth";
 import { createHttpError, isHttpStatusError } from "./errors";
 import type { ShareDownloadResponse, ShareInfo } from "./api";
 import type { DownloadConfig } from "./smart-download";
+import type { AnnouncementCategory, AnnouncementPriority, AnnouncementState } from "./announcements";
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) throw await createHttpError(res);
@@ -654,6 +655,69 @@ export async function unbanAdminShare(code: string): Promise<{ message: string }
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/shares/${code}/ban`, {
     method: "DELETE",
   }));
+}
+
+// ─── 系统更新公告 ────────────────────────────────────────────────
+
+export interface AdminAnnouncement {
+  id: string;
+  version: string;
+  category: AnnouncementCategory;
+  state: AnnouncementState;
+  priority: AnnouncementPriority;
+  title: string;
+  summary: string;
+  details: string[];
+  status: "draft" | "published" | "archived";
+  revision: number;
+  started_at: string | null;
+  completed_at: string | null;
+  visible_until: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminAnnouncementInput {
+  version: string;
+  category: AnnouncementCategory;
+  state: AnnouncementState;
+  priority: AnnouncementPriority;
+  title: string;
+  summary: string;
+  details: string[];
+  started_at: string | null;
+  completed_at: string | null;
+  visible_until: string | null;
+}
+
+export interface AdminAnnouncementList {
+  items: AdminAnnouncement[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export async function getAdminAnnouncements(status = "all"): Promise<AdminAnnouncementList> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/announcements?status=${encodeURIComponent(status)}`));
+}
+
+export async function createAdminAnnouncement(body: AdminAnnouncementInput): Promise<AdminAnnouncement> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/announcements`, { method: "POST", body: JSON.stringify(body) }));
+}
+
+export async function updateAdminAnnouncement(id: string, body: Partial<AdminAnnouncementInput>): Promise<AdminAnnouncement> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/announcements/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }));
+}
+
+export async function publishAdminAnnouncement(id: string): Promise<AdminAnnouncement> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/announcements/${encodeURIComponent(id)}/publish`, { method: "POST" }));
+}
+
+export async function archiveAdminAnnouncement(id: string): Promise<AdminAnnouncement> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/announcements/${encodeURIComponent(id)}/archive`, { method: "POST" }));
 }
 
 // ─── Doubao Session ─────────────────────────────────────────────

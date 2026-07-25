@@ -13,6 +13,7 @@ interface FixtureOptions {
   long?: boolean;
   dangerous?: boolean;
   external?: boolean;
+  localExternal?: boolean;
   externalCss?: boolean;
 }
 
@@ -92,7 +93,7 @@ function zip(entries: Array<[string, string | Buffer]>, compressed = false) {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-function buildDocx({ compressed = false, long = false, dangerous = false, external = false, externalCss = false }: FixtureOptions = {}) {
+function buildDocx({ compressed = false, long = false, dangerous = false, external = false, localExternal = false, externalCss = false }: FixtureOptions = {}) {
   const dangerousText = '<img src=x onerror="window.__officePreviewPwned=1">';
   const paragraphCount = long ? 90 : 6;
   const paragraphs = Array.from({ length: paragraphCount }, (_, index) => {
@@ -123,6 +124,9 @@ function buildDocx({ compressed = false, long = false, dangerous = false, extern
   const documentRelationships = [];
   if (external) {
     documentRelationships.push('<r:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="https://example.com/tracker.png" TargetMode="External"/>');
+  }
+  if (localExternal) {
+    documentRelationships.push('<r:Relationship Id="rIdLocal" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="file:///C:/Users/author/Documents/source.xlsx" TargetMode="External"/>');
   }
   if (externalCss) {
     documentRelationships.push('<r:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>');
@@ -159,7 +163,7 @@ function worksheetRows({ long = false, dangerous = false }: FixtureOptions = {})
 
 function buildXlsx(options: FixtureOptions = {}) {
   const rows = worksheetRows(options);
-  return zip([
+  const entries: Array<[string, string | Buffer]> = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -183,7 +187,14 @@ function buildXlsx(options: FixtureOptions = {}) {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <dimension ref="A1:D${options.long ? 80 : 8}"/><sheetData>${rows}</sheetData>
 </worksheet>`],
-  ]);
+  ];
+  if (options.localExternal) {
+    entries.push(["xl/externalLinks/_rels/externalLink1.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="file:///C:/Users/author/Documents/source.xlsx" TargetMode="External"/>
+</Relationships>`]);
+  }
+  return zip(entries);
 }
 
 function buildXls({ long = false }: FixtureOptions = {}) {
@@ -197,8 +208,8 @@ function buildXls({ long = false }: FixtureOptions = {}) {
   return Buffer.from(XLSX.write(workbook, { bookType: "biff8", type: "buffer" }));
 }
 
-function buildPptx({ external = false }: FixtureOptions = {}) {
-  return zip([
+function buildPptx({ external = false, localExternal = false }: FixtureOptions = {}) {
+  const entries: Array<[string, string | Buffer]> = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -235,6 +246,8 @@ function buildPptx({ external = false }: FixtureOptions = {}) {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
   ${external ? '<恶:Relationship xmlns:恶="http://schemas.openxmlformats.org/package/2006/relationships" Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/tracker.png" TargetMode="Exter&#x6e;al"/>' : ""}
+  ${localExternal ? '<Relationship Id="rIdLocal" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="file:///C:/Users/author/Documents/source.xlsx" TargetMode="External"/>' : ""}
+  ${localExternal ? '<Relationship Id="rIdWps" Type="http://www.wps.cn/officeDocument/2018/webExtension" Target="../webExtensions/webExtension1.xml" TargetMode="External"/>' : ""}
 </Relationships>`],
     ["ppt/slideLayouts/slideLayout1.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank">
@@ -261,7 +274,15 @@ function buildPptx({ external = false }: FixtureOptions = {}) {
   <a:fontScheme name="Fixture"><a:majorFont><a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Arial"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>
   <a:fmtScheme name="Fixture"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements>
 </a:theme>`],
-  ]);
+  ];
+  if (localExternal) {
+    entries.push(["ppt/webExtensions/webExtension1.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<wpswe:webExtension xmlns:wpswe="http://www.wps.cn/officeDocument/2018/webExtension">
+  <wpswe:extSource id="dschart" version="1.0"/>
+  <wpswe:properties><wpswe:property key="dschart" value="local-cache"/></wpswe:properties>
+</wpswe:webExtension>`]);
+  }
+  return zip(entries);
 }
 
 export const OFFICE_FIXTURE_MIME = Object.freeze({
