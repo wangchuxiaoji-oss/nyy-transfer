@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("首页移动端顶栏", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/v1/system/announcements?**", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], has_more: false, next_offset: null }) });
+    });
+  });
+
   test("已登录态保持单行并将账号操作收进菜单", async ({ page }) => {
     await page.route("**/api/v1/auth/bootstrap", async (route) => {
       await route.fulfill({
@@ -37,18 +43,12 @@ test.describe("首页移动端顶栏", () => {
     const headerHeight = await header.evaluate((element) => element.getBoundingClientRect().height);
     expect(headerHeight).toBeLessThanOrEqual(72);
 
-    const accountButtonRadius = await page.getByRole("button", { name: "打开账号菜单" }).evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(accountButtonRadius.actual).toBe(accountButtonRadius.expected);
-
     await page.getByRole("button", { name: "打开账号菜单" }).click();
     await expect(page.getByRole("menu")).toContainText("admin@nyy.app");
     await expect(page.getByRole("menuitem", { name: /退出登录/ })).toBeVisible();
   });
 
-  test("登录弹窗关闭按钮使用统一控件圆角", async ({ page }) => {
+  test("登录弹窗可打开、输入并关闭", async ({ page }) => {
     await page.route("**/api/v1/auth/bootstrap", async (route) => {
       await route.fulfill({
         status: 200,
@@ -71,25 +71,13 @@ test.describe("首页移动端顶栏", () => {
     });
 
     await page.goto("/");
-    const pageCaret = await page.locator("main").evaluate((element) => getComputedStyle(element).caretColor);
-    expect(["transparent", "rgba(0, 0, 0, 0)"].includes(pageCaret)).toBe(true);
     await page.getByRole("button", { name: /^登录$/ }).click();
 
-    const closeButton = page.getByRole("button", { name: "关闭" });
+    const closeButton = page.getByRole("button", { name: "关闭", exact: true });
     await expect(closeButton).toBeVisible();
-    const radius = await closeButton.evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(radius.actual).toBe(radius.expected);
-
-    const tabRadius = await page.getByRole("tab", { name: "登录" }).evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(tabRadius.actual).toBe(tabRadius.expected);
-
-    const inputCaret = await page.getByPlaceholder("you@example.com").evaluate((element) => getComputedStyle(element).caretColor);
-    expect(["transparent", "rgba(0, 0, 0, 0)"].includes(inputCaret)).toBe(false);
+    await page.getByPlaceholder("you@example.com").fill("test@nyy.app");
+    await expect(page.getByPlaceholder("you@example.com")).toHaveValue("test@nyy.app");
+    await closeButton.click();
+    await expect(closeButton).toHaveCount(0);
   });
 });

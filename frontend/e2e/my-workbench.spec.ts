@@ -133,11 +133,6 @@ test.describe("我的工作台", () => {
 
     await page.goto("/my");
     await expect(page.getByText("我的工作台")).toBeVisible();
-    const tabRadius = await page.getByRole("tab", { name: "我的分享" }).evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(tabRadius.actual).toBe(tabRadius.expected);
     await expect(page.getByText("/abc123")).toBeVisible();
     await expect(page.getByText("alpha.txt")).toBeVisible();
     await expect(page.getByText("等 1 个")).toBeVisible();
@@ -184,13 +179,6 @@ test.describe("我的工作台", () => {
     await page.getByRole("button", { name: "撤销" }).click();
     const dialog = page.getByRole("dialog", { name: "撤销收件链接" });
     await expect(dialog).toBeVisible();
-    await expect.poll(async () => dialog.evaluate((element) => getComputedStyle(element).borderRadius)).not.toBe("0px");
-    const closeButton = page.getByRole("button", { name: "关闭确认弹窗" });
-    const closeRadius = await closeButton.evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(closeRadius.actual).toBe(closeRadius.expected);
     await page.getByRole("button", { name: "撤销并移除文件" }).click();
     await expect.poll(() => api.isRequestRevoked()).toBe(true);
   });

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { mockDownloadConfig } from "./test-helpers";
 
 const CODE = "admin-preview-e2e";
 
@@ -60,13 +61,7 @@ test("后台分享卡片提供新标签完整查看入口", async ({ page }) => 
       body: JSON.stringify({ guest_max_file_bytes: 1, guest_max_active_shares: 1, guest_ttl_hours: 1, user_max_file_bytes: 1, user_max_active_shares: 1, user_ttl_hours: 1 }),
     });
   });
-  await page.route("**/api/v1/admin/config/download", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ smart_download_enabled: true, target_video: true, target_audio: true, target_pdf: true, target_image: true, target_other: true, filesystem_access_enabled: true, leave_warning_enabled: true }),
-    });
-  });
+  await mockDownloadConfig(page, "**/api/v1/admin/config/download");
   await page.route("**/api/v1/admin/shares?**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -130,13 +125,7 @@ test("管理员预览复用完整分享页并绕过公开限制", async ({ page 
     contentMethod = route.request().method();
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(content) });
   });
-  await page.route("**/api/v1/shares/download-config", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ smart_download_enabled: true, target_video: true, target_audio: true, target_pdf: true, target_image: true, target_other: true, filesystem_access_enabled: true, leave_warning_enabled: true }),
-    });
-  });
+  await mockDownloadConfig(page);
   await page.route("https://example.com/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "image/png", body: "preview" });
   });

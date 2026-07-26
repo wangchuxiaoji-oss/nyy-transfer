@@ -201,6 +201,14 @@ export function HomeClient() {
   }, []);
 
   useEffect(() => {
+    const handleModeRequest = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === "receive") setMode("receive");
+    };
+    window.addEventListener("nyy:home-mode", handleModeRequest);
+    return () => window.removeEventListener("nyy:home-mode", handleModeRequest);
+  }, []);
+
+  useEffect(() => {
     if (!debugEnabled) return;
     debugStartPerfRef.current = performance.now();
     setDebugEntries([]);
@@ -387,8 +395,8 @@ export function HomeClient() {
       <SystemAnnouncementCenter />
 
       {/* 主操作面板（紧跟 Hero 之后，用户滚动即可触达） */}
-      <section id="upload-section" className="glass-card mt-8 w-full max-w-3xl scroll-mt-[calc(env(safe-area-inset-top)+5rem)]" aria-label="文件操作">
-        <h2 className="sr-only">传文件或收文件</h2>
+      <section id="upload-section" className="glass-card mt-8 w-full max-w-3xl scroll-mt-[calc(env(safe-area-inset-top)+5rem)] xl:max-w-4xl" aria-label="文件操作">
+        <h2 className="sr-only">交付文件或创建收件链接</h2>
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
           <div className="retro-segmented relative grid grid-cols-2 gap-1" role="tablist" aria-label="选择文件操作类型">
             <div
@@ -402,7 +410,7 @@ export function HomeClient() {
               role="tab"
               aria-selected={mode === "send"}
               aria-controls="send-panel"
-              aria-label="传文件 - 生成分享链接"
+              aria-label="传文件 - 生成交付链接"
               onClick={() => setMode("send")}
               className="retro-segment-button relative z-10 min-h-[56px] px-4 py-2.5"
             >
@@ -412,7 +420,7 @@ export function HomeClient() {
                 </span>
                 传文件
               </span>
-              <span className={`type-caption mt-0.5 hidden sm:block transition-colors duration-200 ${mode === "send" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}>生成分享链接</span>
+              <span className={`type-caption mt-0.5 hidden sm:block transition-colors duration-200 ${mode === "send" ? "text-white/80" : "text-gray-400 dark:text-gray-500"}`}>生成交付链接</span>
             </button>
             <button
               id="receive-tab"

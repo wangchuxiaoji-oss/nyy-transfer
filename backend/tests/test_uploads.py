@@ -12,9 +12,11 @@ from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
+from app.api.v1.uploads import _validate_share_expiry, _validate_upload_file_size
 from app.main import create_app
 from app.models.share import DownloadLog, DownloadSession, Share, ShareFile, ShareLogicalFile
 from app.models.system import EmailDelivery, FileRequest, FileRequestFile
@@ -81,6 +83,38 @@ def _mock_init_result() -> UploadInitResult:
         secret_key="SK_TEST",
         session_token="STS_TEST",
     )
+
+
+def test_upload_file_size_limits_follow_identity():
+    gib = 1024 ** 3
+
+    _validate_upload_file_size(2 * gib, user=None)
+    _validate_upload_file_size(10 * gib, user=None, request_code="request-code")
+
+    with pytest.raises(HTTPException) as guest_error:
+        _validate_upload_file_size(2 * gib + 1, user=None)
+    assert guest_error.value.status_code == 403
+    assert "游客单文件上限为 2GB" in guest_error.value.detail
+
+    with pytest.raises(HTTPException) as request_error:
+        _validate_upload_file_size(10 * gib + 1, user=None, request_code="request-code")
+    assert request_error.value.status_code == 400
+    assert "10GB" in request_error.value.detail
+
+
+def test_share_expiry_limits_follow_identity():
+    _validate_share_expiry(72, is_user=False)
+    _validate_share_expiry(720, is_user=True)
+
+    with pytest.raises(HTTPException) as guest_error:
+        _validate_share_expiry(73, is_user=False)
+    assert guest_error.value.status_code == 400
+    assert guest_error.value.detail == "游客分享有效期最长为 3 天"
+
+    with pytest.raises(HTTPException) as user_error:
+        _validate_share_expiry(721, is_user=True)
+    assert user_error.value.status_code == 400
+    assert user_error.value.detail == "登录用户分享有效期最长为 30 天"
 
 
 @pytest.mark.asyncio

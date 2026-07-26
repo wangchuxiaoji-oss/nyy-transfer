@@ -55,6 +55,37 @@ test("重要更新每个 revision 在当前设备首次提示一次", async ({ p
   await expect(dialog).toBeVisible();
 });
 
+test("重要更新在 4K 和紧凑高度下只允许正文纵向滚动", async ({ page }) => {
+  const longItem = {
+    ...announcement(),
+    title: "这是一条用于验证高分辨率与浏览器缩放的较长系统更新标题",
+    summary: "弹窗外壳应保持稳定，装饰、标题和底部操作不参与滚动；只有中间正文区域可以通过滚轮、触控或键盘浏览。",
+    details: Array.from({ length: 12 }, (_, index) => `第 ${index + 1} 项更新说明用于验证长内容不会撑出横向滚动区域，同时保持正文清晰可读。`),
+  };
+  await routeGuestHome(page);
+  await page.route("**/api/v1/system/announcements?**", async (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ items: [longItem], has_more: false, next_offset: null }),
+  }));
+  await page.addInitScript(() => localStorage.removeItem("nyy_system_notice_seen_v1"));
+
+  await page.setViewportSize({ width: 3840, height: 2160 });
+  await page.goto("/");
+  const dialog = page.getByTestId("system-announcement-dialog");
+  const scrollRegion = page.getByTestId("system-announcement-scroll-region");
+  await expect(dialog).toBeVisible();
+
+  for (const viewport of [{ width: 3840, height: 2160 }, { width: 960, height: 540 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(async () => scrollRegion.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    await expect(dialog.getByRole("button", { name: "我知道了" })).toBeVisible();
+  }
+
+  const compactMetrics = await scrollRegion.evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
+  expect(compactMetrics.scrollHeight).toBeGreaterThan(compactMetrics.clientHeight);
+});
+
 test("普通更新使用非阻塞电报卡，更新页保留完整历史", async ({ page }) => {
   await routeGuestHome(page);
   await page.route("**/api/v1/system/announcements?**", async (route) => route.fulfill({

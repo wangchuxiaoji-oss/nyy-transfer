@@ -72,8 +72,8 @@ class UploadCommitRequest(BaseModel):
     empty_dirs: list[str] = Field(default_factory=list, max_length=500)
     # 可选：提取码（4位数字）
     password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
-    # 可选：过期时间（小时），0 = 不过期
-    expires_hours: int = Field(default=0, ge=0, le=720)  # max 30 days
+    # 分享必须设置有效期；游客与登录用户的实际上限在提交接口按身份校验。
+    expires_hours: int = Field(default=1, ge=1, le=720)
     # 可选：最大下载次数，0 = 不限制
     max_downloads: int = Field(default=0, ge=0, le=200)
     # 可选：邮件收件人，最多 5 个

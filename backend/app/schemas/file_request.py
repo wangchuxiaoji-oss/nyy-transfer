@@ -12,7 +12,7 @@ class FileRequestCreate(BaseModel):
     password: str = Field(default="", max_length=4, pattern=r"^(|[0-9]{4})$")
     expires_hours: int = Field(default=168, ge=1, le=720)
     max_files: int = Field(default=20, ge=1, le=100)
-    max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
+    max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, le=10 * 1024 * 1024 * 1024)
 
 
 class FileRequestCreateResponse(BaseModel):
@@ -40,7 +40,7 @@ class FileRequestEdit(BaseModel):
     password: str | None = Field(default=None, max_length=4, pattern=r"^(|[0-9]{4})$")
     extend_hours: int | None = Field(default=None, ge=1, le=720)
     max_files: int | None = Field(default=None, ge=1, le=100)
-    max_bytes: int | None = Field(default=None, ge=1, le=1024 * 1024 * 1024)
+    max_bytes: int | None = Field(default=None, ge=1, le=10 * 1024 * 1024 * 1024)
 
 
 class FileRequestCommitFile(BaseModel):

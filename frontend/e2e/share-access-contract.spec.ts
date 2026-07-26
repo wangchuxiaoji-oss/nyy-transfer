@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { mockDownloadConfig } from "./test-helpers";
 
 const CODE = "access-contract-e2e";
 
@@ -22,7 +23,7 @@ test("公开分享分层埋点且用户取链优先 POST 并携带幂等 ID", as
     requestIds.push(body.request_id);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [{ file_name: "contract.txt", file_size: 12, content_type: "text/plain", is_chunked: false, download_url: "https://example.com/contract.txt", chunks: [], media_metadata: null }], empty_dirs: [], expires_in: 3600 }) });
   });
-  await page.route("**/api/v1/shares/download-config", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ smart_download_enabled: true, target_video: true, target_audio: true, target_pdf: true, target_image: true, target_other: true, filesystem_access_enabled: true, leave_warning_enabled: true }) }));
+  await mockDownloadConfig(page);
   await page.route("https://example.com/**", async (route) => route.fulfill({ status: 200, contentType: "text/plain", body: "contract" }));
 
   await page.goto(`/${CODE}`);

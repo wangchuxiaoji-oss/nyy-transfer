@@ -32,7 +32,7 @@ import {
 } from "@/lib/upload-state";
 
 const MAX_RETRIES = 3;
-const MAX_FILE_SIZE_GUEST = 1024 * 1024 * 1024; // 游客单文件上限
+const MAX_FILE_SIZE_GUEST = 2 * 1024 * 1024 * 1024; // 游客单文件上限
 const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 登录用户单文件硬限制
 const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
 const MAX_FILE_COUNT = 500;
@@ -1597,8 +1597,9 @@ export function FileUploader({
                   { value: 72, label: "3天" },
                   { value: 168, label: "7天" },
                   { value: 360, label: "15天" },
+                  { value: 720, label: "30天" },
                 ].map((opt) => {
-                  const locked = !loggedIn && opt.value !== 1;
+                  const locked = !loggedIn && opt.value > 72;
                   return (
                     <button
                       key={opt.value}

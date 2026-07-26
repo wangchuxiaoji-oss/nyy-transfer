@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, useScroll, useTransform, useInView, AnimatePresence } from "framer-motion";
-import { ArrowRight, Clock3, FileCheck2, FolderInput, KeyRound, Link2, ScanLine, ShieldCheck, ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown, Clock3, FileCheck2, FolderInput, Link2, ScanLine, ShieldCheck } from "lucide-react";
 import { BRAND_NAME } from "@/lib/copy";
 import { HOME_FAQS } from "@/lib/home-faqs";
 
@@ -12,16 +12,16 @@ export { HOME_FAQS };
 
 /* ─── 步骤数据 ─── */
 const steps = [
-  { number: "01", title: "拖进来", text: "选择单个文件、多个文件或完整文件夹。上传前先确认额度、有效期、提取码与下载次数。", Icon: FolderInput },
-  { number: "02", title: "浏览器直传", text: "浏览器向存储服务传输文件；大文件按能力分段处理，页面保留进度与失败重试。", Icon: ScanLine },
-  { number: "03", title: "链接即走", text: "上传确认后生成短链接与二维码。复制给对方，对方无需安装应用即可打开。", Icon: Link2 },
+  { number: "01", title: "选好要交的文件", text: "选择单个文件、多个文件或完整文件夹，再确认有效期、提取码和下载次数。", Icon: FolderInput },
+  { number: "02", title: "上传并生成链接", text: "浏览器直接上传文件，页面显示进度；大文件按支持能力分段处理并保留失败重试。", Icon: ScanLine },
+  { number: "03", title: "发给对方领取", text: "复制链接或二维码发给对方。接收者无需安装应用，也不必先注册账号。", Icon: Link2 },
 ];
 
 /* ─── 统计数据 ─── */
 const stats = [
-  { value: 1, suffix: "GB", label: "游客单文件上限" },
-  { value: 1, suffix: "小时", label: "游客有效期" },
-  { value: 15, suffix: "天", label: "登录可选最长有效期" },
+  { value: 2, suffix: "GB", label: "游客 24 小时额度" },
+  { value: 3, suffix: "天", label: "游客最长分享" },
+  { value: 50, suffix: "GB", label: "用户 30 天额度" },
 ];
 
 const particles = Array.from({ length: 18 }, (_, index) => ({
@@ -64,7 +64,15 @@ function useCountUp(target: number, inView: boolean, duration = 1800) {
 /** 渐变球体背景 */
 function GradientOrbs() {
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+    <div
+      data-testid="hero-atmosphere"
+      className="pointer-events-none absolute inset-y-0 -inset-x-[10vw] overflow-hidden"
+      style={{
+        WebkitMaskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
+        maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, transparent 100%)",
+      }}
+      aria-hidden="true"
+    >
       {/* 橙色主球 */}
       <div
         className="absolute -left-32 -top-32 h-[500px] w-[500px] rounded-full opacity-60"
@@ -135,50 +143,17 @@ function CharReveal({ text, className, delay = 0 }: { text: string; className?: 
   );
 }
 
-/** 滚动进度条（固定在页面右侧） */
-function ScrollProgress() {
-  const { scrollYProgress } = useScroll();
-  const scaleY = useTransform(scrollYProgress, [0, 1], [0, 1]);
-  const dotBottom = useTransform(scrollYProgress, [0, 1], ["0%", "calc(100% - 0.625rem)"]);
-
-  return (
-    <div className="fixed right-4 top-1/2 z-50 hidden -translate-y-1/2 lg:block" aria-hidden="true">
-      <div className="relative h-32 w-1.5 rounded-full bg-black/10 dark:bg-white/10">
-        <motion.div
-          className="absolute inset-x-0 bottom-0 rounded-full bg-gradient-to-t from-orange-600 via-orange-500 to-orange-400 progress-glow"
-          style={{ scaleY, transformOrigin: "bottom" }}
-        />
-        {/* 顶部光点 */}
-        <motion.div
-          className="absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(255,138,61,0.8)]"
-          style={{ bottom: dotBottom, opacity: scaleY }}
-        />
-      </div>
-    </div>
-  );
-}
-
 /** Hero 区域 */
 function HeroSection() {
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start start", "end start"],
-  });
-
-  const opacity = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 0.8], [1, 0.92]);
-  const y = useTransform(scrollYProgress, [0, 1], [0, 100]);
-
   return (
     <motion.section
-      ref={ref}
-      className="relative flex min-h-[100dvh] w-full flex-col items-center justify-center overflow-hidden"
+      data-testid="home-hero"
+      className="relative isolate flex w-full flex-col items-center justify-center overflow-x-clip"
       aria-labelledby="hero-title"
     >
       <GradientOrbs />
 
-      <motion.div className="relative z-10 w-full max-w-5xl px-4 py-24 text-center sm:px-6" style={{ y, opacity, scale }}>
+      <motion.div className="relative z-10 w-full max-w-5xl px-4 pb-12 pt-28 text-center sm:px-6 sm:pb-14 sm:pt-32 lg:pb-10 lg:pt-28 2xl:pb-12 2xl:pt-32">
         {/* 品牌标记 */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -188,7 +163,7 @@ function HeroSection() {
         >
           <span className="retro-chip">
             <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-orange-500" style={{ animation: "pulse-ring 2s ease-in-out infinite" }} />
-            无需注册 · 即传即走
+            临时文件交付 · 也能向外收件
           </span>
         </motion.div>
 
@@ -200,12 +175,12 @@ function HeroSection() {
           transition={{ duration: 0.9, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
           className="retro-title text-4xl leading-tight sm:text-6xl lg:text-7xl"
         >
-          <span className="hero-gradient-text hero-title-glow inline-block" data-text="聊天窗口装不下的">
-            聊天窗口装不下的
+          <span className="hero-gradient-text hero-title-glow inline-block" data-text="文件交付">
+            文件交付
           </span>
           <br />
           <span className="mt-2 block">
-            <CharReveal text="交给一个链接" delay={0.8} />
+            <CharReveal text="发一个链接就够了" delay={0.8} />
           </span>
         </motion.h1>
 
@@ -216,45 +191,13 @@ function HeroSection() {
           transition={{ duration: 0.8, delay: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className="retro-text mx-auto mt-6 max-w-xl text-base leading-relaxed sm:text-lg"
         >
-          设计稿、拍摄素材、课程包、项目归档、报表附件。<br className="hidden sm:block" />
-          拿呀²不替代协作工具，只解决「把这一批文件完整交到对方手里」这件事。
+          设计定稿、照片成片、报告附件和外包成果，上传后生成带有效期的领取链接，对方无需注册或安装。<br className="hidden sm:block" />
+          需要收资料时，再创建一条收件链接。
         </motion.p>
 
-        {/* CTA 按钮 */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
-          className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center"
-        >
-          <a href="#upload-section" className="btn-primary min-w-48 text-base">
-            现在传文件
-            <ArrowRight className="h-4 w-4" />
-          </a>
-          <Link href="/how-it-works" className="retro-btn-secondary min-w-44 text-base">
-            了解工作原理
-          </Link>
-        </motion.div>
+        <p className="retro-muted mt-7 text-xs sm:text-sm">游客免注册 · 2GB / 24小时 · 分享最长3天</p>
       </motion.div>
 
-      {/* 滚动指示器 */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1.2, duration: 0.6 }}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2"
-        aria-hidden="true"
-      >
-        <div className="flex flex-col items-center gap-2">
-          <span className="retro-kicker text-[9px]">向下滚动</span>
-          <div
-            className="h-10 w-6 rounded-full border-2 border-current/30 p-1"
-            style={{ animation: "scroll-bounce 2s ease-in-out infinite" }}
-          >
-            <div className="mx-auto h-2 w-1 rounded-full bg-current/50" />
-          </div>
-        </div>
-      </motion.div>
     </motion.section>
   );
 }
@@ -279,8 +222,8 @@ function StepsSection() {
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         className="text-center"
       >
-        <p className="retro-kicker">从文件到链接</p>
-        <h2 id="steps-title" className="retro-title mt-3 text-2xl leading-tight sm:text-4xl">三步，不把传文件做成一门课</h2>
+        <p className="retro-kicker">从文件到交付</p>
+        <h2 id="steps-title" className="retro-title mt-3 text-2xl leading-tight sm:text-4xl">三步，把文件交到对方手里</h2>
       </motion.div>
 
       <div className="relative mt-14">
@@ -374,10 +317,10 @@ function ScenesSection() {
   const inView = useInView(ref, { once: true, margin: "-80px" });
 
   const scenes = [
-    { title: "临时交付", text: "项目资料不必长期挂在聊天记录里。设置期限和下载次数，交付完成后让链接自然失效。", Icon: Clock3 },
-    { title: "跨设备取件", text: "电脑上传后复制链接或扫码，在手机、平板或另一台电脑上继续访问。", Icon: FileCheck2 },
-    { title: "向外收件", text: "创建收件链接，让客户、同事或同学把文件提交到你的账号，不必互加好友。", Icon: FolderInput },
-    { title: "有门槛地分享", text: "需要时设置四位提取码，并限制链接有效期与下载次数，减少无意扩散。", Icon: KeyRound },
+    { title: "客户交付", text: "把设计定稿、照片成片、报告附件或外包成果放进一个链接，让客户按原文件名和目录领取。", Icon: FileCheck2 },
+    { title: "向外收资料", text: "创建收件链接，让客户、供应商或学员直接提交文件，不必逐个添加好友和催附件。", Icon: FolderInput },
+    { title: "微信中转", text: "文件不适合塞进聊天窗口时，先上传，再把领取链接发进微信。", Icon: Link2 },
+    { title: "跨设备取件", text: "电脑上传后复制链接或扫码，在手机、平板或另一台电脑上继续访问。", Icon: ScanLine },
   ];
 
   return (
@@ -388,8 +331,8 @@ function ScenesSection() {
         transition={{ duration: 0.7 }}
         className="text-center"
       >
-        <p className="retro-kicker">典型场景</p>
-        <h2 id="scenes-title" className="retro-title mt-3 text-2xl sm:text-3xl">一个链接，多种交接方式</h2>
+        <p className="retro-kicker">真实使用场景</p>
+        <h2 id="scenes-title" className="retro-title mt-3 text-2xl sm:text-3xl">文件已经准备好，接下来只差交到对方手里</h2>
       </motion.div>
 
       <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -433,11 +376,11 @@ function SecuritySection() {
         <div className="grid lg:grid-cols-[1fr_0.86fr]">
           <div className="p-7 sm:p-10 lg:p-12">
             <p className="retro-kicker">安全与保留策略</p>
-            <h2 id="security-title" className="retro-title mt-3 text-2xl leading-tight sm:text-3xl">该说清楚的，不藏进小字里</h2>
+            <h2 id="security-title" className="retro-title mt-3 text-2xl leading-tight sm:text-3xl">分享前，规则就摆在明面上</h2>
             <div className="mt-7 space-y-6">
-              <div className="flex gap-4"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">传输有保护，不等于端到端加密</h3><p className="mt-1 text-sm leading-6 retro-muted">网页和接口通过 HTTPS 传输。系统仍需处理上传授权、文件元数据、预览兼容与安全运营信号，因此不要把分享链接当作零知识保险箱。</p></div></div>
-              <div className="flex gap-4"><Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">有效期由发送者选择</h3><p className="mt-1 text-sm leading-6 retro-muted">到期、撤销、封禁或达到下载限制时，公开访问会停止。底层对象按清理流程处理，删除可能不是毫秒级完成。</p></div></div>
-              <div className="flex gap-4"><FileCheck2 className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">重要资料始终保留原件</h3><p className="mt-1 text-sm leading-6 retro-muted">拿呀²是传输与临时分享工具，不是唯一备份。发送方和接收方都应自行确认文件完整性与长期保存位置。</p></div></div>
+              <div className="flex gap-4"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">HTTPS 传输，不等于端到端加密</h3><p className="mt-1 text-sm leading-6 retro-muted">网页与接口通过 HTTPS 传输，但拿呀²不是端到端加密或零知识存储。</p></div></div>
+              <div className="flex gap-4"><Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">失效与清理分开处理</h3><p className="mt-1 text-sm leading-6 retro-muted">分享过期、撤销、封禁或达到下载次数后，公开访问停止，底层对象随后进入清理流程。</p></div></div>
+              <div className="flex gap-4"><FileCheck2 className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" /><div><h3 className="font-semibold retro-text">重要资料始终保留原件</h3><p className="mt-1 text-sm leading-6 retro-muted">拿呀²负责临时传输，不替代长期备份；重要资料始终保留自己的原件。</p></div></div>
             </div>
           </div>
           <div className="relative flex min-h-[320px] items-end overflow-hidden bg-[#2a1520] p-7 text-white sm:p-10 dark:bg-[#110818]">
@@ -462,10 +405,10 @@ function DifferenceSection() {
   const inView = useInView(ref, { once: true, margin: "-80px" });
 
   const items = [
-    ["工具优先", "首页第一屏就是上传与收件，不用先理解产品、选择套餐或创建空间。"],
-    ["目录不打散", "多文件和文件夹按原有路径组织；空目录也尽可能保留，接收方看到的是一份结构化交付。"],
-    ["预览是辅助", "图片、PDF、音视频按浏览器能力提供预览与兼容处理，无法可靠预览时明确引导下载，不伪装成功。"],
-    ["规则可见", "额度、有效期、提取码和下载次数都在创建前展示；安全与数据处理边界也公开说明。"],
+    ["先发再注册", "游客可以直接选择文件。只有需要更高额度、长期管理或创建收件链接时才需要登录。"],
+    ["目录不打散", "多文件和文件夹按原有路径组织，接收者拿到的是一份结构清楚的交付。"],
+    ["发与收分开", "交付文件时生成领取链接；收集资料时生成收件链接，每个入口只处理一件事。"],
+    ["规则提前可见", "剩余额度、有效期、提取码和下载次数都在创建前展示。"],
   ];
 
   return (
@@ -478,8 +421,8 @@ function DifferenceSection() {
           className="lg:sticky lg:top-28"
         >
           <p className="retro-kicker">为什么是拿呀²</p>
-          <h2 id="diff-title" className="retro-title mt-3 text-3xl leading-tight">不做网盘首页，先把发送按钮做好。</h2>
-          <p className="mt-4 text-sm leading-7 retro-text">差异不是堆功能，而是顺序：先选择文件、先生成链接、先让对方拿到，再谈账号和管理。</p>
+          <h2 id="diff-title" className="retro-title mt-3 text-3xl leading-tight">不是网盘首页，是一条更短的交付路径</h2>
+          <p className="mt-4 text-sm leading-7 retro-text">先选择文件、生成链接、让对方领取；需要收资料时，再换成一条收件链接。</p>
         </motion.div>
         <div className="divide-y divide-black/10 overflow-hidden rounded-[2rem] border border-black/10 bg-white/50 px-5 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.04] sm:px-8">
           {items.map(([title, text], index) => (
@@ -599,15 +542,22 @@ function CtaSection() {
         <div className="absolute inset-0 [background:radial-gradient(circle_at_12%_15%,rgba(255,138,61,.25),transparent_30%),radial-gradient(circle_at_88%_82%,rgba(0,212,255,.15),transparent_32%)]" />
         <div className="relative">
           <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-orange-200/60">Ready when the file is</p>
-          <h2 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold leading-tight tracking-tight sm:text-5xl hero-title-glow">文件已经准备好，就别再为怎么发多开一个会。</h2>
-          <p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-white/60">回到上面的工具，选择文件，检查有效期，然后生成链接。没有安装包，也没有必须先完成的注册流程。</p>
+          <h2 className="mx-auto mt-4 max-w-2xl text-3xl font-semibold leading-tight tracking-tight sm:text-5xl hero-title-glow">文件准备好了，就发一条链接。</h2>
+          <p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-white/60">先选文件，再决定有效期和访问方式。需要收资料时，切到“收文件”创建入口。</p>
           <a
             href="#upload-section"
             className="btn-primary mt-8 inline-flex min-w-44 items-center gap-2"
             style={{ animation: "cta-glow-breathe 3s ease-in-out infinite" }}
           >
-            现在传文件 <ArrowRight className="h-4 w-4" />
+            选择文件发送 <ArrowRight className="h-4 w-4" />
           </a>
+          <Link
+            href="/?mode=receive#upload-section"
+            onClick={() => window.dispatchEvent(new CustomEvent("nyy:home-mode", { detail: "receive" }))}
+            className="retro-btn-secondary ml-0 mt-3 inline-flex min-w-44 items-center justify-center sm:ml-3 sm:mt-8"
+          >
+            创建收件链接
+          </Link>
         </div>
       </motion.div>
     </section>
@@ -636,7 +586,6 @@ function Footer() {
 export function HomeHero() {
   return (
     <div className="home-hero relative -mx-4 w-[calc(100%+2rem)] max-w-none">
-      <ScrollProgress />
       <HeroSection />
     </div>
   );

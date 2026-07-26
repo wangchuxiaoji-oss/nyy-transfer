@@ -51,13 +51,14 @@ class Settings(BaseSettings):
     short_code_length: int = 6
 
     # 上传 / 配额
-    guest_max_file_bytes: int = 200 * 1024 * 1024
-    guest_max_file_size: int = 1024 * 1024 * 1024  # 单文件上限 1 GiB
-    guest_max_active_shares: int = 2
+    guest_max_file_bytes: int = 2 * 1024 * 1024 * 1024
+    guest_max_file_size: int = 2 * 1024 * 1024 * 1024
+    guest_max_active_shares: int = 5
     guest_max_files_per_share: int = 10
     guest_ttl_hours: int = 24
-    user_max_file_bytes: int = 1024 * 1024 * 1024
-    user_max_active_shares: int = 20
+    user_max_file_bytes: int = 50 * 1024 * 1024 * 1024
+    user_max_file_size: int = 10 * 1024 * 1024 * 1024
+    user_max_active_shares: int = 30
     user_max_files_per_share: int = 50
     # 上传重试
     upload_max_retries: int = 3

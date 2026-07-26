@@ -76,6 +76,45 @@ def _active_share_limit_message(active_count: int, max_shares: int) -> str:
     return f"活跃分享数量已达上限（{active_count}/{max_shares}），请先撤销已有分享"
 
 
+def _format_gib(value: int) -> str:
+    return f"{value / (1024 ** 3):g}GB"
+
+
+def _validate_upload_file_size(
+    file_size: int,
+    *,
+    user: User | None,
+    request_code: str = "",
+) -> None:
+    settings = get_settings()
+    max_file_size = (
+        settings.user_max_file_size
+        if user or request_code
+        else settings.guest_max_file_size
+    )
+    if file_size <= max_file_size:
+        return
+    if not user and not request_code:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"游客单文件上限为 {_format_gib(max_file_size)}，登录后可上传更大文件",
+        )
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        f"单文件大小超过 {_format_gib(max_file_size)} 上限",
+    )
+
+
+def _validate_share_expiry(expires_hours: int, *, is_user: bool) -> None:
+    max_expires_hours = 30 * 24 if is_user else 3 * 24
+    if expires_hours > max_expires_hours:
+        role = "登录用户" if is_user else "游客"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{role}分享有效期最长为 {max_expires_hours // 24} 天",
+        )
+
+
 def _share_logical_file_count(share) -> int:
     logical_files = share.__dict__.get("logical_files")
     if logical_files is not None:
@@ -227,13 +266,15 @@ async def upload_init(
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
-    # --- 大文件权限检查：>1GB 需要登录 ---
-    _ONE_GB = 1024 * 1024 * 1024
-    is_large_file = body.logical_file_size > _ONE_GB or body.file_size > _ONE_GB
-    if is_large_file and not user:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "上传超过 1GB 的文件需要登录")
+    logical_file_size = body.logical_file_size or body.file_size
+    _validate_upload_file_size(
+        logical_file_size,
+        user=user,
+        request_code=body.request_code,
+    )
 
     # 单个 chunk 不能超过 1GB（TOS 限制）
+    _ONE_GB = 1024 * 1024 * 1024
     if body.file_size > _ONE_GB:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "单个分片不能超过 1GB")
 
@@ -384,10 +425,14 @@ async def multipart_init(
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
-    # 大文件权限：>1GB 需登录
+    _validate_upload_file_size(
+        body.file_size,
+        user=user,
+        request_code=body.request_code,
+    )
+
+    # TOS 在超过 1GB 时切换到 large file 模式。
     is_large_file = body.file_size > _LARGE_FILE_SIZE
-    if is_large_file and not user:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "上传超过 1GB 的文件需要登录")
 
     # 配额检查
     redis = request.app.state.redis
@@ -670,6 +715,8 @@ async def upload_commit(
         guest_id = _get_guest_id(request, ip)
     user_id = file_infos[0].get("user_id") if file_infos else (str(user.id) if user else None)
     total_bytes = sum(f["file_size"] for f in file_infos)
+    if not body.retention_coupon_id:
+        _validate_share_expiry(body.expires_hours, is_user=bool(user_id))
     if body.retention_coupon_id and (
         not user or not user_id or str(user.id) != str(user_id)
     ):

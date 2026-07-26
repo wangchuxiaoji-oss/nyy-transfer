@@ -12,6 +12,8 @@ interface FileRequestCreatorProps {
   embedded?: boolean;
 }
 
+const MAX_REQUEST_BYTES = 10 * 1024 * 1024 * 1024;
+
 export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }: FileRequestCreatorProps) {
   const idPrefix = useId();
   const [title, setTitle] = useState("给我传文件");
@@ -36,10 +38,14 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
       setError("访问码需要 4 位数字");
       return;
     }
+    const maxBytes = Math.round(Number(maxBytesValue) * (maxBytesUnit === "GB" ? 1024 * 1024 * 1024 : 1024 * 1024));
+    if (!Number.isFinite(maxBytes) || maxBytes < 1024 * 1024 || maxBytes > MAX_REQUEST_BYTES) {
+      setError("收件总容量需在 1MB 到 10GB 之间");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const maxBytes = Math.round(Number(maxBytesValue) * (maxBytesUnit === "GB" ? 1024 * 1024 * 1024 : 1024 * 1024));
       const res = await createFileRequest({
         title,
         password,
@@ -129,7 +135,7 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
                 <label className="block">
                   <span className="type-label retro-text">总容量上限</span>
                   <div className="retro-input mt-1 flex min-h-[44px] overflow-hidden p-0 focus-within:border-nyy-600">
-                    <input type="number" min={1} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
+                    <input type="number" min={1} max={maxBytesUnit === "GB" ? 10 : 10240} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
                       className="type-body-sm min-h-[44px] min-w-0 flex-1 bg-transparent px-3 outline-none" />
                     <select value={maxBytesUnit} onChange={(e) => setMaxBytesUnit(e.target.value as "MB" | "GB")}
                       className="type-caption border-l border-white/10 bg-transparent px-2 retro-text outline-none">

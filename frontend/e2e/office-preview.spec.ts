@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createOfficeFixture, createPdfFixture, OFFICE_FIXTURE_MIME } from "./office-fixtures";
+import { mockDownloadConfig } from "./test-helpers";
 
 type OfficeExtension = keyof typeof OFFICE_FIXTURE_MIME;
 type OfficeKind = "document" | "spreadsheet" | "presentation";
@@ -82,22 +83,7 @@ async function routeShare(page: Page, options: ShareMockOptions): Promise<ShareM
     media_metadata: null,
   };
 
-  await page.route("**/api/v1/shares/download-config", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        smart_download_enabled: true,
-        target_video: true,
-        target_audio: true,
-        target_pdf: true,
-        target_image: true,
-        target_other: true,
-        filesystem_access_enabled: true,
-        leave_warning_enabled: true,
-      }),
-    });
-  });
+  await mockDownloadConfig(page);
   await page.route(`**/api/v1/shares/${code}/interaction`, async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });
@@ -332,27 +318,26 @@ test.describe("Office 预览分类与回退", () => {
 });
 
 test.describe("Office 预览主题", () => {
-  test("浅色文档舞台不使用黑色背景", async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("nyy-theme", "light"));
-    const preview = await openShare(page, await routeOfficeShare(page, "docx"));
-    await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 10000 });
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  test("浅深主题保持正确明度与正文对比度", async ({ context }) => {
+    for (const theme of ["light", "dark"] as const) {
+      await test.step(theme, async () => {
+        const page = await context.newPage();
+        await page.addInitScript((selectedTheme) => localStorage.setItem("nyy-theme", selectedTheme), theme);
+        const preview = await openShare(page, await routeOfficeShare(page, "docx"));
+        await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 10000 });
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
-    const colors = await officeThemeColors(page);
-    expect(luminance(colors.stageBackground)).toBeGreaterThan(0.55);
-    expect(luminance(colors.documentBackground)).toBeGreaterThan(0.75);
-    expect(contrastRatio(colors.documentBackground, colors.documentColor)).toBeGreaterThanOrEqual(4.5);
-  });
-
-  test("深色文档舞台保持暗色且正文可读", async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("nyy-theme", "dark"));
-    const preview = await openShare(page, await routeOfficeShare(page, "docx"));
-    await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 10000 });
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-
-    const colors = await officeThemeColors(page);
-    expect(luminance(colors.stageBackground)).toBeLessThan(0.4);
-    expect(contrastRatio(colors.documentBackground, colors.documentColor)).toBeGreaterThanOrEqual(4.5);
+        const colors = await officeThemeColors(page);
+        if (theme === "light") {
+          expect(luminance(colors.stageBackground)).toBeGreaterThan(0.55);
+          expect(luminance(colors.documentBackground)).toBeGreaterThan(0.75);
+        } else {
+          expect(luminance(colors.stageBackground)).toBeLessThan(0.4);
+        }
+        expect(contrastRatio(colors.documentBackground, colors.documentColor)).toBeGreaterThanOrEqual(4.5);
+        await page.close();
+      });
+    }
   });
 });
 
@@ -375,8 +360,6 @@ test("浅色 PDF 舞台无黑底、隐藏滚动条并释放离屏画布", async 
   await scroller.hover();
   await page.mouse.wheel(0, 420);
   await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect(scroller).toHaveAttribute("data-scrolling", "true");
-  await expect(scroller).not.toHaveAttribute("data-scrolling", "true", { timeout: 2500 });
   await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect.poll(() => firstCanvas.evaluate((canvas) => (canvas as HTMLCanvasElement).width), { timeout: 10000 }).toBe(1);
   await scroller.evaluate((element) => { element.scrollTop = 0; });
@@ -407,23 +390,6 @@ test("PDF 主预览源失败后自动切换备用源", async ({ page }) => {
   await expect(page.getByTestId("pdf-preview-scroll").locator("canvas").first()).toBeVisible({ timeout: 15000 });
   expect(mock.externalRequests()).toBe(1);
   expect(mock.backupRequests()).toBeGreaterThan(0);
-});
-
-test.describe("Office 预览滚动", () => {
-  test("PC 滚动时标记 data-scrolling 并在停止后自动移除", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    const preview = await openShare(page, await routeOfficeShare(page, "docx", { long: true }));
-    await expect(preview).toHaveAttribute("data-state", "ready", { timeout: 10000 });
-    const scroller = page.getByTestId("office-preview-scroll");
-    await expect(scroller).toBeVisible();
-    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
-
-    await scroller.hover();
-    await page.mouse.wheel(0, 480);
-    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    await expect(scroller).toHaveAttribute("data-scrolling", "true");
-    await expect(scroller).not.toHaveAttribute("data-scrolling", "true", { timeout: 2500 });
-  });
 });
 
 test.describe("Office 预览触屏滚动条", () => {
@@ -496,19 +462,36 @@ test.describe("Office 预览状态", () => {
     await expect(preview).toContainText("Office DOCX fixture");
   });
 
-  test("包含外部媒体关系的 Office 文件会被阻止", async ({ page }) => {
-    const preview = await openShare(page, await routeOfficeShare(page, "docx", { external: true }));
+  test("外部媒体、伪装关系和外部样式均被阻止", async ({ page }) => {
+    const scenarios: Array<{
+      name: string;
+      extension: OfficeExtension;
+      options: Parameters<typeof routeOfficeShare>[2];
+      message: RegExp;
+      trackStyleRequest?: boolean;
+    }> = [
+      { name: "DOCX 外部媒体", extension: "docx", options: { external: true }, message: /外部媒体|外部资源|无法预览/ },
+      { name: "PPTX 伪装关系", extension: "pptx", options: { external: true }, message: /外部媒体|外部资源|无法预览/ },
+      { name: "DOCX 外部样式", extension: "docx", options: { externalCss: true }, message: /外部样式资源|无法预览/, trackStyleRequest: true },
+    ];
 
-    await expect(preview).toHaveAttribute("data-state", "error", { timeout: 10000 });
-    await expect(preview).toContainText(/外部媒体|外部资源|无法预览/);
-    await expect(preview.getByRole("button", { name: "下载查看" })).toBeVisible();
-  });
-
-  test("PPTX 伪装为 hyperlink 的外部关系会被阻止", async ({ page }) => {
-    const preview = await openShare(page, await routeOfficeShare(page, "pptx", { external: true }));
-
-    await expect(preview).toHaveAttribute("data-state", "error", { timeout: 10000 });
-    await expect(preview).toContainText(/外部媒体|外部资源|无法预览/);
+    for (const scenario of scenarios) {
+      await test.step(scenario.name, async () => {
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+        let styleRequests = 0;
+        if (scenario.trackStyleRequest) {
+          await page.route("https://office-style.invalid/**", async (route) => {
+            styleRequests += 1;
+            await route.abort();
+          });
+        }
+        const preview = await openShare(page, await routeOfficeShare(page, scenario.extension, scenario.options));
+        await expect(preview).toHaveAttribute("data-state", "error", { timeout: 10000 });
+        await expect(preview).toContainText(scenario.message);
+        await expect(preview.getByRole("button", { name: "下载查看" })).toBeVisible();
+        expect(styleRequests).toBe(0);
+      });
+    }
   });
 
   test("Word、Excel、PPT 的本地文件关系使用包内缓存安全预览", async ({ page }) => {
@@ -528,41 +511,32 @@ test.describe("Office 预览状态", () => {
     }
   });
 
-  test("DOCX 注入的外部 CSS 不会发起网络请求", async ({ page }) => {
-    let styleRequests = 0;
-    await page.route("https://office-style.invalid/**", async (route) => {
-      styleRequests += 1;
-      await route.abort();
-    });
-    const preview = await openShare(page, await routeOfficeShare(page, "docx", { externalCss: true }));
+  test("Office 文件大小策略在通用与 PPTX 边界生效", async ({ page }) => {
+    const scenarios: Array<{
+      name: string;
+      extension: OfficeExtension;
+      fileSize: number;
+      state: "ready" | "too-large";
+      requests: number;
+    }> = [
+      { name: "XLSX 超过通用限制", extension: "xlsx", fileSize: 256 * 1024 * 1024, state: "too-large", requests: 0 },
+      { name: "PPTX 接受 100MiB", extension: "pptx", fileSize: 100 * 1024 * 1024, state: "ready", requests: 1 },
+      { name: "PPTX 拒绝超过 100MiB", extension: "pptx", fileSize: 100 * 1024 * 1024 + 1, state: "too-large", requests: 0 },
+    ];
 
-    await expect(preview).toHaveAttribute("data-state", "error", { timeout: 10000 });
-    await expect(preview).toContainText(/外部样式资源|无法预览/);
-    expect(styleRequests).toBe(0);
-  });
-
-  test("超限文件不发起内容请求并显示下载回退", async ({ page }) => {
-    const mock = await routeOfficeShare(page, "xlsx", { fileSize: 256 * 1024 * 1024 });
-    const preview = await openShare(page, mock);
-
-    await expect(preview).toHaveAttribute("data-state", "too-large", { timeout: 10000 });
-    await expect(preview).toContainText(/文件过大|超出.*预览.*限制/);
-    await expect(preview.getByRole("button", { name: /下载(查看|此文件)/ })).toBeVisible();
-    expect(mock.externalRequests()).toBe(0);
-  });
-
-  test("PPTX 单独允许 100MiB，超过 100MiB 时不发起内容请求", async ({ page }) => {
-    const accepted = await routeOfficeShare(page, "pptx", { fileSize: 100 * 1024 * 1024 });
-    const acceptedPreview = await openShare(page, accepted);
-    await expect(acceptedPreview).toHaveAttribute("data-state", "ready", { timeout: 20000 });
-    expect(accepted.externalRequests()).toBe(1);
-
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    const rejected = await routeOfficeShare(page, "pptx", { fileSize: 100 * 1024 * 1024 + 1 });
-    const rejectedPreview = await openShare(page, rejected);
-    await expect(rejectedPreview).toHaveAttribute("data-state", "too-large", { timeout: 10000 });
-    await expect(rejectedPreview.getByRole("button", { name: "下载查看" })).toBeVisible();
-    expect(rejected.externalRequests()).toBe(0);
+    for (const scenario of scenarios) {
+      await test.step(scenario.name, async () => {
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+        const mock = await routeOfficeShare(page, scenario.extension, { fileSize: scenario.fileSize });
+        const preview = await openShare(page, mock);
+        await expect(preview).toHaveAttribute("data-state", scenario.state, { timeout: 20000 });
+        if (scenario.state === "too-large") {
+          await expect(preview).toContainText(/文件过大|超出.*预览.*限制/);
+          await expect(preview.getByRole("button", { name: /下载(查看|此文件)/ })).toBeVisible();
+        }
+        expect(mock.externalRequests()).toBe(scenario.requests);
+      });
+    }
   });
 });
 

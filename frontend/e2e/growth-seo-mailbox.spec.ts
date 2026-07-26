@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectNoHorizontalOverflow, mockDownloadConfig } from "./test-helpers";
 
-const quota = { used_bytes: 0, limit_bytes: 10 * 1024 ** 3, remaining_bytes: 10 * 1024 ** 3, ttl_hours: 720 };
+const quota = { used_bytes: 0, limit_bytes: 50 * 1024 ** 3, remaining_bytes: 50 * 1024 ** 3, ttl_hours: 720 };
 const user = { id: "growth-user", email: "growth@nyy.app", plan: "free", is_admin: false, email_verified: true };
 
 async function mockHomeBootstrap(page: Page, loggedIn = false) {
@@ -17,6 +18,11 @@ async function mockHomeBootstrap(page: Page, loggedIn = false) {
       referrals: { qualified: 2, pending: 1 },
     }),
   }));
+  await page.route("**/api/v1/system/announcements?**", async (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ items: [], has_more: false, next_offset: null }),
+  }));
 }
 
 test.describe("增长与公开内容", () => {
@@ -26,19 +32,18 @@ test.describe("增长与公开内容", () => {
     await page.goto("/");
 
     const tool = page.getByRole("region", { name: "文件操作" });
-    const storyHeading = page.getByRole("heading", { name: "三步，不把传文件做成一门课" });
+    const storyHeading = page.getByRole("heading", { name: "三步，把文件交到对方手里" });
     await expect(tool).toBeVisible();
     await expect(storyHeading).toBeVisible();
     const positions = await Promise.all([tool.boundingBox(), storyHeading.boundingBox()]);
     expect(positions[0]?.y || 0).toBeLessThan(positions[1]?.y || 0);
-    const overflow = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+    await expectNoHorizontalOverflow(page);
     await expect.poll(() => page.locator('script[type="application/ld+json"]').evaluateAll((scripts) => scripts.some((script) => script.textContent?.includes("FAQPage")))).toBe(true);
-    const guestLimit = page.getByText("游客单文件上限").locator("..");
-    await guestLimit.scrollIntoViewIfNeeded();
-    await expect(guestLimit).toContainText("1GB");
-    await expect(page.getByText("游客有效期").locator("..")).toContainText("1小时");
-    await expect(page.getByText("登录可选最长有效期").locator("..")).toContainText("15天");
+    const guestQuota = page.getByText("游客 24 小时额度").locator("..");
+    await guestQuota.scrollIntoViewIfNeeded();
+    await expect(guestQuota).toContainText("2GB");
+    await expect(page.getByText("游客最长分享").locator("..")).toContainText("3天");
+    await expect(page.getByText("用户 30 天额度").locator("..")).toContainText("50GB");
   });
 
   test("首页采集 ref_share 与 UTM 并持久化", async ({ page }) => {
@@ -78,7 +83,7 @@ test.describe("增长与公开内容", () => {
       body: JSON.stringify({ code, files: [], empty_dirs: ["待上传/"], total_bytes: 0, created_at: "2026-07-24T00:00:00Z", expires_at: null, download_count: 0, max_downloads: 0, has_password: false }),
     }));
     await page.route(`**/api/v1/shares/${code}/interaction`, async (route) => route.fulfill({ status: 204, body: "" }));
-    await page.route("**/api/v1/shares/download-config", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ smart_download_enabled: true, target_video: true, target_audio: true, target_pdf: true, target_image: true, target_other: true, filesystem_access_enabled: true, leave_warning_enabled: true }) }));
+    await mockDownloadConfig(page);
     let clickBody: Record<string, string> | null = null;
     await page.route("**/api/v1/growth/viral-click", async (route) => {
       clickBody = route.request().postDataJSON();
@@ -219,8 +224,7 @@ test.describe("Admin 邮件工作台", () => {
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("button", { name: "返回列表" })).toBeFocused();
     await expect(drawer.getByText("移动端正文").last()).toBeVisible();
-    const overflow = await drawer.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+    await expectNoHorizontalOverflow(page);
     await page.keyboard.press("Escape");
     await expect(drawer).toHaveCount(0);
     await expect(page.getByRole("button", { name: "打开邮件 移动端邮件" })).toBeFocused();

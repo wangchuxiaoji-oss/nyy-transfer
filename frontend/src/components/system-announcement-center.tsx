@@ -35,7 +35,7 @@ function persistSeenNotices(seen: Set<string>) {
   }
 }
 
-function NoticeDetails({ item }: { item: SystemAnnouncement }) {
+function NoticeDetails({ item, titleId }: { item: SystemAnnouncement; titleId?: string }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -44,16 +44,16 @@ function NoticeDetails({ item }: { item: SystemAnnouncement }) {
         </span>
         <span className="type-caption text-emerald-700 dark:text-emerald-300">{ANNOUNCEMENT_STATE_LABELS[item.state]}</span>
       </div>
-      <h2 className="retro-title mt-4 text-2xl leading-tight sm:text-3xl">{item.title}</h2>
-      <p className="type-body-sm mt-3 leading-7 retro-text">{item.summary}</p>
+      <h2 id={titleId} className="retro-title mt-4 break-words text-2xl leading-tight sm:text-3xl">{item.title}</h2>
+      <p className="type-body-sm mt-3 break-words leading-7 retro-text">{item.summary}</p>
       {item.details.length > 0 && (
         <ol className="mt-5 space-y-3">
           {item.details.map((detail, index) => (
-            <li key={`${item.notice_id}-${index}`} className="grid grid-cols-[1.75rem_1fr] gap-3 type-body-sm leading-6 retro-text">
+            <li key={`${item.notice_id}-${index}`} className="grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)] gap-3 type-body-sm leading-6 retro-text">
               <span className="grid h-7 w-7 place-items-center rounded-full border border-orange-500/20 bg-orange-500/8 font-mono text-[10px] font-bold text-orange-600 dark:text-orange-300">
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <span>{detail}</span>
+              <span className="min-w-0 break-words">{detail}</span>
             </li>
           ))}
         </ol>
@@ -102,23 +102,27 @@ function ImportantNoticeDialog({ item, onAcknowledge }: { item: SystemAnnounceme
   }, [onAcknowledge]);
 
   return (
-    <motion.div className="fixed inset-0 z-[70] flex items-center justify-center px-4 py-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden px-3 py-3 sm:px-6 sm:py-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <button type="button" aria-label="关闭系统更新通知" className="absolute inset-0 cursor-default bg-[#160d08]/55 backdrop-blur-md" onClick={onAcknowledge} />
-      <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="system-notice-title" data-testid="system-announcement-dialog" className="retro-panel-strong relative max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-xl overflow-y-auto p-6 shadow-[0_32px_100px_rgba(73,33,8,0.34)] sm:p-8" initial={{ y: 28, scale: 0.96, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 16, scale: 0.98, opacity: 0 }} transition={{ type: "spring", stiffness: 340, damping: 30 }}>
+      <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="system-notice-title" data-testid="system-announcement-dialog" className="retro-panel-strong relative flex max-h-[min(760px,calc(100dvh-1.5rem))] min-w-0 w-full max-w-xl flex-col overflow-hidden shadow-[0_32px_100px_rgba(73,33,8,0.34)] sm:max-h-[min(760px,calc(100dvh-3rem))]" initial={{ y: 28, scale: 0.96, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 16, scale: 0.98, opacity: 0 }} transition={{ type: "spring", stiffness: 340, damping: 30 }}>
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-300/15 blur-3xl" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-orange-400/18 blur-3xl" />
         <button type="button" onClick={onAcknowledge} aria-label="关闭系统更新通知" className="retro-close-button absolute right-4 top-4 z-10"><X className="h-4 w-4" /></button>
-        <div className="relative">
-          <div className="mb-5 flex items-center gap-3">
+        <div className="relative shrink-0 px-5 pb-4 pr-20 pt-5 sm:px-8 sm:pb-5 sm:pr-24 sm:pt-8">
+          <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 text-white shadow-[0_12px_30px_rgba(234,88,12,.28)]">
               {item.priority === "critical" ? <AlertTriangle className="h-5 w-5" /> : <Radio className="h-5 w-5" />}
             </span>
             <div><p className="retro-kicker">拿呀²有新变化</p><p className="type-caption mt-1 retro-muted">看过后，本设备不会重复提醒</p></div>
           </div>
-          <div id="system-notice-title"><NoticeDetails item={item} /></div>
-          <div className="mt-7 grid gap-2 sm:grid-cols-[1fr_auto]">
-            <Link href="/updates" onClick={onAcknowledge} className="retro-btn-secondary justify-center">查看全部更新 <ArrowRight className="h-4 w-4" /></Link>
-            <button type="button" onClick={onAcknowledge} className="btn-primary justify-center"><Check className="h-4 w-4" />我知道了</button>
+        </div>
+        <div data-testid="system-announcement-scroll-region" tabIndex={0} className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-5 outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange-400/60 sm:px-8 sm:pb-6 [&::-webkit-scrollbar]:hidden">
+          <NoticeDetails item={item} titleId="system-notice-title" />
+        </div>
+        <div className="relative shrink-0 border-t border-black/8 bg-white/45 px-5 py-4 backdrop-blur-xl dark:border-white/10 dark:bg-black/10 sm:px-8 sm:py-5">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Link href="/updates" onClick={onAcknowledge} className="retro-btn-secondary min-w-0 justify-center">查看全部更新 <ArrowRight className="h-4 w-4" /></Link>
+            <button type="button" onClick={onAcknowledge} className="btn-primary min-w-0 justify-center"><Check className="h-4 w-4" />我知道了</button>
           </div>
         </div>
       </motion.div>

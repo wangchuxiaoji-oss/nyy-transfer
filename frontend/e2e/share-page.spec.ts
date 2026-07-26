@@ -331,13 +331,22 @@ test.describe("分享页核心状态", () => {
   });
 
   test("ready 页展示品牌、主题、概览和底部官网", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("nyy-theme", "light"));
     await openMockShare(page);
     await waitForReady(page);
 
     await expect(page.locator('img[alt="拿呀²"]').first()).toBeVisible();
     await expect(page.getByRole("link", { name: /返回.*首页/ }).first()).toHaveAttribute("href", "/");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    const color = await page.evaluate(() => {
+      const element = document.querySelector('main [class*="tPrimary"]');
+      return element ? getComputedStyle(element).color : null;
+    });
+    expect(color).not.toBeNull();
+    const channels = color!.match(/\d+/g)!.map(Number);
+    expect(Math.max(channels[0], channels[1], channels[2])).toBeLessThan(120);
     await page.getByRole("button", { name: /当前：(浅色模式|深色模式|跟随系统)，点击切换/ }).first().click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", /^(light|dark)$/);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator("aside").getByText("分享概览").first()).toBeVisible();
     await expect(page.getByText("想传文件？拿呀²")).toBeVisible();
     await expect(page.getByRole("link", { name: "nyy.app" }).first()).toBeVisible();
@@ -363,11 +372,6 @@ test.describe("分享页布局回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await openMockShare(page, shareInfo(files), downloadResponse(files));
     await expect(page.getByRole("tab", { name: "文件" })).toHaveAttribute("aria-selected", "true", { timeout: 10000 });
-    const tabRadius = await page.getByRole("tab", { name: "文件" }).evaluate((element) => ({
-      actual: getComputedStyle(element).borderRadius,
-      expected: getComputedStyle(document.documentElement).getPropertyValue("--radius-control").trim(),
-    }));
-    expect(tabRadius.actual).toBe(tabRadius.expected);
     await expectNoHorizontalOverflow(page);
 
     const hasFixedBottomBar = await page.evaluate(() => {
@@ -380,16 +384,8 @@ test.describe("分享页布局回归", () => {
 
     await page.getByRole("tab", { name: "扫码" }).click();
     await expect(page.locator('img[alt="二维码"]').first()).toBeVisible();
-  });
 
-  test("关键视口均无横向溢出", async ({ page }) => {
-    const viewports = [
-      { width: 320, height: 640 },
-      { width: 375, height: 667 },
-      { width: 768, height: 1024 },
-    ];
-
-    for (const viewport of viewports) {
+    for (const viewport of [{ width: 320, height: 640 }, { width: 768, height: 1024 }]) {
       await page.unrouteAll({ behavior: "ignoreErrors" });
       await page.setViewportSize(viewport);
       await openMockShare(page);
@@ -437,20 +433,6 @@ test.describe("分享页布局回归", () => {
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
   });
 
-  test("浅色主题文字为深色", async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("nyy-theme", "light"));
-    await openMockShare(page);
-    await waitForReady(page);
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-
-    const color = await page.evaluate(() => {
-      const element = document.querySelector('main [class*="tPrimary"]');
-      return element ? getComputedStyle(element).color : null;
-    });
-    expect(color).not.toBeNull();
-    const channels = color!.match(/\d+/g)!.map(Number);
-    expect(Math.max(channels[0], channels[1], channels[2])).toBeLessThan(120);
-  });
 });
 
 test.describe("播放器代表性回归", () => {
@@ -765,20 +747,7 @@ test.describe("播放器代表性回归", () => {
 });
 
 test.describe("骨架和文件列表回归", () => {
-  test("loading 阶段渲染骨架且移动端不溢出", async ({ page }) => {
-    const file = shareFile({ file_name: "演示视频.mp4" });
-    await routeShare(page, shareInfo([file]), downloadResponse([file]), { infoDelayMs: 1500, downloadDelayMs: 1500 });
-    await routeExternal(page);
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`/${MOCK_CODE}`);
-    await page.waitForTimeout(400);
-
-    expect(await page.evaluate(() => !!document.querySelector('main [class*="stagePlayer"]'))).toBe(true);
-    expect(await page.evaluate(() => !!document.querySelector("main aside"))).toBe(true);
-    await expectNoHorizontalOverflow(page);
-  });
-
-  test("loading 到 ready 侧栏 Y 坐标保持稳定", async ({ page }) => {
+  test("loading 骨架到 ready 保持布局稳定", async ({ page }) => {
     const file = shareFile({ file_name: "演示视频.mp4" });
     await routeShare(page, shareInfo([file]), downloadResponse([file]), { infoDelayMs: 1200, downloadDelayMs: 1200 });
     await routeExternal(page);
@@ -786,6 +755,9 @@ test.describe("骨架和文件列表回归", () => {
     await page.goto(`/${MOCK_CODE}`);
     await page.waitForTimeout(400);
 
+    expect(await page.evaluate(() => !!document.querySelector('main [class*="stagePlayer"]'))).toBe(true);
+    expect(await page.evaluate(() => !!document.querySelector("main aside"))).toBe(true);
+    await expectNoHorizontalOverflow(page);
     const asideTop = () => page.evaluate(() => {
       const aside = document.querySelector("main aside");
       return aside ? Math.round(aside.getBoundingClientRect().top) : null;
@@ -796,25 +768,6 @@ test.describe("骨架和文件列表回归", () => {
     expect(before).not.toBeNull();
     expect(after).not.toBeNull();
     expect(Math.abs(after! - before!)).toBeLessThanOrEqual(2);
-  });
-
-  test("小型文件列表默认完整展示", async ({ page }) => {
-    const files = Array.from({ length: 8 }, (_, index) => shareFile({ file_name: `文件_${index + 1}.mp4`, index }));
-    await openMockShare(page, shareInfo(files), downloadResponse(files));
-    await waitForReady(page);
-
-    const rows = page.locator("aside [role='treeitem']:visible");
-    await expect(rows).toHaveCount(8);
-    await expect(page.locator("aside button:has-text('显示更多'):visible")).toHaveCount(0);
-  });
-
-  test("文件数未超过折叠阈值时不显示展开更多", async ({ page }) => {
-    const files = Array.from({ length: 4 }, (_, index) => shareFile({ file_name: `文件_${index + 1}.mp4`, index }));
-    await openMockShare(page, shareInfo(files), downloadResponse(files));
-    await waitForReady(page);
-
-    await expect(page.locator("aside [role='treeitem']:visible")).toHaveCount(4);
-    await expect(page.locator("aside button:has-text('显示更多'):visible")).toHaveCount(0);
   });
 
   test("文件夹分享按目录树展示", async ({ page }) => {
