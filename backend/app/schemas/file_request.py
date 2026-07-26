@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class FileRequestCreate(BaseModel):
     title: str = Field(default="文件请求", min_length=1, max_length=255)
     password: str = Field(default="", max_length=4, pattern=r"^(|[0-9]{4})$")
-    expires_hours: int = Field(default=168, ge=1, le=720)
+    expires_hours: int = Field(default=168, ge=1, le=2160)
     max_files: int = Field(default=20, ge=1, le=100)
     max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, le=10 * 1024 * 1024 * 1024)
 
@@ -27,6 +27,7 @@ class FileRequestInfoResponse(BaseModel):
     expires_at: datetime | None
     max_files: int
     max_bytes: int
+    max_file_bytes: int
     received_files: int
     received_bytes: int
 
@@ -38,7 +39,7 @@ class FileRequestVerify(BaseModel):
 class FileRequestEdit(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     password: str | None = Field(default=None, max_length=4, pattern=r"^(|[0-9]{4})$")
-    extend_hours: int | None = Field(default=None, ge=1, le=720)
+    extend_hours: int | None = Field(default=None, ge=1, le=2160)
     max_files: int | None = Field(default=None, ge=1, le=100)
     max_bytes: int | None = Field(default=None, ge=1, le=10 * 1024 * 1024 * 1024)
 
@@ -49,6 +50,7 @@ class FileRequestCommitFile(BaseModel):
 
 
 class FileRequestCommit(BaseModel):
+    upload_batch_id: str = Field(default="", max_length=64)
     files: list[FileRequestCommitFile] = Field(..., min_length=1, max_length=100)
     password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 
@@ -80,6 +82,9 @@ class FileRequestInboxGroup(BaseModel):
     total_bytes: int
     max_files: int
     max_bytes: int
+    policy_max_files: int
+    policy_max_bytes: int
+    retention_options_hours: list[int]
     has_password: bool
     revoked: bool
     files: list[FileRequestFileItem] = Field(default_factory=list)

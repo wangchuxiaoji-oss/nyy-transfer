@@ -177,6 +177,10 @@ class FileRequest(Base, TimestampMixin):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     max_files: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     max_bytes: Mapped[int] = mapped_column(BigInteger, default=1024 * 1024 * 1024, nullable=False)
+    max_file_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=10 * 1024 * 1024 * 1024, server_default=str(10 * 1024 * 1024 * 1024), nullable=False
+    )
+    policy_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -197,6 +201,32 @@ class FileRequestFile(Base, TimestampMixin):
     tos_uri: Mapped[str] = mapped_column(String(512), nullable=False)
     uploader_ip: Mapped[str | None] = mapped_column(INET)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class FileRequestUpload(Base, TimestampMixin):
+    """收件上传批次与配额结算状态。"""
+
+    __tablename__ = "file_request_uploads"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("file_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    upload_batch_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    quota_reservation_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    quota_batch_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    quota_legacy_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
+    quota_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("request_id", "upload_batch_id", name="uq_file_request_upload_batch"),
+    )
 
 
 class EmailDelivery(Base, TimestampMixin):

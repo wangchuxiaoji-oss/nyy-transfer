@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class UploadInitRequest(BaseModel):
@@ -21,9 +21,18 @@ class UploadInitRequest(BaseModel):
     chunk_total: int = Field(default=1, ge=1, le=50)  # 10GB / 512MB ≈ 20, 留余量
     logical_file_id: str = Field(default="", max_length=36)  # 前端生成的 UUID
     logical_file_size: int = Field(default=0, ge=0)  # 逻辑文件总大小（用于配额预检）
+    upload_batch_id: str = Field(default="", max_length=64)
     # 文件请求上传场景：访客上传到请求链接，占创建者配额
     request_code: str = Field(default="", max_length=16)
     request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+
+    @model_validator(mode="after")
+    def validate_chunks(self) -> UploadInitRequest:
+        if self.chunk_index >= self.chunk_total:
+            raise ValueError("分片序号必须小于分片总数")
+        if self.chunk_total == 1 and self.logical_file_size not in (0, self.file_size):
+            raise ValueError("单片文件的逻辑大小必须等于文件大小")
+        return self
 
 
 class UploadInitResponse(BaseModel):
@@ -33,6 +42,12 @@ class UploadInitResponse(BaseModel):
     store_uri: str
     commit_token: str  # 前端 commit 时回传
     commit_token_expires_at: datetime
+
+
+class UploadBatchCancelRequest(BaseModel):
+    upload_batch_id: str = Field(..., min_length=1, max_length=64)
+    request_code: str = Field(default="", max_length=16)
+    request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 
 
 class CommitFileItem(BaseModel):
@@ -73,9 +88,9 @@ class UploadCommitRequest(BaseModel):
     # 可选：提取码（4位数字）
     password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
     # 分享必须设置有效期；游客与登录用户的实际上限在提交接口按身份校验。
-    expires_hours: int = Field(default=1, ge=1, le=720)
+    expires_hours: int | None = Field(default=None, ge=1, le=2160)
     # 可选：最大下载次数，0 = 不限制
-    max_downloads: int = Field(default=0, ge=0, le=200)
+    max_downloads: int | None = Field(default=None, ge=0, le=1_000_000)
     # 可选：邮件收件人，最多 5 个
     recipients: list[EmailStr] = Field(default_factory=list, max_length=5)
     # 可选：消费一张留存券，将新分享有效期强制设为 90 天
@@ -97,6 +112,7 @@ class MultipartInitRequest(BaseModel):
     file_ext: str = Field(default="", max_length=16)
     content_type: str = Field(default="", max_length=127)
     logical_file_id: str = Field(..., min_length=1, max_length=36)
+    upload_batch_id: str = Field(default="", max_length=64)
     request_code: str = Field(default="", max_length=16)
     request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
 

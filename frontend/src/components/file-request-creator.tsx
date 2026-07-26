@@ -1,18 +1,18 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Inbox, Lock, Plus, Settings } from "lucide-react";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { createFileRequest } from "@/lib/auth";
 import { getErrorMessage } from "@/lib/errors";
+import { DEFAULT_QUOTA_POLICY, getPublicQuotaPolicy } from "@/lib/quota-policy";
+import { formatSize } from "@/lib/utils";
 
 interface FileRequestCreatorProps {
   loggedIn: boolean;
   onLoginClick: () => void;
   embedded?: boolean;
 }
-
-const MAX_REQUEST_BYTES = 10 * 1024 * 1024 * 1024;
 
 export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }: FileRequestCreatorProps) {
   const idPrefix = useId();
@@ -23,9 +23,31 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
   const [maxFiles, setMaxFiles] = useState(20);
   const [maxBytesValue, setMaxBytesValue] = useState("1024");
   const [maxBytesUnit, setMaxBytesUnit] = useState<"MB" | "GB">("MB");
+  const maxBytesUnitRef = useRef<"MB" | "GB">("MB");
+  maxBytesUnitRef.current = maxBytesUnit;
   const [result, setResult] = useState<{ code: string; url: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [policy, setPolicy] = useState(DEFAULT_QUOTA_POLICY.config.receive);
+  const [policyLoading, setPolicyLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPublicQuotaPolicy().then((result) => {
+      if (cancelled) return;
+      setPolicy(result.config.receive);
+      setExpiresHours(result.config.receive.default_retention_hours);
+      setMaxFiles((value) => Math.min(value, result.config.receive.max_files_per_request));
+      const maxBytes = result.config.receive.max_request_bytes;
+      setMaxBytesValue((value) => {
+        const unit = maxBytesUnitRef.current;
+        const currentBytes = Number(value) * (unit === "GB" ? 1024 ** 3 : 1024 ** 2);
+        if (currentBytes <= maxBytes) return value;
+        return String(Number((maxBytes / (unit === "GB" ? 1024 ** 3 : 1024 ** 2)).toFixed(2)));
+      });
+    }).finally(() => { if (!cancelled) setPolicyLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const displayUrl = result ? `${window.location.origin}/r/${result.code}` : "";
 
@@ -34,13 +56,21 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
       onLoginClick();
       return;
     }
+    if (policyLoading) {
+      setError("正在同步收件规则，请稍后再试");
+      return;
+    }
+    if (!policy.enabled) {
+      setError("收件链接当前暂停创建");
+      return;
+    }
     if (password && password.length !== 4) {
       setError("访问码需要 4 位数字");
       return;
     }
     const maxBytes = Math.round(Number(maxBytesValue) * (maxBytesUnit === "GB" ? 1024 * 1024 * 1024 : 1024 * 1024));
-    if (!Number.isFinite(maxBytes) || maxBytes < 1024 * 1024 || maxBytes > MAX_REQUEST_BYTES) {
-      setError("收件总容量需在 1MB 到 10GB 之间");
+    if (!Number.isFinite(maxBytes) || maxBytes < 1024 * 1024 || maxBytes > policy.max_request_bytes) {
+      setError(`收件总容量需在 1MB 到 ${formatSize(policy.max_request_bytes)} 之间`);
       return;
     }
     setLoading(true);
@@ -103,9 +133,9 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
               <label className="block">
                 <span className="type-label retro-text">有效期</span>
                 <select id={`${idPrefix}-expires`} value={expiresHours} onChange={(e) => setExpiresHours(Number(e.target.value))} className="retro-input type-body-sm mt-1.5 w-full px-3">
-                  <option value={24}>1 天</option>
-                  <option value={168}>7 天</option>
-                  <option value={720}>30 天</option>
+                  {policy.retention_options_hours.map((hours) => (
+                    <option key={hours} value={hours}>{hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`}</option>
+                  ))}
                 </select>
               </label>
             </div>
@@ -129,13 +159,13 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
               <div className="retro-card grid gap-3 p-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="type-label retro-text">最大文件数</span>
-                  <input type="number" min={1} max={100} value={maxFiles} onChange={(e) => setMaxFiles(Math.max(1, Math.min(100, Number(e.target.value))))}
+                  <input type="number" min={1} max={policy.max_files_per_request} value={maxFiles} onChange={(e) => setMaxFiles(Math.max(1, Math.min(policy.max_files_per_request, Number(e.target.value))))}
                     className="retro-input type-body-sm mt-1 min-h-[44px] w-full px-3" />
                 </label>
                 <label className="block">
                   <span className="type-label retro-text">总容量上限</span>
                   <div className="retro-input mt-1 flex min-h-[44px] overflow-hidden p-0 focus-within:border-nyy-600">
-                    <input type="number" min={1} max={maxBytesUnit === "GB" ? 10 : 10240} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
+                    <input type="number" min={1} max={policy.max_request_bytes / (maxBytesUnit === "GB" ? 1024 ** 3 : 1024 ** 2)} value={maxBytesValue} onChange={(e) => setMaxBytesValue(e.target.value)}
                       className="type-body-sm min-h-[44px] min-w-0 flex-1 bg-transparent px-3 outline-none" />
                     <select value={maxBytesUnit} onChange={(e) => setMaxBytesUnit(e.target.value as "MB" | "GB")}
                       className="type-caption border-l border-white/10 bg-transparent px-2 retro-text outline-none">
@@ -149,8 +179,8 @@ export function FileRequestCreator({ loggedIn, onLoginClick, embedded = false }:
 
             {error && <p role="alert" className="type-body-sm rounded-xl bg-red-50 px-3 py-2 text-red-700 dark:bg-red-900/20 dark:text-red-400">{error}</p>}
 
-            <button onClick={handleCreate} disabled={loading} className="btn-primary flex w-full items-center justify-center gap-2 py-3">
-              <Plus className="h-4 w-4" /> {loading ? "生成中..." : "生成收件链接"}
+            <button onClick={handleCreate} disabled={loading || policyLoading || !policy.enabled} className="btn-primary flex w-full items-center justify-center gap-2 py-3">
+              <Plus className="h-4 w-4" /> {policyLoading ? "同步规则..." : !policy.enabled ? "收件已暂停" : loading ? "生成中..." : "生成收件链接"}
             </button>
 
             {result && (

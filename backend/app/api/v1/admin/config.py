@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_admin_user
@@ -41,7 +41,10 @@ async def update_quota(
     db: AsyncSession = Depends(get_db),
 ):
     before = await get_quota_config(db)
-    config = await set_quota_config(db, body.model_dump(), admin.id, commit=False)
+    try:
+        config = await set_quota_config(db, body.model_dump(), admin.id, commit=False)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     add_admin_audit(
         db,
         request=request,

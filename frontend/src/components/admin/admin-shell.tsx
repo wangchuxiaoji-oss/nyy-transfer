@@ -19,14 +19,13 @@ import {
   getAdminShares,
   getAdminUsers,
   getDownloadConfig,
-  getQuotaConfig,
+  getQuotaPolicies,
   retryAdminEmails,
   sendAdminUserPasswordReset,
   unbanAdminShare,
   updateAdminReportStatus,
   updateAdminUser,
   updateDownloadConfig,
-  updateQuotaConfig,
   type AdminDashboard,
   type AdminEmailItem,
   type AdminReportItem,
@@ -35,7 +34,7 @@ import {
   type AdminUserItem,
   type AdminUserPatch,
   type DownloadConfig,
-  type QuotaConfig,
+  type QuotaPolicyList,
 } from "@/lib/admin";
 import { ADMIN_QUERY_RESET, readAdminQueryState, type AdminTab } from "@/lib/admin-query-state";
 import { AdminNavigation } from "./admin-navigation";
@@ -95,7 +94,7 @@ export function AdminShell() {
   const [usersTotal, setUsersTotal] = useState(0);
   const [emails, setEmails] = useState<AdminEmailItem[]>([]);
   const [emailsTotal, setEmailsTotal] = useState(0);
-  const [quota, setQuota] = useState<QuotaConfig | null>(null);
+  const [quotaPolicies, setQuotaPolicies] = useState<QuotaPolicyList | null>(null);
   const [downloadConfig, setDownloadConfig] = useState<DownloadConfig | null>(null);
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
   const [sourceTarget, setSourceTarget] = useState<AdminSourceTarget | null>(null);
@@ -163,8 +162,8 @@ export function AdminShell() {
         const result = await getAdminEmails({ page: query.page, pageSize: PAGE_SIZE, q: query.q || undefined, status: query.status });
         if (serial === requestSerialRef.current) { setEmails(result.emails || []); setEmailsTotal(result.total || 0); }
       } else if (query.tab === "quota") {
-        const result = await getQuotaConfig();
-        if (serial === requestSerialRef.current) setQuota(result);
+        const result = await getQuotaPolicies();
+        if (serial === requestSerialRef.current) setQuotaPolicies(result);
       } else if (query.tab === "download") {
         const result = await getDownloadConfig();
         if (serial === requestSerialRef.current) setDownloadConfig(result);
@@ -279,7 +278,6 @@ export function AdminShell() {
     const key = adminEmailKey(item);
     void runMutation(`email:${key}`, async () => { await retryAdminEmails([item.delivery_id || item.id || key], createRequestId()); }, "邮件重试任务已提交");
   };
-  const saveQuota = (config: QuotaConfig) => runMutation("config:quota", async () => { setQuota(await updateQuotaConfig(config)); }, "配额已保存", false);
   const saveDownload = (config: DownloadConfig) => runMutation("config:download", async () => { setDownloadConfig(await updateDownloadConfig(config)); }, "下载配置已保存", false);
 
   if (authState === "checking") return <main className="nyy-product-shell admin-console-shell flex items-center justify-center retro-text"><RefreshCw className="mr-2 h-5 w-5 animate-spin" />正在验证管理员身份...</main>;
@@ -296,7 +294,7 @@ export function AdminShell() {
   else if (query.tab === "reports") moduleContent = <AdminReportQueue reports={reports} total={reportsTotal} page={query.page} pendingIds={new Set(Array.from(pendingKeys).filter((key) => key.startsWith("report:")).map((key) => key.slice(7)))} onStatus={updateReport} onBan={banFromReport} onSource={(report) => setSourceTarget({ kind: "share", id: report.share_code, label: `/${report.share_code}` })} onPage={(page) => setQuery({ page: page <= 1 ? null : page })} />;
   else if (query.tab === "users") moduleContent = <AdminUserList users={users} total={usersTotal} page={query.page} pendingIds={new Set(Array.from(pendingKeys).filter((key) => key.startsWith("user:")).map((key) => key.slice(5)))} onUpdate={updateUser} onConfirm={(user, action) => setUserConfirm({ user, action })} onSource={(user) => setSourceTarget({ kind: "user", id: user.id, label: user.email })} onPage={(page) => setQuery({ page: page <= 1 ? null : page })} />;
   else if (query.tab === "emails") moduleContent = <AdminEmailQueue emails={emails} total={emailsTotal} page={query.page} pendingIds={new Set(Array.from(pendingKeys).filter((key) => key.startsWith("email:")).map((key) => key.slice(6)))} onRetry={retryEmail} onPage={(page) => setQuery({ page: page <= 1 ? null : page })} />;
-  else if (query.tab === "quota" && quota) moduleContent = <AdminQuotaPanel initial={quota} saving={pendingKeys.has("config:quota")} onSave={saveQuota} />;
+  else if (query.tab === "quota" && quotaPolicies) moduleContent = <AdminQuotaPanel initial={quotaPolicies} onChange={setQuotaPolicies} />;
   else if (query.tab === "download" && downloadConfig) moduleContent = <AdminDownloadPanel initial={downloadConfig} saving={pendingKeys.has("config:download")} onSave={saveDownload} />;
   else if (query.tab === "doubao") moduleContent = <AdminDoubaoPanel />;
   else if (query.tab === "mailbox") moduleContent = <AdminMailbox onError={handleDataError} refreshToken={mailboxRefreshToken} />;

@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     user_max_file_size: int = 10 * 1024 * 1024 * 1024
     user_max_active_shares: int = 30
     user_max_files_per_share: int = 50
+    platform_max_file_bytes: int = 10 * 1024 * 1024 * 1024
+    platform_max_share_bytes: int = 50 * 1024 * 1024 * 1024
+    platform_max_files_per_share: int = 500
+    platform_max_empty_dirs_per_share: int = 500
+    platform_max_retention_hours: int = 90 * 24
+    platform_max_active_links: int = 200
+    platform_max_concurrent_upload_batches: int = 10
+    platform_max_request_bytes: int = 10 * 1024 * 1024 * 1024
+    platform_max_request_files: int = 100
     # 上传重试
     upload_max_retries: int = 3
 

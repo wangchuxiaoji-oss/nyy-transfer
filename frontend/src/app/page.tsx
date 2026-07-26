@@ -1,6 +1,6 @@
 import dynamic from "next/dynamic";
 import { HomeClient } from "@/components/home-client";
-import { HOME_FAQS } from "@/lib/home-faqs";
+import { createHomeFaqs, getServerQuotaPolicy } from "@/lib/quota-policy";
 
 /**
  * 首页：Server Component
@@ -22,17 +22,19 @@ const HomeStory = dynamic(
   { ssr: true }
 );
 
-export default function Home() {
+export default async function Home() {
+  const policy = await getServerQuotaPolicy();
+  const faqs = createHomeFaqs(policy);
   return (
     <main className="nyy-product-shell flex flex-col items-center px-4 pt-0 pb-16" aria-label="拿呀²首页" data-ui-revision="20260722.4">
       {/* 1. 紧凑 Hero — 各端都让操作区进入首屏 */}
-      <HomeHero />
+      <HomeHero policy={policy} />
 
       {/* 2. 交互区域 — Header(fixed) + 上传面板 + Debug + 游客分享 + Auth 弹窗 */}
       <HomeClient />
 
       {/* 3. 营销内容 — 三步流程 · 统计 · 场景 · 安全 · 差异化 · FAQ · CTA · 页脚 */}
-      <HomeStory />
+      <HomeStory policy={policy} faqs={faqs} />
 
       {/* FAQ 结构化数据（仅此处输出，避免重复） */}
       <script
@@ -41,7 +43,7 @@ export default function Home() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "FAQPage",
-            mainEntity: HOME_FAQS.map((item) => ({
+            mainEntity: faqs.map((item) => ({
               "@type": "Question",
               name: item.question,
               acceptedAnswer: { "@type": "Answer", text: item.answer },

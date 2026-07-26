@@ -37,6 +37,8 @@ class MyShareItem(BaseModel):
     has_password: bool
     download_count: int
     max_downloads: int
+    retention_options_hours: list[int]
+    download_options: list[int]
     last_downloaded_at: str | None = None
     created_at: str
     expires_at: str | None
@@ -53,7 +55,7 @@ class MySharesListResponse(BaseModel):
 class ShareEditRequest(BaseModel):
     password: str | None = Field(default=None, max_length=4, pattern=r"^(?:[0-9]{4})?$", description="新提取码，空字符串表示清除")
     expires_hours: int | None = Field(default=None, ge=0, description="从现在起的过期小时数，0=永不过期")
-    max_downloads: int | None = Field(default=None, ge=0, le=200, description="最大下载次数，0=不限")
+    max_downloads: int | None = Field(default=None, ge=0, le=1_000_000, description="最大下载次数，0=不限")
 
 
 class MessageResponse(BaseModel):
@@ -113,6 +115,20 @@ async def list_my_shares(
     result = await db.execute(stmt)
     shares = result.scalars().all()
 
+    from app.models.quota import QuotaPolicyVersion
+    from app.schemas.quota_policy import QuotaPolicyConfig
+    from app.services.quota_policy import default_policy_config
+
+    versions = {share.policy_version for share in shares if share.policy_version}
+    policy_rows = (
+        await db.scalars(select(QuotaPolicyVersion).where(QuotaPolicyVersion.version.in_(versions)))
+    ).all() if versions else []
+    policies = {
+        row.version: QuotaPolicyConfig.model_validate(row.config).user
+        for row in policy_rows
+    }
+    fallback_policy = default_policy_config().user
+
     share_ids = [s.id for s in shares]
     last_downloaded_by_share = {}
     if share_ids:
@@ -139,6 +155,7 @@ async def list_my_shares(
 
     items = []
     for s in shares:
+        share_policy = policies.get(s.policy_version, fallback_policy)
         preview_files, file_count = build_preview(s)
         last_downloaded_at = last_downloaded_by_share.get(s.id)
         items.append(MyShareItem(
@@ -151,6 +168,8 @@ async def list_my_shares(
             has_password=s.password_hash is not None,
             download_count=s.download_count,
             max_downloads=s.max_downloads,
+            retention_options_hours=share_policy.retention_options_hours,
+            download_options=share_policy.download_options,
             last_downloaded_at=last_downloaded_at.isoformat() if last_downloaded_at else None,
             created_at=s.created_at.isoformat() if s.created_at else "",
             expires_at=s.expires_at.isoformat() if s.expires_at else None,
@@ -204,6 +223,29 @@ async def edit_share(
     if share.revoked_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "已撤销的分享不可编辑")
 
+    await db.scalar(select(func.pg_advisory_xact_lock(func.hashtext(f"share:user:{user.id}"))))
+    now = datetime.now(UTC)
+    was_active = (
+        share.banned_at is None
+        and (share.expires_at is None or share.expires_at > now)
+        and (share.max_downloads == 0 or share.download_count < share.max_downloads)
+    )
+
+    from app.models.quota import QuotaPolicyVersion
+    from app.schemas.quota_policy import QuotaPolicyConfig
+    from app.services.quota_policy import default_policy_config
+
+    policy_row = None
+    if share.policy_version:
+        policy_row = await db.scalar(
+            select(QuotaPolicyVersion).where(QuotaPolicyVersion.version == share.policy_version)
+        )
+    policy = (
+        QuotaPolicyConfig.model_validate(policy_row.config).user
+        if policy_row
+        else default_policy_config().user
+    )
+
     if body.password is not None:
         if body.password == "":
             share.password_hash = None
@@ -213,14 +255,37 @@ async def edit_share(
 
     if body.expires_hours is not None:
         if body.expires_hours == 0:
-            share.expires_at = None
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "永久有效不在创建时策略选项中")
         else:
+            if body.expires_hours not in policy.retention_options_hours:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "分享有效期不在创建时策略选项中")
             share.expires_at = datetime.now(UTC) + timedelta(hours=body.expires_hours)
 
     if body.max_downloads is not None:
-        if body.max_downloads not in {0, 1, 10, 50, 100, 200}:
+        if body.max_downloads not in policy.download_options:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "下载次数上限不合法")
         share.max_downloads = body.max_downloads
+
+    is_active = (
+        share.banned_at is None
+        and (share.expires_at is None or share.expires_at > now)
+        and (share.max_downloads == 0 or share.download_count < share.max_downloads)
+    )
+    if not was_active and is_active:
+        active_count = await db.scalar(
+            select(func.count())
+            .select_from(Share)
+            .where(
+                Share.owner_id == user.id,
+                Share.id != share.id,
+                Share.revoked_at.is_(None),
+                Share.banned_at.is_(None),
+                or_(Share.expires_at.is_(None), Share.expires_at > now),
+                or_(Share.max_downloads == 0, Share.download_count < Share.max_downloads),
+            )
+        ) or 0
+        if active_count >= policy.max_active_shares:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "活跃分享数量已达创建时策略上限")
 
     await db.commit()
     return MessageResponse(message="修改成功")

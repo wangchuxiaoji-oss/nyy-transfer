@@ -6,6 +6,7 @@ import { motion, useScroll, useTransform, useInView, AnimatePresence } from "fra
 import { ArrowRight, ChevronDown, Clock3, FileCheck2, FolderInput, Link2, ScanLine, ShieldCheck } from "lucide-react";
 import { BRAND_NAME } from "@/lib/copy";
 import { HOME_FAQS } from "@/lib/home-faqs";
+import { formatPolicyBytes, periodLabel, retentionLabel, type PublicQuotaPolicy } from "@/lib/quota-policy";
 
 // 重新导出，供其他组件从 @/components/home-story 导入
 export { HOME_FAQS };
@@ -18,12 +19,6 @@ const steps = [
 ];
 
 /* ─── 统计数据 ─── */
-const stats = [
-  { value: 2, suffix: "GB", label: "游客 24 小时额度" },
-  { value: 3, suffix: "天", label: "游客最长分享" },
-  { value: 50, suffix: "GB", label: "用户 30 天额度" },
-];
-
 const particles = Array.from({ length: 18 }, (_, index) => ({
   size: 2 + ((index * 3) % 5),
   left: (index * 37 + 11) % 100,
@@ -49,7 +44,7 @@ function useCountUp(target: number, inView: boolean, duration = 1800) {
       const progress = Math.min(elapsed / duration, 1);
       // easeOutExpo 缓动
       const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
-      setCount(Math.round(eased * target));
+      setCount(Math.round(eased * target * 100) / 100);
       if (progress < 1) rafRef.current = requestAnimationFrame(animate);
     };
     rafRef.current = requestAnimationFrame(animate);
@@ -144,7 +139,8 @@ function CharReveal({ text, className, delay = 0 }: { text: string; className?: 
 }
 
 /** Hero 区域 */
-function HeroSection() {
+function HeroSection({ policy }: { policy: PublicQuotaPolicy }) {
+  const guest = policy.config.guest;
   return (
     <motion.section
       data-testid="home-hero"
@@ -195,7 +191,7 @@ function HeroSection() {
           需要收资料时，再创建一条收件链接。
         </motion.p>
 
-        <p className="retro-muted mt-7 text-xs sm:text-sm">游客免注册 · 2GB / 24小时 · 分享最长3天</p>
+        <p className="retro-muted mt-7 text-xs sm:text-sm">游客免注册 · {formatPolicyBytes(guest.period_limit_bytes)} / {periodLabel(guest.period_kind)} · 分享最长{retentionLabel(Math.max(...guest.retention_options_hours))}</p>
       </motion.div>
 
     </motion.section>
@@ -263,13 +259,20 @@ function StepsSection() {
 }
 
 /** 数据统计（数字计数动画） */
-function StatsSection() {
+function StatsSection({ policy }: { policy: PublicQuotaPolicy }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-60px" });
+  const { guest, user } = policy.config;
+  const guestRetentionHours = Math.max(...guest.retention_options_hours);
+  const stats = [
+    { value: guest.period_limit_bytes / 1024 ** 3, suffix: "GB", label: `游客${periodLabel(guest.period_kind)}额度` },
+    { value: guestRetentionHours % 24 === 0 ? guestRetentionHours / 24 : guestRetentionHours, suffix: guestRetentionHours % 24 === 0 ? "天" : "小时", label: "游客最长分享" },
+    { value: user.period_limit_bytes / 1024 ** 3, suffix: "GB", label: `用户${periodLabel(user.period_kind)}额度` },
+  ];
 
   return (
     <section ref={ref} className="mt-24 w-full max-w-4xl px-4 sm:mt-32">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         {stats.map(({ value, suffix, label }, index) => (
           <StatCard key={label} value={value} suffix={suffix} label={label} inView={inView} delay={index * 0.12} />
         ))}
@@ -445,7 +448,7 @@ function DifferenceSection() {
 }
 
 /** FAQ 手风琴（弹簧动画） */
-function FaqSection() {
+function FaqSection({ faqs }: { faqs: Array<{ question: string; answer: string }> }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-60px" });
   const [openIndex, setOpenIndex] = useState<number | null>(0);
@@ -463,7 +466,7 @@ function FaqSection() {
       </motion.div>
 
       <div className="mt-9 space-y-3">
-        {HOME_FAQS.map((item, index) => (
+        {faqs.map((item, index) => (
           <motion.div
             key={item.question}
             initial={{ opacity: 0, y: 20 }}
@@ -520,7 +523,7 @@ function FaqItem({ item, isOpen, onToggle }: { item: { question: string; answer:
 }
 
 /** CTA 区域（极光渐变 + 脉冲发光） */
-function CtaSection() {
+function CtaSection({ receiveEnabled }: { receiveEnabled: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-60px" });
 
@@ -551,13 +554,13 @@ function CtaSection() {
           >
             选择文件发送 <ArrowRight className="h-4 w-4" />
           </a>
-          <Link
+          {receiveEnabled && <Link
             href="/?mode=receive#upload-section"
             onClick={() => window.dispatchEvent(new CustomEvent("nyy:home-mode", { detail: "receive" }))}
             className="retro-btn-secondary ml-0 mt-3 inline-flex min-w-44 items-center justify-center sm:ml-3 sm:mt-8"
           >
             创建收件链接
-          </Link>
+          </Link>}
         </div>
       </motion.div>
     </section>
@@ -583,25 +586,25 @@ function Footer() {
 }
 
 /* ─── 主组件：Hero（全屏沉浸式） ─── */
-export function HomeHero() {
+export function HomeHero({ policy }: { policy: PublicQuotaPolicy }) {
   return (
     <div className="home-hero relative -mx-4 w-[calc(100%+2rem)] max-w-none">
-      <HeroSection />
+      <HeroSection policy={policy} />
     </div>
   );
 }
 
 /* ─── 主组件：营销内容（步骤 · 统计 · 场景 · 安全 · 差异化 · FAQ · CTA · 页脚） ─── */
-export function HomeStory() {
+export function HomeStory({ policy, faqs }: { policy: PublicQuotaPolicy; faqs: Array<{ question: string; answer: string }> }) {
   return (
     <div className="home-story mt-0 w-full max-w-5xl sm:mt-0">
       <StepsSection />
-      <StatsSection />
+      <StatsSection policy={policy} />
       <ScenesSection />
       <SecuritySection />
       <DifferenceSection />
-      <FaqSection />
-      <CtaSection />
+      <FaqSection faqs={faqs} />
+      <CtaSection receiveEnabled={policy.config.receive.enabled} />
       <Footer />
     </div>
   );

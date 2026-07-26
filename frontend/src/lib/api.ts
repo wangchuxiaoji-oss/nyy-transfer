@@ -160,8 +160,22 @@ export interface UploadCommitResponse {
 
 export interface QuotaInfo {
   used_bytes: number;
+  reserved_bytes: number;
   limit_bytes: number;
   remaining_bytes: number;
+  reset_at: string;
+  period_kind: "daily" | "monthly";
+  policy_version: number;
+  max_file_bytes: number;
+  max_share_bytes: number;
+  max_files_per_share: number;
+  max_empty_dirs_per_share: number;
+  max_active_shares: number;
+  max_concurrent_upload_batches: number;
+  default_retention_hours: number;
+  retention_options_hours: number[];
+  default_max_downloads: number;
+  download_options: number[];
   ttl_hours: number;
 }
 
@@ -227,6 +241,7 @@ export async function uploadInit(params: {
   chunk_total?: number;
   logical_file_id?: string;
   logical_file_size?: number;
+  upload_batch_id?: string;
   request_code?: string;
   request_password?: string;
 }): Promise<UploadInitResponse> {
@@ -257,13 +272,21 @@ export async function uploadCommit(params: {
 
 export async function multipartInit(body: {
   file_name: string; file_size: number; file_ext: string; content_type: string;
-  logical_file_id: string;
+  logical_file_id: string; upload_batch_id?: string;
   request_code?: string; request_password?: string;
 }): Promise<MultipartInitResponse> {
   const res = await authFetch(`${API_BASE}/api/v1/uploads/multipart-init`, {
     method: "POST", body: JSON.stringify(body),
   });
   return handleResponse<MultipartInitResponse>(res, "发起分片上传失败");
+}
+
+export async function cancelUploadBatch(params: { upload_batch_id: string; request_code?: string; request_password?: string }): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/v1/uploads/cancel`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+  await handleResponse(res, "取消上传失败");
 }
 
 export async function multipartMerge(body: {
@@ -370,13 +393,20 @@ export interface FileRequestInfo {
   expires_at: string | null;
   max_files: number;
   max_bytes: number;
+  max_file_bytes: number;
   received_files: number;
   received_bytes: number;
+  supports_multipart: boolean;
 }
 
 export async function getFileRequestInfo(code: string): Promise<FileRequestInfo> {
   const res = await fetch(`${API_BASE}/api/v1/file-requests/${code}`);
-  return handleResponse(res, "请求链接不存在或已被删除");
+  const data = await handleResponse<Omit<FileRequestInfo, "supports_multipart"> & { max_file_bytes?: number }>(res, "请求链接不存在或已被删除");
+  return {
+    ...data,
+    max_file_bytes: data.max_file_bytes ?? 1024 ** 3,
+    supports_multipart: typeof data.max_file_bytes === "number",
+  };
 }
 
 export async function verifyFileRequest(code: string, password: string): Promise<{ message: string }> {
@@ -388,11 +418,11 @@ export async function verifyFileRequest(code: string, password: string): Promise
   return handleResponse(res, "访问码验证失败");
 }
 
-export async function commitFileRequest(code: string, params: { files: CommitFileItem[]; password?: string }): Promise<{ message: string }> {
+export async function commitFileRequest(code: string, params: { upload_batch_id?: string; files: CommitFileItem[]; password?: string }): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/v1/file-requests/${code}/commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ files: params.files, password: params.password || "" }),
+    body: JSON.stringify({ upload_batch_id: params.upload_batch_id || "", files: params.files, password: params.password || "" }),
   });
   return handleResponse(res, "提交失败");
 }

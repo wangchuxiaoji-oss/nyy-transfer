@@ -13,6 +13,7 @@ from app.models.mailbox import (
     MailboxImportTombstone,
     MailboxMessage,
 )
+from app.models.quota import QuotaPolicyVersion
 from app.models.share import (
     DownloadLog,
     DownloadSession,
@@ -29,6 +30,7 @@ from app.models.system import (
     EmailDelivery,
     FileRequest,
     FileRequestFile,
+    FileRequestUpload,
     HashBlacklist,
     IpQuota,
     Report,
@@ -47,6 +49,7 @@ __all__ = [
     "EmailDelivery",
     "FileRequest",
     "FileRequestFile",
+    "FileRequestUpload",
     "GrowthLandingEvent",
     "HashBlacklist",
     "IpQuota",
@@ -54,6 +57,7 @@ __all__ = [
     "MailboxImportSource",
     "MailboxImportTombstone",
     "MailboxMessage",
+    "QuotaPolicyVersion",
     "ReferralAttribution",
     "Report",
     "RetentionCoupon",

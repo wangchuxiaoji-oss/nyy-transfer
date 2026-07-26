@@ -189,7 +189,7 @@ async def test_edit_share_updates_limits_and_can_clear_password(client):
     resp = await client.patch(
         f"/api/v1/my/shares/{code}",
         headers=headers,
-        json={"password": "", "expires_hours": 0, "max_downloads": 200},
+        json={"password": "", "expires_hours": 720, "max_downloads": 200},
     )
     assert resp.status_code == 200
 
@@ -199,7 +199,7 @@ async def test_edit_share_updates_limits_and_can_clear_password(client):
         share = await db.scalar(select(Share).where(Share.code == code))
         assert share is not None
         assert share.password_hash is None
-        assert share.expires_at is None
+        assert share.expires_at is not None
         assert share.max_downloads == 200
 
     invalid = await client.patch(

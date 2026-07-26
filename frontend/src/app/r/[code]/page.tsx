@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { Upload, CheckCircle2, AlertCircle, Lock, FileIcon } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { computeCRC32 } from "@/lib/crc32";
-import { commitFileRequest, getFileRequestInfo, uploadInit, verifyFileRequest, type CommitFileItem, type FileRequestInfo } from "@/lib/api";
+import { cancelUploadBatch, commitFileRequest, getFileRequestInfo, multipartInit, multipartMerge, uploadInit, verifyFileRequest, type CommitFileItem, type FileRequestInfo } from "@/lib/api";
 import { formatXhrStatusError, getErrorMessage, isSuccessfulHttpStatus } from "@/lib/errors";
 import { formatSize } from "@/lib/utils";
 import { BRAND_NAME } from "@/lib/copy";
@@ -20,9 +20,13 @@ export default function FileRequestPage() {
 function FileRequestContent({ code }: { code: string }) {
   const passwordInputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeXhrsRef = useRef<Set<XMLHttpRequest>>(new Set());
+  const activeBatchRef = useRef<string | null>(null);
+  const passwordRef = useRef("");
   const [info, setInfo] = useState<FileRequestInfo | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [password, setPassword] = useState("");
+  passwordRef.current = password;
   const [verified, setVerified] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "uploading" | "done" | "error">("loading");
   const [error, setError] = useState("");
@@ -31,6 +35,19 @@ function FileRequestContent({ code }: { code: string }) {
     getFileRequestInfo(code)
       .then((data) => { setInfo(data); setVerified(!data.has_password); setState("ready"); })
       .catch((err) => { setError(getErrorMessage(err, "请求链接不存在或已过期")); setState("error"); });
+  }, [code]);
+
+  useEffect(() => () => {
+    activeXhrsRef.current.forEach((xhr) => xhr.abort());
+    const uploadBatchId = activeBatchRef.current;
+    if (uploadBatchId) {
+      void fetch("/api/v1/uploads/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upload_batch_id: uploadBatchId, request_code: code, request_password: passwordRef.current }),
+        keepalive: true,
+      });
+    }
   }, [code]);
 
   async function handleVerify() {
@@ -43,17 +60,76 @@ function FileRequestContent({ code }: { code: string }) {
     }
   }
 
-  async function uploadSingle(file: File): Promise<CommitFileItem> {
-    const crc32 = await computeCRC32(file);
+  async function uploadSingle(file: File, uploadBatchId: string, supportsMultipart: boolean): Promise<CommitFileItem> {
     const ext = file.name.includes(".") ? file.name.split(".").pop() || "" : "";
-    const initRes = await uploadInit({ file_name: file.name, file_size: file.size, file_ext: ext, request_code: code, request_password: password });
-    await new Promise<void>((resolve, reject) => {
+    const logicalFileId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `request-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    if (supportsMultipart && file.size > 512 * 1024 * 1024) {
+      const multipart = await multipartInit({
+        file_name: file.name,
+        file_size: file.size,
+        file_ext: ext,
+        content_type: file.type || "application/octet-stream",
+        logical_file_id: logicalFileId,
+        upload_batch_id: uploadBatchId,
+        request_code: code,
+        request_password: password,
+      });
+      const crcList: string[] = [];
+      for (let index = 0; index < multipart.part_count; index += 1) {
+        const blob = file.slice(index * multipart.part_size, Math.min((index + 1) * multipart.part_size, file.size));
+        const crc32 = await computeCRC32(blob);
+        let uploaded = false;
+        let partError: Error | null = null;
+        for (let attempt = 0; attempt < 3 && !uploaded; attempt += 1) {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              activeXhrsRef.current.add(xhr);
+              const partNumber = multipart.part_number_base + index;
+              xhr.open("PUT", `https://${multipart.tos_host}/${multipart.store_uri}?partNumber=${partNumber}&uploadID=${multipart.upload_id}`);
+              xhr.timeout = 30 * 60 * 1000;
+              xhr.setRequestHeader("Authorization", multipart.tos_auth);
+              xhr.setRequestHeader("Content-CRC32", crc32);
+              if (multipart.part_number_base === 1) xhr.setRequestHeader("X-Storage-Mode", "gateway");
+              xhr.onload = () => {
+                activeXhrsRef.current.delete(xhr);
+                if (isSuccessfulHttpStatus(xhr.status)) resolve();
+                else reject(new Error(formatXhrStatusError(xhr.status, "上传分片失败")));
+              };
+              xhr.onerror = () => { activeXhrsRef.current.delete(xhr); reject(new Error(formatXhrStatusError(0, "网络错误"))); };
+              xhr.ontimeout = () => { activeXhrsRef.current.delete(xhr); reject(new Error("上传分片超时")); };
+              xhr.onabort = () => { activeXhrsRef.current.delete(xhr); reject(new Error("上传已取消")); };
+              xhr.send(blob);
+            });
+            uploaded = true;
+          } catch (reason) {
+            partError = reason instanceof Error ? reason : new Error("上传分片失败");
+            if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+          }
+        }
+        if (!uploaded) throw partError || new Error("上传分片失败");
+        crcList.push(crc32);
+      }
+      const merged = await multipartMerge({ multipart_token: multipart.multipart_token, crc_list: crcList });
+      return { commit_token: merged.commit_token, store_uri: multipart.store_uri };
+    }
+    const crc32 = await computeCRC32(file);
+    const initRes = await uploadInit({ file_name: file.name, file_size: file.size, file_ext: ext, logical_file_id: logicalFileId, logical_file_size: file.size, upload_batch_id: uploadBatchId, request_code: code, request_password: password });
+    if (initRes.upload_url) await new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      activeXhrsRef.current.add(xhr);
       xhr.open("POST", initRes.upload_url);
+      xhr.timeout = 2 * 60 * 60 * 1000;
       xhr.setRequestHeader("Authorization", initRes.authorization);
       xhr.setRequestHeader("Content-CRC32", crc32);
-      xhr.onload = () => isSuccessfulHttpStatus(xhr.status) ? resolve() : reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
-      xhr.onerror = () => reject(new Error(formatXhrStatusError(0, "网络错误")));
+      xhr.onload = () => {
+        activeXhrsRef.current.delete(xhr);
+        if (isSuccessfulHttpStatus(xhr.status)) resolve();
+        else reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+      };
+      xhr.onerror = () => { activeXhrsRef.current.delete(xhr); reject(new Error(formatXhrStatusError(0, "网络错误"))); };
+      xhr.ontimeout = () => { activeXhrsRef.current.delete(xhr); reject(new Error("上传超时")); };
+      xhr.onabort = () => { activeXhrsRef.current.delete(xhr); reject(new Error("上传已取消")); };
       xhr.send(file);
     });
     return { commit_token: initRes.commit_token, store_uri: initRes.store_uri };
@@ -63,15 +139,21 @@ function FileRequestContent({ code }: { code: string }) {
     if (!info || files.length === 0) return;
     setState("uploading");
     setError("");
+    const uploadBatchId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `request-${Date.now().toString(36)}`;
+    activeBatchRef.current = uploadBatchId;
     try {
       const total = files.reduce((s, f) => s + f.size, 0);
+      if (files.some((file) => file.size > info.max_file_bytes)) throw new Error(`单文件不能超过 ${formatSize(info.max_file_bytes)}`);
       if (files.length + info.received_files > info.max_files) throw new Error("文件数量超过请求限制");
       if (total + info.received_bytes > info.max_bytes) throw new Error("文件大小超过请求限制");
       const items = [] as CommitFileItem[];
-      for (const file of files) items.push(await uploadSingle(file));
-      await commitFileRequest(code, { files: items, password });
+      for (const file of files) items.push(await uploadSingle(file, uploadBatchId, info.supports_multipart));
+      await commitFileRequest(code, { upload_batch_id: uploadBatchId, files: items, password });
+      activeBatchRef.current = null;
       setState("done");
     } catch (err) {
+      await cancelUploadBatch({ upload_batch_id: uploadBatchId, request_code: code, request_password: password }).catch(() => {});
+      activeBatchRef.current = null;
       setError(getErrorMessage(err, "上传失败"));
       setState("error");
     }

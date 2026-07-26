@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +44,22 @@ async def lifespan(app: FastAPI):
         redis_client = None
     app.state.redis = redis_client
 
+    reconciliation_task = None
+    if redis_client is not None:
+        async def reconcile_loop() -> None:
+            from app.services.quota_reconciliation import reconcile_quota_settlements
+
+            while True:
+                try:
+                    settled = await reconcile_quota_settlements(redis_client)
+                    if settled:
+                        slog.info("quota settlements reconciled", count=settled)
+                except Exception as exc:
+                    slog.warning("quota settlement reconciliation failed", error=str(exc))
+                await asyncio.sleep(60)
+
+        reconciliation_task = asyncio.create_task(reconcile_loop())
+
     # --- Doubao client / auto verify ---
     from app.services.doubao_auto_verify import (
         shutdown_doubao_auto_verifier,
@@ -55,6 +72,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
+    if reconciliation_task:
+        reconciliation_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reconciliation_task
     if redis_client:
         await redis_client.aclose()
     await shutdown_doubao_auto_verifier()

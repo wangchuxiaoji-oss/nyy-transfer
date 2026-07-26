@@ -3,6 +3,7 @@ import { createHttpError, isHttpStatusError } from "./errors";
 import type { ShareDownloadResponse, ShareInfo } from "./api";
 import type { DownloadConfig } from "./smart-download";
 import type { AnnouncementCategory, AnnouncementPriority, AnnouncementState } from "./announcements";
+import type { QuotaPolicyConfig } from "./quota-policy";
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) throw await createHttpError(res);
@@ -195,6 +196,37 @@ export interface QuotaConfig {
   user_max_file_bytes: number;
   user_max_active_shares: number;
   user_ttl_hours: number;
+}
+
+export interface QuotaPolicyVersion {
+  id: string;
+  version: number;
+  status: "draft" | "published" | "scheduled";
+  config: QuotaPolicyConfig;
+  note: string;
+  effective_at: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  published_by: string | null;
+  rollback_from_id: string | null;
+}
+
+export interface QuotaPolicyList {
+  items: QuotaPolicyVersion[];
+  current_id: string | null;
+}
+
+export interface QuotaPolicyImpact {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  changed_fields: string[];
+  over_limit_identities: number;
+  technical: Record<string, number>;
+  config_hash: string;
+  updated_at: string;
 }
 
 export type { DownloadConfig };
@@ -500,6 +532,42 @@ export async function getAdminIpRelations(ip: string, params: AdminSourceQuery =
 
 export async function getQuotaConfig(): Promise<QuotaConfig> {
   return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/config/quota`));
+}
+
+export async function getQuotaPolicies(): Promise<QuotaPolicyList> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies`));
+}
+
+export async function createQuotaPolicyDraft(note = ""): Promise<QuotaPolicyVersion> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  }));
+}
+
+export async function updateQuotaPolicyDraft(id: string, config: QuotaPolicyConfig, note: string): Promise<QuotaPolicyVersion> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ config, note }),
+  }));
+}
+
+export async function previewQuotaPolicy(id: string): Promise<QuotaPolicyImpact> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies/${id}/preview`, { method: "POST" }));
+}
+
+export async function publishQuotaPolicy(id: string, effectiveAt: string | null, note: string, expectedConfigHash: string): Promise<QuotaPolicyVersion> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies/${id}/publish`, {
+    method: "POST",
+    body: JSON.stringify({ effective_at: effectiveAt, note, expected_config_hash: expectedConfigHash }),
+  }));
+}
+
+export async function rollbackQuotaPolicy(id: string, effectiveAt: string | null, note: string): Promise<QuotaPolicyVersion> {
+  return handleResponse(await authFetch(`${API_BASE}/api/v1/admin/quota-policies/${id}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({ effective_at: effectiveAt, note }),
+  }));
 }
 
 export async function getDownloadConfig(): Promise<DownloadConfig> {

@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user_optional
@@ -23,24 +24,24 @@ from app.schemas.upload import (
     MultipartInitResponse,
     MultipartMergeRequest,
     MultipartMergeResponse,
+    UploadBatchCancelRequest,
     UploadCommitRequest,
     UploadCommitResponse,
     UploadInitRequest,
     UploadInitResponse,
 )
-from app.services.app_config import get_quota_config
 from app.services.doubao_client import (
     DoubaoClientError,
     get_doubao_client,
 )
 from app.services.growth import (
-    COUPON_TARGET_TTL,
     GrowthServiceError,
     assert_coupon_consumed_by_share,
     consume_retention_coupon,
 )
 from app.services.playback_assets import attach_playback_assets_for_single_object
-from app.services.quota import get_quota_snapshot
+from app.services.quota import QuotaService, get_quota_snapshot, quota_identity
+from app.services.quota_policy import get_effective_policy, get_policy_config_for_version
 from app.utils.client_ip import get_client_ip as _get_client_ip
 from app.utils.client_ip import get_guest_id as _get_guest_id
 from app.utils.short_code import gen_short_code
@@ -56,7 +57,6 @@ _EMPTY_URI_PREFIX = "nyy-empty://"
 _MAX_EMPTY_DIRS = 500
 _MAX_EMPTY_DIR_PATH_LEN = 512
 _MAX_MEDIA_METADATA_BYTES = 64 * 1024
-_ALLOWED_MAX_DOWNLOADS = {0, 1, 10, 50, 100, 200}
 
 # multipart 上传参数（经真机实测，见 docs/spike-multipart-upload.md）
 _PART_SIZE = 64 * 1024 * 1024            # 64MB 每片
@@ -83,18 +83,12 @@ def _format_gib(value: int) -> str:
 def _validate_upload_file_size(
     file_size: int,
     *,
-    user: User | None,
-    request_code: str = "",
+    max_file_size: int,
+    is_guest: bool,
 ) -> None:
-    settings = get_settings()
-    max_file_size = (
-        settings.user_max_file_size
-        if user or request_code
-        else settings.guest_max_file_size
-    )
     if file_size <= max_file_size:
         return
-    if not user and not request_code:
+    if is_guest:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"游客单文件上限为 {_format_gib(max_file_size)}，登录后可上传更大文件",
@@ -105,14 +99,9 @@ def _validate_upload_file_size(
     )
 
 
-def _validate_share_expiry(expires_hours: int, *, is_user: bool) -> None:
-    max_expires_hours = 30 * 24 if is_user else 3 * 24
-    if expires_hours > max_expires_hours:
-        role = "登录用户" if is_user else "游客"
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"{role}分享有效期最长为 {max_expires_hours // 24} 天",
-        )
+def _validate_share_expiry(expires_hours: int, *, options: list[int], role: str) -> None:
+    if expires_hours not in options:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{role}分享有效期不在允许选项中")
 
 
 def _share_logical_file_count(share) -> int:
@@ -137,6 +126,27 @@ def _upload_commit_response(settings, share, file_count: int | None = None) -> U
         file_count=file_count if file_count is not None else _share_logical_file_count(share),
         revoke_token=share.revoke_token,
     )
+
+
+async def _settle_share_quota(share, redis, policy, db) -> None:
+    if share.quota_settled_at is not None:
+        return
+    if share.quota_scope and share.quota_identity:
+        service = QuotaService(redis)
+        for reservation_id in share.quota_reservation_ids:
+            await service.consume_reservation(share.quota_scope, share.quota_identity, reservation_id)
+        if share.quota_legacy_bytes:
+            await service.consume_unreserved(
+                scope=share.quota_scope,
+                identity=share.quota_identity,
+                policy=policy,
+                size=share.quota_legacy_bytes,
+                settlement_id=f"share:{share.id}",
+            )
+        for batch_id in share.quota_batch_ids:
+            await service.finalize_batch(share.quota_scope, share.quota_identity, batch_id)
+    share.quota_settled_at = datetime.now(UTC)
+    await db.commit()
 
 
 def _parse_uuid(value: str, field_name: str) -> uuid.UUID:
@@ -266,13 +276,6 @@ async def upload_init(
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
-    logical_file_size = body.logical_file_size or body.file_size
-    _validate_upload_file_size(
-        logical_file_size,
-        user=user,
-        request_code=body.request_code,
-    )
-
     # 单个 chunk 不能超过 1GB（TOS 限制）
     _ONE_GB = 1024 * 1024 * 1024
     if body.file_size > _ONE_GB:
@@ -280,55 +283,75 @@ async def upload_init(
 
     # --- 配额检查 ---
     redis = request.app.state.redis
-    request_owner_id = None
-    if redis is not None:
-        from app.services.quota import QuotaService
-        quota_svc = QuotaService(redis)
-        from app.db.session import get_session_factory
-        async with get_session_factory()() as db:
-            quota_config = await get_quota_config(db)
-            if body.request_code:
-                from sqlalchemy import select
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
+    quota_svc = QuotaService(redis)
+    from app.db.session import get_session_factory
+    from app.models.system import FileRequest
+    from app.utils.security import verify_secret
 
-                from app.models.system import FileRequest
-                from app.utils.security import verify_secret
-                req = await db.scalar(select(FileRequest).where(FileRequest.code == body.request_code, FileRequest.revoked_at.is_(None)))
-                if not req:
-                    raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
-                if req.expires_at and req.expires_at < datetime.now(UTC):
-                    raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
-                if req.password_hash and not verify_secret(body.request_password, req.password_hash):
-                    raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
-                request_owner_id = str(req.owner_id)
-            else:
-                active_user_id = str(user.id) if user else None
-                active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip, guest_id=None if active_user_id else guest_id)
-                max_shares = quota_config[
-                    "user_max_active_shares" if active_user_id else "guest_max_active_shares"
-                ]
-                if active_count >= max_shares:
-                    raise HTTPException(
-                        status.HTTP_429_TOO_MANY_REQUESTS,
-                        _active_share_limit_message(active_count, max_shares),
-                    )
-        if request_owner_id:
-            # 大文件：仅第一个 chunk 做配额预检（按逻辑文件总大小）
-            quota_size = body.logical_file_size if body.logical_file_size > 0 and body.chunk_index == 0 else body.file_size
-            # 非第一个 chunk 跳过配额检查（commit 时统一扣减）
-            if body.chunk_index == 0:
-                result = await quota_svc.check_user_with_config(request_owner_id, quota_size, quota_config)
-            else:
-                result = None
-        elif user:
-            quota_size = body.logical_file_size if body.logical_file_size > 0 and body.chunk_index == 0 else body.file_size
-            if body.chunk_index == 0:
-                result = await quota_svc.check_user_with_config(str(user.id), quota_size, quota_config)
-            else:
-                result = None
+    request_owner_id = None
+    async with get_session_factory()() as db:
+        effective = await get_effective_policy(db)
+        if body.request_code:
+            req = await db.scalar(select(FileRequest).where(
+                FileRequest.code == body.request_code,
+                FileRequest.revoked_at.is_(None),
+            ))
+            if not req:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
+            if req.expires_at and req.expires_at < datetime.now(UTC):
+                raise HTTPException(status.HTTP_410_GONE, "请求链接已过期")
+            if req.password_hash and not verify_secret(body.request_password, req.password_hash):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
+            request_owner_id = str(req.owner_id)
+            audience_policy = effective.config.user
+            max_file_size = req.max_file_bytes
         else:
-            result = await quota_svc.check_guest_with_config(guest_id, body.file_size, quota_config)
-        if result is not None and not result.allowed:
+            active_user_id = str(user.id) if user else None
+            audience_policy = effective.config.user if user else effective.config.guest
+            max_file_size = audience_policy.max_file_bytes
+            active_count = await _count_active_shares(
+                db,
+                user_id=active_user_id,
+                ip=ip,
+                guest_id=None if active_user_id else guest_id,
+            )
+            if active_count >= audience_policy.max_active_shares:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    _active_share_limit_message(active_count, audience_policy.max_active_shares),
+                )
+
+    if body.chunk_total > 1 and body.logical_file_size <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "分片上传必须提供逻辑文件总大小")
+    logical_file_size = body.file_size if body.chunk_total == 1 else body.logical_file_size
+    _validate_upload_file_size(
+        logical_file_size,
+        max_file_size=max_file_size,
+        is_guest=not user and not request_owner_id,
+    )
+    scope, identity = quota_identity(
+        user_id=request_owner_id or (str(user.id) if user else None),
+        guest_id=guest_id,
+    )
+    batch_id = body.upload_batch_id.strip() or f"legacy-{scope}-{identity}"
+    logical_file_id = body.logical_file_id or str(uuid.uuid4())
+    quota_reservation_id = f"{batch_id}:{logical_file_id}"
+    reservation_created = False
+    if body.chunk_index == 0:
+        result = await quota_svc.reserve(
+            scope=scope,
+            identity=identity,
+            policy=audience_policy,
+            policy_version=effective.version,
+            batch_id=batch_id,
+            reservation_id=quota_reservation_id,
+            size=logical_file_size,
+        )
+        if not result.allowed:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
+        reservation_created = result.created
 
     if body.file_size == 0:
         store_uri = f"{_EMPTY_URI_PREFIX}{secrets.token_urlsafe(16)}"
@@ -352,8 +375,14 @@ async def upload_init(
             "is_empty": True,
             "chunk_index": body.chunk_index,
             "chunk_total": body.chunk_total,
-            "logical_file_id": body.logical_file_id or None,
+            "logical_file_id": logical_file_id,
             "logical_file_size": body.logical_file_size,
+            "upload_batch_id": batch_id,
+            "quota_scope": scope,
+            "quota_identity": identity,
+            "quota_reservation_id": quota_reservation_id,
+            "quota_policy_version": effective.version,
+            "quota_reserved_size": logical_file_size,
         }
     else:
         # --- 调豆包 init_upload ---
@@ -364,6 +393,8 @@ async def upload_init(
                 file_ext=body.file_ext or body.file_name.rsplit(".", 1)[-1] if "." in body.file_name else "",
             )
         except DoubaoClientError as e:
+            if reservation_created:
+                await quota_svc.release_reservation(scope, identity, quota_reservation_id)
             log.error("doubao init_upload failed: %s", e)
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试") from e
 
@@ -388,19 +419,29 @@ async def upload_init(
             "is_empty": False,
             "chunk_index": body.chunk_index,
             "chunk_total": body.chunk_total,
-            "logical_file_id": body.logical_file_id or None,
+            "logical_file_id": logical_file_id,
             "logical_file_size": body.logical_file_size,
+            "upload_batch_id": batch_id,
+            "quota_scope": scope,
+            "quota_identity": identity,
+            "quota_reservation_id": quota_reservation_id,
+            "quota_policy_version": effective.version,
+            "quota_reserved_size": logical_file_size,
         }
 
     # --- 生成 commit_token，存 Redis ---
     commit_token = secrets.token_urlsafe(32)
     commit_token_expires_at = datetime.now(UTC) + _COMMIT_TOKEN_TTL
-    if redis is not None:
+    try:
         await redis.setex(
             f"nyy:commit:{commit_token}",
             int(_COMMIT_TOKEN_TTL.total_seconds()),
             json.dumps(token_data),
         )
+    except Exception:
+        if reservation_created:
+            await quota_svc.release_reservation(scope, identity, quota_reservation_id)
+        raise
 
     return UploadInitResponse(
         upload_url=upload_url,
@@ -409,6 +450,57 @@ async def upload_init(
         commit_token=commit_token,
         commit_token_expires_at=commit_token_expires_at,
     )
+
+
+@router.post("/cancel", summary="取消上传批次并释放预留额度")
+async def upload_cancel(
+    body: UploadBatchCancelRequest,
+    request: Request,
+    user: User | None = Depends(get_current_user_optional),
+):
+    redis = request.app.state.redis
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
+    ip = _get_client_ip(request)
+    guest_id = _get_guest_id(request, ip)
+    owner_id = str(user.id) if user else None
+    request_id = None
+    if body.request_code:
+        from app.db.session import get_session_factory
+        from app.models.system import FileRequest
+        from app.utils.security import verify_secret
+
+        async with get_session_factory()() as db:
+            req = await db.scalar(select(FileRequest).where(
+                FileRequest.code == body.request_code,
+                FileRequest.revoked_at.is_(None),
+            ))
+            if not req:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "请求链接不存在")
+            if req.password_hash and not verify_secret(body.request_password, req.password_hash):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
+            owner_id = str(req.owner_id)
+            request_id = req.id
+    scope, identity = quota_identity(user_id=owner_id, guest_id=guest_id)
+    from app.db.session import get_session_factory
+    from app.models.share import Share
+    from app.models.system import FileRequestUpload
+
+    async with get_session_factory()() as db:
+        committed_share = await db.scalar(select(Share.id).where(
+            Share.upload_batch_id == body.upload_batch_id,
+            Share.owner_id == owner_id if owner_id else Share.guest_id == guest_id,
+        ))
+        committed_request = None
+        if request_id:
+            committed_request = await db.scalar(select(FileRequestUpload.id).where(
+                FileRequestUpload.request_id == request_id,
+                FileRequestUpload.upload_batch_id == body.upload_batch_id,
+            ))
+        if committed_share or committed_request:
+            raise HTTPException(status.HTTP_409_CONFLICT, "上传批次已提交，不能取消")
+    released = await QuotaService(redis).cancel_batch(scope, identity, body.upload_batch_id)
+    return {"message": "上传批次已取消", "released_reservations": released}
 
 
 @router.post(
@@ -425,12 +517,6 @@ async def multipart_init(
     ip = _get_client_ip(request)
     guest_id = _get_guest_id(request, ip)
 
-    _validate_upload_file_size(
-        body.file_size,
-        user=user,
-        request_code=body.request_code,
-    )
-
     # TOS 在超过 1GB 时切换到 large file 模式。
     is_large_file = body.file_size > _LARGE_FILE_SIZE
 
@@ -440,16 +526,14 @@ async def multipart_init(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "缓存服务暂时不可用，请稍后重试")
 
     request_owner_id = None
-    from app.services.quota import QuotaService
     quota_svc = QuotaService(redis)
     from app.db.session import get_session_factory
-    async with get_session_factory()() as db:
-        quota_config = await get_quota_config(db)
-        if body.request_code:
-            from sqlalchemy import select
+    from app.models.system import FileRequest
+    from app.utils.security import verify_secret
 
-            from app.models.system import FileRequest
-            from app.utils.security import verify_secret
+    async with get_session_factory()() as db:
+        effective = await get_effective_policy(db)
+        if body.request_code:
             req = await db.scalar(select(FileRequest).where(
                 FileRequest.code == body.request_code, FileRequest.revoked_at.is_(None)
             ))
@@ -460,24 +544,45 @@ async def multipart_init(
             if req.password_hash and not verify_secret(body.request_password, req.password_hash):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "访问码错误")
             request_owner_id = str(req.owner_id)
+            audience_policy = effective.config.user
+            max_file_size = req.max_file_bytes
         else:
             active_user_id = str(user.id) if user else None
-            active_count = await _count_active_shares(db, user_id=active_user_id, ip=ip, guest_id=None if active_user_id else guest_id)
-            max_shares = quota_config[
-                "user_max_active_shares" if active_user_id else "guest_max_active_shares"
-            ]
-            if active_count >= max_shares:
+            audience_policy = effective.config.user if user else effective.config.guest
+            max_file_size = audience_policy.max_file_bytes
+            active_count = await _count_active_shares(
+                db,
+                user_id=active_user_id,
+                ip=ip,
+                guest_id=None if active_user_id else guest_id,
+            )
+            if active_count >= audience_policy.max_active_shares:
                 raise HTTPException(
                     status.HTTP_429_TOO_MANY_REQUESTS,
-                    _active_share_limit_message(active_count, max_shares),
+                    _active_share_limit_message(active_count, audience_policy.max_active_shares),
                 )
-    if request_owner_id:
-        result = await quota_svc.check_user_with_config(request_owner_id, body.file_size, quota_config)
-    elif user:
-        result = await quota_svc.check_user_with_config(str(user.id), body.file_size, quota_config)
-    else:
-        result = await quota_svc.check_guest_with_config(guest_id, body.file_size, quota_config)
-    if result is not None and not result.allowed:
+
+    _validate_upload_file_size(
+        body.file_size,
+        max_file_size=max_file_size,
+        is_guest=not user and not request_owner_id,
+    )
+    scope, identity = quota_identity(
+        user_id=request_owner_id or (str(user.id) if user else None),
+        guest_id=guest_id,
+    )
+    batch_id = body.upload_batch_id.strip() or f"legacy-{scope}-{identity}"
+    quota_reservation_id = f"{batch_id}:{body.logical_file_id}"
+    result = await quota_svc.reserve(
+        scope=scope,
+        identity=identity,
+        policy=audience_policy,
+        policy_version=effective.version,
+        batch_id=batch_id,
+        reservation_id=quota_reservation_id,
+        size=body.file_size,
+    )
+    if not result.allowed:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, result.reason)
 
     # 调豆包：prepare/apply 拿 store_uri，再 init_multipart 拿 upload_id
@@ -492,6 +597,8 @@ async def multipart_init(
             is_large_file=is_large_file,
         )
     except DoubaoClientError as e:
+        if result.created:
+            await quota_svc.release_reservation(scope, identity, quota_reservation_id)
         log.error("multipart_init failed: %s", e)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "上传服务暂时不可用，请稍后重试") from e
 
@@ -526,12 +633,23 @@ async def multipart_init(
         "chunk_index": 0,
         "chunk_total": 1,
         "logical_file_size": body.file_size,
+        "upload_batch_id": batch_id,
+        "quota_scope": scope,
+        "quota_identity": identity,
+        "quota_reservation_id": quota_reservation_id,
+        "quota_policy_version": effective.version,
+        "quota_reserved_size": body.file_size,
     }
-    await redis.setex(
-        f"nyy:mpu:{commit_token}",
-        int(_COMMIT_TOKEN_TTL.total_seconds()),
-        json.dumps(session_data),
-    )
+    try:
+        await redis.setex(
+            f"nyy:mpu:{commit_token}",
+            int(_COMMIT_TOKEN_TTL.total_seconds()),
+            json.dumps(session_data),
+        )
+    except Exception:
+        if result.created:
+            await quota_svc.release_reservation(scope, identity, quota_reservation_id)
+        raise
 
     return MultipartInitResponse(
         multipart_token=commit_token,
@@ -640,9 +758,6 @@ async def upload_commit(
     empty_dirs = _normalize_empty_dirs(body.empty_dirs)
     if not body.files and not empty_dirs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请至少选择一个文件或空文件夹")
-    if body.max_downloads not in _ALLOWED_MAX_DOWNLOADS:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "下载次数上限不合法")
-
     upload_batch_id = body.upload_batch_id.strip() or None
 
     from sqlalchemy import select
@@ -655,12 +770,16 @@ async def upload_commit(
     factory = get_session_factory()
     if upload_batch_id:
         async with factory() as db:
+            identity_filter = Share.owner_id == user.id if user else Share.guest_id == _get_guest_id(request, _get_client_ip(request))
             existing_share = await db.scalar(
                 select(Share)
                 .options(selectinload(Share.files), selectinload(Share.logical_files))
-                .where(Share.upload_batch_id == upload_batch_id)
+                .where(Share.upload_batch_id == upload_batch_id, identity_filter)
             )
             if existing_share:
+                existing_config = await get_policy_config_for_version(db, existing_share.policy_version)
+                existing_policy = existing_config.user if existing_share.owner_id else existing_config.guest
+                await _settle_share_quota(existing_share, redis, existing_policy, db)
                 if body.retention_coupon_id:
                     if not user or existing_share.owner_id != user.id:
                         raise HTTPException(status.HTTP_404_NOT_FOUND, "留存券不存在")
@@ -698,14 +817,19 @@ async def upload_commit(
         if token_data["store_uri"] != item.store_uri:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
         token_data["_token_redis_key"] = f"nyy:mpu:{item.commit_token}" if is_mpu else f"nyy:commit:{item.commit_token}"
-        # 合并 commit 请求中的 chunk 信息（优先使用请求中的值）
+        token_batch_id = token_data.get("upload_batch_id")
+        if upload_batch_id and token_batch_id and upload_batch_id != token_batch_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传批次校验失败，请重新上传")
+        # commit 只能确认 init 时签发的分片元数据，不能由客户端改写。
         stored_logical_file_id = token_data.get("logical_file_id")
         if stored_logical_file_id and item.logical_file_id and stored_logical_file_id != item.logical_file_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件校验失败，请重新上传")
+        if int(token_data.get("chunk_index", 0)) != item.chunk_index or int(token_data.get("chunk_total", 1)) != item.chunk_total:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传分片元数据校验失败，请重新上传")
         logical_file_id = item.logical_file_id or stored_logical_file_id or str(uuid.uuid4())
         token_data["_logical_file_id"] = str(_parse_uuid(logical_file_id, "logical_file_id"))
-        token_data["_chunk_index"] = item.chunk_index
-        token_data["_chunk_total"] = item.chunk_total
+        token_data["_chunk_index"] = int(token_data.get("chunk_index", 0))
+        token_data["_chunk_total"] = int(token_data.get("chunk_total", 1))
         file_infos.append(token_data)
 
     # 取第一个文件的信息；纯空目录分享则取当前请求身份/IP
@@ -714,9 +838,26 @@ async def upload_commit(
     if not guest_id:
         guest_id = _get_guest_id(request, ip)
     user_id = file_infos[0].get("user_id") if file_infos else (str(user.id) if user else None)
+    if any(str(info.get("user_id") or "") != str(user_id or "") for info in file_infos):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件身份不一致，请重新上传")
+    identities = {
+        (info.get("quota_scope"), info.get("quota_identity"))
+        for info in file_infos
+        if info.get("quota_scope") and info.get("quota_identity")
+    }
+    if len(identities) > 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传文件身份不一致，请重新上传")
+    quota_scope, quota_identity_value = next(iter(identities)) if identities else quota_identity(user_id=user_id, guest_id=guest_id)
+    token_batch_ids = {
+        str(info["upload_batch_id"])
+        for info in file_infos
+        if info.get("upload_batch_id")
+    }
+    quota_service = QuotaService(redis)
+    for token_batch_id in token_batch_ids:
+        if await quota_service.is_batch_cancelled(quota_scope, quota_identity_value, token_batch_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "上传批次已取消，请重新选择文件")
     total_bytes = sum(f["file_size"] for f in file_infos)
-    if not body.retention_coupon_id:
-        _validate_share_expiry(body.expires_hours, is_user=bool(user_id))
     if body.retention_coupon_id and (
         not user or not user_id or str(user.id) != str(user_id)
     ):
@@ -733,17 +874,40 @@ async def upload_commit(
     missing_logical_files = set(logical_file_specs) - set(file_groups)
     if missing_logical_files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件与上传分片不匹配")
+    for group in file_groups.values():
+        reserved = {
+            (str(info["quota_reservation_id"]), int(info.get("quota_reserved_size", -1)))
+            for info in group
+            if info.get("quota_reservation_id")
+        }
+        if reserved and (len(reserved) != 1 or next(iter(reserved))[1] != sum(int(info["file_size"]) for info in group)):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "上传预留大小与实际文件不一致，请重新上传")
 
     # --- 活跃分享数限制 ---
     created_logical_file_count = 0
     email_delivery_ids: list[uuid.UUID] = []
     async with factory() as db:
-        quota_config = await get_quota_config(db)
+        effective = await get_effective_policy(db)
+        audience_policy = effective.config.user if user_id else effective.config.guest
         active_count = await _count_active_shares(db, user_id=user_id, ip=ip, guest_id=None if user_id else guest_id)
-        if user_id:
-            max_shares = quota_config["user_max_active_shares"]
-        else:
-            max_shares = quota_config["guest_max_active_shares"]
+        max_shares = audience_policy.max_active_shares
+
+    if len(file_groups) > audience_policy.max_files_per_share:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "文件数量超过单次分享限制")
+    if len(empty_dirs) > audience_policy.max_empty_dirs_per_share:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "空目录数量超过单次分享限制")
+    if total_bytes > audience_policy.max_share_bytes:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "文件总大小超过单次分享限制")
+    max_downloads = body.max_downloads if body.max_downloads is not None else audience_policy.default_max_downloads
+    expires_hours = body.expires_hours if body.expires_hours is not None else audience_policy.default_retention_hours
+    if max_downloads not in audience_policy.download_options:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "下载次数上限不在允许选项中")
+    if not body.retention_coupon_id:
+        _validate_share_expiry(
+            expires_hours,
+            options=audience_policy.retention_options_hours,
+            role="登录用户" if user_id else "游客",
+        )
 
     if active_count >= max_shares:
         raise HTTPException(
@@ -772,6 +936,22 @@ async def upload_commit(
 
     # --- 创建 Share + ShareFiles ---
     share_code = gen_short_code()
+    scope, identity = quota_scope, quota_identity_value
+    reservation_ids = sorted({
+        str(info["quota_reservation_id"])
+        for info in file_infos
+        if info.get("quota_reservation_id")
+    })
+    legacy_bytes = sum(
+        int(info["file_size"])
+        for info in file_infos
+        if not info.get("quota_reservation_id")
+    )
+    batch_ids = sorted({
+        str(info["upload_batch_id"])
+        for info in file_infos
+        if info.get("upload_batch_id")
+    })
 
     password_hash = None
     if body.password:
@@ -780,27 +960,35 @@ async def upload_commit(
 
     expires_at = None
     if body.retention_coupon_id:
-        expires_at = datetime.now(UTC) + COUPON_TARGET_TTL
-    elif body.expires_hours > 0:
-        expires_at = datetime.now(UTC) + timedelta(hours=body.expires_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=effective.config.retention_coupon_hours)
+    elif expires_hours > 0:
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_hours)
 
     # 游客生成 revoke_token，登录用户不需要（可通过 /my 管理）
     import secrets
     revoke_token = secrets.token_urlsafe(24) if not user_id else None
 
     async with factory() as db:
-        if upload_batch_id:
-            from sqlalchemy import func
+        from sqlalchemy import func
 
+        lock_identity = user_id or guest_id
+        await db.scalar(select(func.pg_advisory_xact_lock(func.hashtext(f"share:{'user' if user_id else 'guest'}:{lock_identity}"))))
+        if upload_batch_id:
             await db.scalar(
                 select(func.pg_advisory_xact_lock(func.hashtext(upload_batch_id)))
             )
             existing_share = await db.scalar(
                 select(Share)
                 .options(selectinload(Share.files), selectinload(Share.logical_files))
-                .where(Share.upload_batch_id == upload_batch_id)
+                .where(
+                    Share.upload_batch_id == upload_batch_id,
+                    Share.owner_id == user_id if user_id else Share.guest_id == guest_id,
+                )
             )
             if existing_share:
+                stored_config = await get_policy_config_for_version(db, existing_share.policy_version)
+                stored_policy = stored_config.user if existing_share.owner_id else stored_config.guest
+                await _settle_share_quota(existing_share, redis, stored_policy, db)
                 if body.retention_coupon_id:
                     try:
                         await assert_coupon_consumed_by_share(
@@ -813,6 +1001,18 @@ async def upload_commit(
                         raise _coupon_http_exception(exc) from exc
                 return _upload_commit_response(settings, existing_share)
 
+        locked_active_count = await _count_active_shares(
+            db,
+            user_id=user_id,
+            ip=ip,
+            guest_id=None if user_id else guest_id,
+        )
+        if locked_active_count >= audience_policy.max_active_shares:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                _active_share_limit_message(locked_active_count, audience_policy.max_active_shares),
+            )
+
         share = Share(
             code=share_code,
             owner_id=user_id,
@@ -823,10 +1023,16 @@ async def upload_commit(
             upload_batch_id=upload_batch_id,
             password_hash=password_hash,
             expires_at=expires_at,
-            max_downloads=body.max_downloads,
+            max_downloads=max_downloads,
             revoke_token=revoke_token,
             logical_file_count=len(file_groups),
             stored_object_count=len(file_infos),
+            policy_version=effective.version,
+            quota_scope=scope,
+            quota_identity=identity,
+            quota_reservation_ids=reservation_ids,
+            quota_batch_ids=batch_ids,
+            quota_legacy_bytes=legacy_bytes,
             last_activity_at=datetime.now(UTC),
         )
         ordered_logical_ids = [
@@ -921,22 +1127,24 @@ async def upload_commit(
                 existing_share = await db.scalar(
                     select(Share)
                     .options(selectinload(Share.files), selectinload(Share.logical_files))
-                    .where(Share.upload_batch_id == upload_batch_id)
+                    .where(
+                        Share.upload_batch_id == upload_batch_id,
+                        Share.owner_id == user_id if user_id else Share.guest_id == guest_id,
+                    )
                 )
                 if existing_share:
+                    stored_config = await get_policy_config_for_version(db, existing_share.policy_version)
+                    stored_policy = stored_config.user if existing_share.owner_id else stored_config.guest
+                    await _settle_share_quota(existing_share, redis, stored_policy, db)
                     return _upload_commit_response(settings, existing_share)
             raise
         await db.refresh(share)
 
-    # --- 扣减配额 ---
-    from app.services.quota import QuotaService
-    quota_svc = QuotaService(redis)
+    # --- 将上传预留转为已用额度；失败时可通过相同批次安全重试 ---
     async with factory() as db:
-        quota_config = await get_quota_config(db)
-    if user_id:
-        await quota_svc.consume_user_with_config(user_id, total_bytes, quota_config)
-    else:
-        await quota_svc.consume_guest_with_config(guest_id, total_bytes, quota_config)
+        persisted_share = await db.get(Share, share.id)
+        if persisted_share:
+            await _settle_share_quota(persisted_share, redis, audience_policy, db)
 
     # --- 删除所有 commit_token ---
     for info in file_infos:

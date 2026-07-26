@@ -22,6 +22,7 @@ from app.models.share import DownloadLog, DownloadSession, Share, ShareFile, Sha
 from app.models.system import EmailDelivery, FileRequest, FileRequestFile
 from app.models.user import User
 from app.services.doubao_client import CommitResult, DownloadUrlResult, UploadInitResult
+from app.services.quota_policy import EffectiveQuotaPolicy, default_policy_config
 
 
 @pytest.fixture
@@ -39,29 +40,23 @@ def app(redis):
 @pytest.fixture
 def _raise_share_limit():
     """固定成功路径配额，避免依赖测试库历史数据。"""
-    from app.core.config import get_settings
-    settings = get_settings()
-    original = settings.guest_max_active_shares
-    settings.guest_max_active_shares = 9999
-    fixed_quota = {
-        "guest_max_file_bytes": 1024 * 1024 * 1024,
-        "guest_max_active_shares": 9999,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
     with patch(
-        "app.api.v1.uploads.get_quota_config",
-        new_callable=AsyncMock,
-        return_value=fixed_quota,
-    ), patch(
         "app.api.v1.uploads._count_active_shares",
         new_callable=AsyncMock,
         return_value=0,
     ):
         yield
-    settings.guest_max_active_shares = original
+
+
+def _effective_policy(*, guest_limit: int | None = None, guest_active: int | None = None) -> EffectiveQuotaPolicy:
+    config = default_policy_config()
+    guest = config.guest.model_copy(update={
+        "period_limit_bytes": guest_limit or config.guest.period_limit_bytes,
+        "max_file_bytes": min(guest_limit or config.guest.max_file_bytes, config.guest.max_file_bytes),
+        "max_share_bytes": min(guest_limit or config.guest.max_share_bytes, config.guest.max_share_bytes),
+        "max_active_shares": guest_active or config.guest.max_active_shares,
+    })
+    return EffectiveQuotaPolicy(None, 1, datetime.now(UTC), config.model_copy(update={"guest": guest}))
 
 
 @pytest.fixture
@@ -88,33 +83,33 @@ def _mock_init_result() -> UploadInitResult:
 def test_upload_file_size_limits_follow_identity():
     gib = 1024 ** 3
 
-    _validate_upload_file_size(2 * gib, user=None)
-    _validate_upload_file_size(10 * gib, user=None, request_code="request-code")
+    _validate_upload_file_size(2 * gib, max_file_size=2 * gib, is_guest=True)
+    _validate_upload_file_size(10 * gib, max_file_size=10 * gib, is_guest=False)
 
     with pytest.raises(HTTPException) as guest_error:
-        _validate_upload_file_size(2 * gib + 1, user=None)
+        _validate_upload_file_size(2 * gib + 1, max_file_size=2 * gib, is_guest=True)
     assert guest_error.value.status_code == 403
     assert "游客单文件上限为 2GB" in guest_error.value.detail
 
     with pytest.raises(HTTPException) as request_error:
-        _validate_upload_file_size(10 * gib + 1, user=None, request_code="request-code")
+        _validate_upload_file_size(10 * gib + 1, max_file_size=10 * gib, is_guest=False)
     assert request_error.value.status_code == 400
     assert "10GB" in request_error.value.detail
 
 
 def test_share_expiry_limits_follow_identity():
-    _validate_share_expiry(72, is_user=False)
-    _validate_share_expiry(720, is_user=True)
+    _validate_share_expiry(72, options=[1, 6, 24, 72], role="游客")
+    _validate_share_expiry(720, options=[1, 6, 24, 72, 168, 360, 720], role="登录用户")
 
     with pytest.raises(HTTPException) as guest_error:
-        _validate_share_expiry(73, is_user=False)
+        _validate_share_expiry(73, options=[1, 6, 24, 72], role="游客")
     assert guest_error.value.status_code == 400
-    assert guest_error.value.detail == "游客分享有效期最长为 3 天"
+    assert guest_error.value.detail == "游客分享有效期不在允许选项中"
 
     with pytest.raises(HTTPException) as user_error:
-        _validate_share_expiry(721, is_user=True)
+        _validate_share_expiry(721, options=[1, 6, 24, 72, 168, 360, 720], role="登录用户")
     assert user_error.value.status_code == 400
-    assert user_error.value.detail == "登录用户分享有效期最长为 30 天"
+    assert user_error.value.detail == "登录用户分享有效期不在允许选项中"
 
 
 @pytest.mark.asyncio
@@ -227,21 +222,13 @@ async def test_upload_init_quota_exceeded(client, redis):
     注意：固定 mock 配额配置，避免依赖 DB 中运营可调整的 AppConfig
     （生产 DB 的 guest 上限已被调高，若读真实配置该用例会失真）。
     """
-    fixed_quota = {
-        "guest_max_file_bytes": 200 * 1024 * 1024,
-        "guest_max_active_shares": 9999,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
     # 预设当前浏览器游客已用 199 MB
     await redis.set("nyy:quota:guest:guest-quota-full:bytes", str(199 * 1024 * 1024))
 
     with patch(
-        "app.api.v1.uploads.get_quota_config",
+        "app.api.v1.uploads.get_effective_policy",
         new_callable=AsyncMock,
-        return_value=fixed_quota,
+        return_value=_effective_policy(guest_limit=200 * 1024 * 1024),
     ), patch(
         "app.api.v1.uploads._count_active_shares",
         new_callable=AsyncMock,
@@ -258,23 +245,10 @@ async def test_upload_init_quota_exceeded(client, redis):
 @pytest.mark.asyncio
 async def test_guest_quota_isolated_by_guest_id(client, redis):
     """同一 IP 下不同浏览器游客不共享上传额度。"""
-    fixed_quota = {
-        "guest_max_file_bytes": 200 * 1024 * 1024,
-        "guest_max_active_shares": 9999,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
     await redis.set("nyy:quota:guest:guest-phone-device:bytes", str(199 * 1024 * 1024))
 
-    with patch(
-        "app.api.v1.uploads.get_quota_config",
-        new_callable=AsyncMock,
-        return_value=fixed_quota,
-    ):
-        phone_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-phone-device"})
-        laptop_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-laptop-device"})
+    phone_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-phone-device"})
+    laptop_resp = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-laptop-device"})
 
     assert phone_resp.status_code == 200
     assert laptop_resp.status_code == 200
@@ -301,19 +275,10 @@ async def test_guest_active_share_limit_isolated_by_guest_id(client, redis):
         ))
         await db.commit()
 
-    fixed_quota = {
-        "guest_max_file_bytes": 200 * 1024 * 1024,
-        "guest_max_active_shares": 1,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
-
     with patch(
-        "app.api.v1.uploads.get_quota_config",
+        "app.api.v1.uploads.get_effective_policy",
         new_callable=AsyncMock,
-        return_value=fixed_quota,
+        return_value=_effective_policy(guest_active=1),
     ), patch(
         "app.api.v1.uploads.get_doubao_client",
         new_callable=AsyncMock,
@@ -380,8 +345,8 @@ async def test_upload_commit_success(client, redis, _raise_share_limit):
     assert await redis.get(f"nyy:commit:{token}") is None
 
     # 配额应已扣减
-    used = int(await redis.get("nyy:quota:guest:guest-commit-device:bytes") or 0)
-    assert used == 512
+    quota_response = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-commit-device"})
+    assert quota_response.json()["used_bytes"] == 512
 
 
 @pytest.mark.asyncio
@@ -418,7 +383,8 @@ async def test_upload_commit_persists_email_outbox_before_dispatch(client, redis
         })
 
     assert response.status_code == 201
-    assert int(await redis.get("nyy:quota:guest:guest-email-outbox:bytes") or 0) == 512
+    quota_response = await client.get("/api/v1/uploads/quota", headers={"x-nyy-guest-id": "guest-email-outbox"})
+    assert quota_response.json()["used_bytes"] == 512
     from app.db.session import get_session_factory
 
     async with get_session_factory()() as db:
@@ -440,14 +406,27 @@ async def test_upload_commit_persists_email_outbox_before_dispatch(client, redis
 
 
 @pytest.mark.asyncio
-async def test_upload_commit_rejects_legacy_download_limit(client):
+async def test_upload_commit_rejects_legacy_download_limit(client, redis, _raise_share_limit):
     """创建分享时下载次数必须使用固定选项。"""
+    await redis.setex("nyy:commit:unused", 1800, json.dumps({
+        "ip": "127.0.0.1",
+        "guest_id": "guest-download-limit",
+        "file_name": "hello.txt",
+        "file_size": 1,
+        "file_ext": "txt",
+        "store_uri": "tos-cn-i-test/hello.txt",
+        "session_key": "sk",
+        "service_id": "svc",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "session_token": "st",
+    }))
     resp = await client.post("/api/v1/uploads/commit", json={
         "files": [{"commit_token": "unused", "store_uri": "tos-cn-i-test/hello.txt"}],
         "max_downloads": 5,
     })
     assert resp.status_code == 400
-    assert resp.json()["detail"] == "下载次数上限不合法"
+    assert resp.json()["detail"] == "下载次数上限不在允许选项中"
 
 
 @pytest.mark.parametrize("password", ["1", "123", "abcd", "12345"])
@@ -955,8 +934,8 @@ async def test_file_request_commit_rejects_token_for_other_request(client, redis
     resp = await client.post("/api/v1/file-requests/wrong-code/commit", json={
         "files": [{"commit_token": token, "store_uri": "tos-cn-i-test/hello.txt"}],
     })
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "上传文件不属于当前请求链接"
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "请求链接不存在"
 
 
 @pytest.mark.asyncio
@@ -983,6 +962,7 @@ async def test_file_request_commit_limit_is_checked_under_commit_lock(client, re
         token = f"request-lock-token-{idx}"
         await redis.setex(f"nyy:commit:{token}", 1800, json.dumps({
             "ip": "127.0.0.1",
+            "user_id": str(user.id),
             "request_code": request_code,
             "file_name": f"hello-{idx}.txt",
             "file_size": 512,
@@ -999,17 +979,7 @@ async def test_file_request_commit_limit_is_checked_under_commit_lock(client, re
         await asyncio.sleep(0.05)
         return CommitResult(store_uri="tos-cn-i-test/unused.txt", success=True)
 
-    fixed_quota = {
-        "guest_max_file_bytes": 1024 * 1024 * 1024,
-        "guest_max_active_shares": 9999,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
-    with patch("app.api.v1.file_requests.get_quota_config", new_callable=AsyncMock, return_value=fixed_quota), patch(
-        "app.api.v1.file_requests.get_doubao_client", new_callable=AsyncMock
-    ) as mock_get:
+    with patch("app.api.v1.file_requests.get_doubao_client", new_callable=AsyncMock) as mock_get:
         mock_client = AsyncMock()
         mock_client.commit_upload.side_effect = slow_commit_upload
         mock_get.return_value = mock_client

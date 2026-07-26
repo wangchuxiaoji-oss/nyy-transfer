@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
@@ -10,7 +10,7 @@ import {
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { cn } from "@/lib/utils";
 import { computeCRC32 } from "@/lib/crc32";
-import { uploadInit, uploadCommit, multipartInit, multipartMerge, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata, type MultipartInitResponse } from "@/lib/api";
+import { cancelUploadBatch, uploadInit, uploadCommit, multipartInit, multipartMerge, getQuota, type QuotaInfo, type CommitFileItem, type CommitLogicalFileItem, type MediaMetadata, type MultipartInitResponse } from "@/lib/api";
 import { formatXhrStatusError, getErrorMessage, HttpStatusError, isSuccessfulHttpStatus } from "@/lib/errors";
 import { probeMediaMetadata, shouldProbeMediaMetadata, checkCodecCompatibility } from "@/lib/media-metadata";
 import type { DebugLogFn } from "@/lib/debug";
@@ -32,11 +32,7 @@ import {
 } from "@/lib/upload-state";
 
 const MAX_RETRIES = 3;
-const MAX_FILE_SIZE_GUEST = 2 * 1024 * 1024 * 1024; // 游客单文件上限
-const MAX_FILE_SIZE_USER = 10 * 1024 * 1024 * 1024; // 登录用户单文件硬限制
 const CHUNK_SIZE = 512 * 1024 * 1024; // 512 MiB
-const MAX_FILE_COUNT = 500;
-const MAX_EMPTY_DIR_COUNT = 500;
 const SMALL_FILE_XHR_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours per small file
 const COMMIT_MAX_RETRIES = 3;
 const GLOBAL_UPLOAD_CONCURRENCY = 2;
@@ -105,8 +101,8 @@ export function FileUploader({
   const [qrUrl, setQrUrl] = useState<string>("");
   const [quota, setQuota] = useState<QuotaInfo | null>(initialQuota ?? null);
   const [password, setPassword] = useState("");
-  const [expiresHours, setExpiresHours] = useState(loggedIn ? 168 : 1);
-  const [maxDownloads, setMaxDownloads] = useState(loggedIn ? 100 : 10);
+  const [expiresHours, setExpiresHours] = useState(initialQuota?.default_retention_hours ?? (loggedIn ? 168 : 1));
+  const [maxDownloads, setMaxDownloads] = useState(initialQuota?.default_max_downloads ?? (loggedIn ? 100 : 10));
   const [growth, setGrowth] = useState<GrowthMe | null>(null);
   const [retentionCouponId, setRetentionCouponId] = useState("");
   const [showAllFiles, setShowAllFiles] = useState(false);
@@ -122,6 +118,31 @@ export function FileUploader({
   const uploadSamplesRef = useRef<Array<{ at: number; bytes: number }>>([]);
   const lastMetricsUpdateRef = useRef(0);
   const lastDebugMetricsAtRef = useRef(0);
+  const retentionTouchedRef = useRef(false);
+  const downloadsTouchedRef = useRef(false);
+  const appliedPolicyVersionRef = useRef<string | null>(null);
+  const maxFileSize = quota?.max_file_bytes ?? (loggedIn ? 10 : 2) * 1024 ** 3;
+  const maxFileCount = quota?.max_files_per_share ?? (loggedIn ? 500 : 100);
+  const maxEmptyDirCount = quota?.max_empty_dirs_per_share ?? (loggedIn ? 500 : 100);
+  const maxShareSize = quota?.max_share_bytes ?? quota?.limit_bytes ?? Number.MAX_SAFE_INTEGER;
+
+  useEffect(() => {
+    if (!quota) return;
+    const fallbackRetention = loggedIn ? [1, 6, 24, 72, 168, 360, 720] : [1, 6, 24, 72];
+    const fallbackDownloads = loggedIn ? [1, 10, 50, 100, 200, 0] : [1, 10];
+    const retentionOptions = quota.retention_options_hours ?? fallbackRetention;
+    const downloadOptions = quota.download_options ?? fallbackDownloads;
+    const defaultRetention = quota.default_retention_hours ?? (loggedIn ? 168 : 1);
+    const defaultDownloads = quota.default_max_downloads ?? (loggedIn ? 100 : 10);
+    const policyKey = `${loggedIn}:${quota.policy_version ?? 0}:${quota.period_kind ?? "legacy"}:${quota.limit_bytes}`;
+    if (appliedPolicyVersionRef.current !== policyKey) {
+      if (!retentionTouchedRef.current) setExpiresHours(defaultRetention);
+      if (!downloadsTouchedRef.current) setMaxDownloads(defaultDownloads);
+      appliedPolicyVersionRef.current = policyKey;
+    }
+    if (!retentionOptions.includes(expiresHours)) setExpiresHours(defaultRetention);
+    if (!downloadOptions.includes(maxDownloads)) setMaxDownloads(defaultDownloads);
+  }, [expiresHours, loggedIn, maxDownloads, quota]);
 
   useEffect(() => {
     setSupportsDirectoryPicker(typeof window !== "undefined" && "showDirectoryPicker" in window);
@@ -158,6 +179,11 @@ export function FileUploader({
   }, [overall]);
 
   const reset = () => {
+    const activeUploadBatchId = activeUploadBatchIdRef.current;
+    if (activeUploadBatchId) {
+      void cancelUploadBatch({ upload_batch_id: activeUploadBatchId }).catch(() => {});
+      void deleteUploadSession(activeUploadBatchId).catch(() => {});
+    }
     abortRef.current.forEach((xhr) => xhr.abort());
     abortRef.current.clear();
     setOverall("idle");
@@ -207,7 +233,7 @@ export function FileUploader({
   const pickFile = (file: File, uploadName = getFileUploadName(file)): PickedFile => ({ file, uploadName });
 
   const addFiles = (newFiles: PickedFile[], newEmptyDirs: string[] = []) => {
-    const maxSize = loggedIn ? MAX_FILE_SIZE_USER : MAX_FILE_SIZE_GUEST;
+    const maxSize = maxFileSize;
     debugLog?.("upload", "selection:add", {
       incomingFiles: newFiles.length,
       incomingBytes: newFiles.reduce((sum, item) => sum + item.file.size, 0),
@@ -215,7 +241,7 @@ export function FileUploader({
       loggedIn,
     });
     // 检查是否超过游客单文件上限且未登录。
-    const hasLargeFile = newFiles.some(({ file }) => file.size > MAX_FILE_SIZE_GUEST);
+    const hasLargeFile = newFiles.some(({ file }) => file.size > maxFileSize);
     if (hasLargeFile && !loggedIn) {
       debugLog?.("upload", "selection:blocked", { reason: "large-file-requires-login" });
       setError("超过游客单文件上限的大文件需要登录后上传");
@@ -395,6 +421,7 @@ export function FileUploader({
     cancelledRef.current = true;
     abortActiveUploads();
     const activeUploadBatchId = activeUploadBatchIdRef.current;
+    if (activeUploadBatchId) await cancelUploadBatch({ upload_batch_id: activeUploadBatchId }).catch(() => {});
     if (activeUploadBatchId) await deleteUploadSession(activeUploadBatchId).catch(() => {});
     activeUploadBatchIdRef.current = null;
     fileLoadedRef.current.clear();
@@ -596,6 +623,7 @@ export function FileUploader({
       const res = await multipartInit({
         file_name: entry.uploadName, file_size: fileSize, file_ext: ext,
         content_type: contentType, logical_file_id: sessionFile.logical_file_id,
+        upload_batch_id: session.upload_batch_id,
       });
       mpuState = { ...res, parts: new Array(res.part_count).fill(null), merged: false };
       sessionFile.multipart = mpuState;
@@ -747,6 +775,7 @@ export function FileUploader({
             chunk_total: 1,
             logical_file_id: sessionFile.logical_file_id,
             logical_file_size: fileSize,
+            upload_batch_id: session.upload_batch_id,
           });
           debugLog?.("upload", "file:init:done", {
             fileName: uploadName,
@@ -847,6 +876,15 @@ export function FileUploader({
   /** Start uploading all pending files, then commit. */
   const startUpload = async () => {
     if (files.length === 0 && emptyDirs.length === 0) return;
+    const selectedBytes = files.reduce((sum, item) => sum + item.file.size, 0);
+    if (files.some((item) => item.file.size > maxFileSize)) {
+      setError(`有文件超过当前单文件上限 ${formatSize(maxFileSize)}`);
+      return;
+    }
+    if (selectedBytes > maxShareSize || files.length > maxFileCount || emptyDirs.length > maxEmptyDirCount) {
+      setError("当前选择已超过单次分享策略，请移除部分内容");
+      return;
+    }
     cancelledRef.current = false;
     fileLoadedRef.current.clear();
     uploadStartAtRef.current = performance.now();
@@ -860,7 +898,7 @@ export function FileUploader({
     debugLog?.("upload", "start", {
       files: files.length,
       emptyDirs: emptyDirs.length,
-      totalBytes: files.reduce((sum, item) => sum + item.file.size, 0),
+      totalBytes: selectedBytes,
       globalConcurrency: GLOBAL_UPLOAD_CONCURRENCY,
       chunkSize: CHUNK_SIZE,
     });
@@ -885,6 +923,7 @@ export function FileUploader({
           if (completed > 0) setResumeMessage(`已恢复 ${completed}/${total} 个文件`);
           debugLog?.("upload", "session:resume", { uploadBatchId: session.upload_batch_id, completedFiles: completed, totalFiles: total });
         } else {
+          await cancelUploadBatch({ upload_batch_id: existingSession.upload_batch_id }).catch(() => {});
           await deleteUploadSession(existingSession.upload_batch_id);
           session = createSessionForCurrentSelection(generateUUID(), fileKeys);
           await saveUploadSession(session);
@@ -1040,7 +1079,7 @@ export function FileUploader({
             empty_dirs: emptyDirs,
             password: password || undefined,
             expires_hours: expiresHours,
-            max_downloads: maxDownloads || undefined,
+            max_downloads: maxDownloads,
             retention_coupon_id: retentionCouponId || undefined,
           });
           debugLog?.("commit", "done", {
@@ -1103,13 +1142,12 @@ export function FileUploader({
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const onDrop = useCallback(async (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const dropped = await extractFilesFromDrop(e.dataTransfer);
     addFiles(dropped.files, dropped.emptyDirs);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.length]);
+  };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []).map((file) => pickFile(file));
@@ -1529,14 +1567,19 @@ export function FileUploader({
                 超出剩余容量 {formatSize(totalSize - quota.remaining_bytes)}，请移除部分文件
               </p>
             )}
-            {files.length > MAX_FILE_COUNT && (
+            {files.length > maxFileCount && (
               <p className="type-caption text-red-500 dark:text-red-400">
-                文件数量超出上限（最多 {MAX_FILE_COUNT} 个），请移除部分文件
+                文件数量超出上限（最多 {maxFileCount} 个），请移除部分文件
               </p>
             )}
-            {emptyDirs.length > MAX_EMPTY_DIR_COUNT && (
+            {emptyDirs.length > maxEmptyDirCount && (
               <p className="type-caption text-red-500 dark:text-red-400">
-                空文件夹数量超出上限（最多 {MAX_EMPTY_DIR_COUNT} 个），请移除部分空文件夹
+                空文件夹数量超出上限（最多 {maxEmptyDirCount} 个），请移除部分空文件夹
+              </p>
+            )}
+            {totalSize > maxShareSize && (
+              <p className="type-caption text-red-500 dark:text-red-400">
+                文件总大小超出单次分享上限 {formatSize(maxShareSize)}
               </p>
             )}
             {folderWarning && <p className="type-caption text-yellow-600 dark:text-yellow-400">{folderWarning}</p>}
@@ -1551,10 +1594,10 @@ export function FileUploader({
           </button>
           <button
             onClick={startUpload}
-            disabled={(!!quota && totalSize > quota.remaining_bytes) || files.length > MAX_FILE_COUNT || emptyDirs.length > MAX_EMPTY_DIR_COUNT}
+            disabled={(!!quota && totalSize > quota.remaining_bytes) || totalSize > maxShareSize || files.length > maxFileCount || emptyDirs.length > maxEmptyDirCount}
             className={cn(
               "btn-primary",
-              ((!!quota && totalSize > quota.remaining_bytes) || files.length > MAX_FILE_COUNT || emptyDirs.length > MAX_EMPTY_DIR_COUNT) && "!bg-none !bg-gray-200 dark:!bg-gray-800 !text-gray-500 !shadow-none cursor-not-allowed"
+              ((!!quota && totalSize > quota.remaining_bytes) || totalSize > maxShareSize || files.length > maxFileCount || emptyDirs.length > maxEmptyDirCount) && "!bg-none !bg-gray-200 dark:!bg-gray-800 !text-gray-500 !shadow-none cursor-not-allowed"
             )}
           >
             开始上传
@@ -1590,35 +1633,23 @@ export function FileUploader({
                 <label className="text-sm text-gray-500 dark:text-gray-400">有效期</label>
               </div>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { value: 1, label: "1时" },
-                  { value: 6, label: "6时" },
-                  { value: 24, label: "1天" },
-                  { value: 72, label: "3天" },
-                  { value: 168, label: "7天" },
-                  { value: 360, label: "15天" },
-                  { value: 720, label: "30天" },
-                ].map((opt) => {
-                  const locked = !loggedIn && opt.value > 72;
+                {(quota?.retention_options_hours ?? (loggedIn ? [1, 6, 24, 72, 168, 360, 720] : [1, 6, 24, 72])).map((value) => {
+                  const opt = { value, label: value % 24 === 0 ? `${value / 24}天` : `${value}时` };
                   return (
                     <button
                       key={opt.value}
                       onClick={() => {
-                        if (locked) { onLoginClick?.(); return; }
+                        retentionTouchedRef.current = true;
                         setExpiresHours(opt.value);
                       }}
                       className={cn(
                         "relative h-8 rounded-md px-3 text-sm font-medium transition-all",
-                        locked
-                          ? "text-gray-300 dark:text-gray-600 cursor-default"
-                          : expiresHours === opt.value
-                            ? "bg-nyy-500 text-white shadow-sm shadow-nyy-500/25"
-                            : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+                        expiresHours === opt.value
+                          ? "bg-nyy-500 text-white shadow-sm shadow-nyy-500/25"
+                          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
                       )}
-                      title={locked ? "登录后解锁" : undefined}
                     >
                       {opt.label}
-                      {locked && <Lock className="absolute -top-1 -right-1 w-2.5 h-2.5 text-gray-300 dark:text-gray-600" />}
                     </button>
                   );
                 })}
@@ -1657,34 +1688,23 @@ export function FileUploader({
                 <label className="text-sm text-gray-500 dark:text-gray-400">下载上限</label>
               </div>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { value: 1, label: "1次" },
-                  { value: 10, label: "10次" },
-                  { value: 50, label: "50次" },
-                  { value: 100, label: "100次" },
-                  { value: 200, label: "200次" },
-                  { value: 0, label: "不限" },
-                ].map((opt) => {
-                  const locked = !loggedIn && ![1, 10].includes(opt.value);
+                {(quota?.download_options ?? (loggedIn ? [1, 10, 50, 100, 200, 0] : [1, 10])).map((value) => {
+                  const opt = { value, label: value === 0 ? "不限" : `${value}次` };
                   return (
                     <button
                       key={opt.value}
                       onClick={() => {
-                        if (locked) { onLoginClick?.(); return; }
+                        downloadsTouchedRef.current = true;
                         setMaxDownloads(opt.value);
                       }}
                       className={cn(
                         "relative h-8 rounded-md px-3 text-sm font-medium transition-all",
-                        locked
-                          ? "text-gray-300 dark:text-gray-600 cursor-default"
-                          : maxDownloads === opt.value
-                            ? "bg-nyy-500 text-white shadow-sm shadow-nyy-500/25"
-                            : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+                        maxDownloads === opt.value
+                          ? "bg-nyy-500 text-white shadow-sm shadow-nyy-500/25"
+                          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
                       )}
-                      title={locked ? "登录后解锁" : undefined}
                     >
                       {opt.label}
-                      {locked && <Lock className="absolute -top-1 -right-1 w-2.5 h-2.5 text-gray-300 dark:text-gray-600" />}
                     </button>
                   );
                 })}

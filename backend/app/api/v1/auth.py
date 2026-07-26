@@ -176,8 +176,22 @@ class TokenResponse(BaseModel):
 
 class QuotaResponse(BaseModel):
     used_bytes: int
+    reserved_bytes: int
     limit_bytes: int
     remaining_bytes: int
+    reset_at: datetime
+    period_kind: Literal["daily", "monthly"]
+    policy_version: int
+    max_file_bytes: int
+    max_share_bytes: int
+    max_files_per_share: int
+    max_empty_dirs_per_share: int
+    max_active_shares: int
+    max_concurrent_upload_batches: int
+    default_retention_hours: int
+    retention_options_hours: list[int]
+    default_max_downloads: int
+    download_options: list[int]
     ttl_hours: int
 
 

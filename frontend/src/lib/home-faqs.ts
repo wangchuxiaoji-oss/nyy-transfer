@@ -2,29 +2,6 @@
  * 首页 FAQ 数据
  * 可同时被 Server Component（page.tsx 结构化数据）和 Client Component（home-story.tsx UI）导入
  */
-export const HOME_FAQS = [
-  {
-    question: "不注册也能传文件吗？",
-    answer: "可以。游客拥有 2GB / 24 小时周期额度，单文件最高 2GB，最多保留 5 个活跃分享，每条分享最长 3 天。",
-  },
-  {
-    question: "登录后有什么不同？",
-    answer: "登录用户拥有 50GB / 30 天周期额度，单文件最高 10GB，最多保留 30 个活跃分享，普通分享最长 30 天，并可在工作台集中管理。",
-  },
-  {
-    question: "文件会保留多久？",
-    answer: "创建分享时由发送者选择有效期。到期或主动撤销后，公开链接会失效，系统再按存储清理流程处理关联对象；重要文件仍应保留自己的原始副本。",
-  },
-  {
-    question: "可以让别人把文件发给我吗？",
-    answer: "可以。登录后创建收件链接，对方无需账号即可提交。每条收件链接最多接收 10GB，收到的内容会占用创建者账号额度。",
-  },
-  {
-    question: "对方需要安装 App 吗？",
-    answer: "不需要。对方通过现代浏览器打开链接即可查看文件列表、按浏览器能力预览并下载；部分超大文件或特殊媒体格式可能更适合桌面浏览器。",
-  },
-  {
-    question: "拿呀²适合保存唯一原件吗？",
-    answer: "不适合。它是临时传输与收件工具，不是长期网盘或唯一备份。服务会处理上传、预览、兼容性和安全运营所需的信息，也不是端到端加密存储。",
-  },
-];
+import { createHomeFaqs, DEFAULT_QUOTA_POLICY } from "@/lib/quota-policy";
+
+export const HOME_FAQS = createHomeFaqs(DEFAULT_QUOTA_POLICY);

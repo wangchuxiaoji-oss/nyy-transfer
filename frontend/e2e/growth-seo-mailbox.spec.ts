@@ -39,11 +39,11 @@ test.describe("增长与公开内容", () => {
     expect(positions[0]?.y || 0).toBeLessThan(positions[1]?.y || 0);
     await expectNoHorizontalOverflow(page);
     await expect.poll(() => page.locator('script[type="application/ld+json"]').evaluateAll((scripts) => scripts.some((script) => script.textContent?.includes("FAQPage")))).toBe(true);
-    const guestQuota = page.getByText("游客 24 小时额度").locator("..");
+    const guestQuota = page.getByText("游客每日额度").locator("..");
     await guestQuota.scrollIntoViewIfNeeded();
     await expect(guestQuota).toContainText("2GB");
     await expect(page.getByText("游客最长分享").locator("..")).toContainText("3天");
-    await expect(page.getByText("用户 30 天额度").locator("..")).toContainText("50GB");
+    await expect(page.getByText("用户每月额度").locator("..")).toContainText("50GB");
   });
 
   test("首页采集 ref_share 与 UTM 并持久化", async ({ page }) => {

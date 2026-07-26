@@ -42,7 +42,6 @@ type StatusFilter = "all" | "active" | "expired" | "revoked";
 type SizeUnit = "MB" | "GB";
 
 const PAGE_SIZE = 10;
-const DOWNLOAD_OPTIONS = [1, 10, 50, 100, 200, 0];
 const ONE_MB = 1024 * 1024;
 const ONE_GB = 1024 * ONE_MB;
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
@@ -374,8 +373,10 @@ function MyWorkbenchPage() {
       showToast({ title: "访问码需要 4 位数字", type: "warning" });
       return;
     }
-    if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > 100) {
-      showToast({ title: "最大文件数需要在 1 到 100 之间", type: "warning" });
+    const policyMaxFiles = group.policy_max_files ?? 100;
+    const policyMaxBytes = group.policy_max_bytes ?? 10 * ONE_GB;
+    if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > policyMaxFiles) {
+      showToast({ title: `最大文件数需要在 1 到 ${policyMaxFiles} 之间`, type: "warning" });
       return;
     }
     if (maxFiles < group.file_count) {
@@ -384,7 +385,7 @@ function MyWorkbenchPage() {
     }
     if (requestEditMaxBytesDirty) {
       const maxBytesValue = Number(requestEditMaxBytesValue);
-      if (!Number.isFinite(maxBytesValue) || maxBytesValue <= 0 || maxBytes > ONE_GB) {
+      if (!Number.isFinite(maxBytesValue) || maxBytesValue <= 0 || maxBytes > policyMaxBytes) {
         showToast({ title: "收件容量上限需要在允许范围内", type: "warning" });
         return;
       }
@@ -611,7 +612,8 @@ function MyWorkbenchPage() {
                   setEditPassword("");
                   setEditClearPassword(false);
                   setEditExpires("keep");
-                  setEditMaxDownloads(DOWNLOAD_OPTIONS.includes(share.max_downloads) ? String(share.max_downloads) : "");
+                  const downloadOptions = share.download_options ?? [1, 10, 50, 100, 200, 0];
+                  setEditMaxDownloads(downloadOptions.includes(share.max_downloads) ? String(share.max_downloads) : "");
                 }}
                 onEditCancel={() => setEditingId(null)}
                 onEditSave={() => handleEdit(share.code)}
@@ -938,18 +940,14 @@ function ShareCard({ share, isEditing, editPassword, editClearPassword, editExpi
               <span className="type-label retro-text">有效期</span>
               <select value={editExpires} onChange={(event) => onEditExpiresChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
                 <option value="keep">保持不变</option>
-                <option value="0">永不过期</option>
-                <option value="1">1 小时</option>
-                <option value="24">1 天</option>
-                <option value="168">7 天</option>
-                <option value="720">30 天</option>
+                {(share.retention_options_hours ?? [1, 24, 168, 720]).map((hours) => <option key={hours} value={hours}>{hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`}</option>)}
               </select>
             </label>
             <label className="block">
               <span className="type-label retro-text">下载次数</span>
               <select value={editMaxDownloads} onChange={(event) => onEditMaxDownloadsChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
                 {!editMaxDownloads && <option value="" disabled>选择新的下载次数</option>}
-                {DOWNLOAD_OPTIONS.map((value) => <option key={value} value={value}>{value === 0 ? "不限" : `${value} 次`}</option>)}
+                {(share.download_options ?? [1, 10, 50, 100, 200, 0]).map((value) => <option key={value} value={value}>{value === 0 ? "不限" : `${value} 次`}</option>)}
               </select>
               {!editMaxDownloads && <p className="type-caption mt-1.5 text-amber-500">当前上限是旧规则，请选择新的下载次数。</p>}
             </label>
@@ -1098,9 +1096,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
               <span className="type-label retro-text">有效期</span>
               <select value={editExtendHours} onChange={(event) => onEditExtendHoursChange(event.target.value)} className="retro-input type-body-sm mt-1.5 w-full px-3">
                 <option value="keep">保持不变</option>
-                <option value="24">延长 1 天</option>
-                <option value="168">延长 7 天</option>
-                <option value="720">延长 30 天</option>
+                {(group.retention_options_hours ?? [24, 168, 720]).map((hours) => <option key={hours} value={hours}>延长 {hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`}</option>)}
               </select>
             </label>
             <label className="block">
@@ -1108,7 +1104,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
               <input
                 type="number"
                 min={Math.max(1, group.file_count)}
-                max={100}
+                max={group.policy_max_files ?? 100}
                 value={editMaxFiles}
                 onChange={(event) => onEditMaxFilesChange(event.target.value)}
                 className="retro-input type-body-sm mt-1.5 w-full px-3"
@@ -1120,7 +1116,7 @@ function InboxGroupCard({ group, expanded, downloading, isEditing, editTitle, ed
                 <input
                   type="number"
                   min={1}
-                  max={editMaxBytesUnit === "GB" ? 1 : 1024}
+                  max={(group.policy_max_bytes ?? 10 * ONE_GB) / (editMaxBytesUnit === "GB" ? ONE_GB : ONE_MB)}
                   value={editMaxBytesValue}
                   onChange={(event) => onEditMaxBytesValueChange(event.target.value)}
                   className="type-body-sm min-h-[42px] min-w-0 flex-1 bg-transparent px-3 outline-none"

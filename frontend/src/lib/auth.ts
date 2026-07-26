@@ -337,6 +337,8 @@ export interface MyShareItem {
   has_password: boolean;
   download_count: number;
   max_downloads: number;
+  retention_options_hours: number[];
+  download_options: number[];
   last_downloaded_at: string | null;
   created_at: string;
   expires_at: string | null;
@@ -370,6 +372,9 @@ export interface MyInboxGroup {
   total_bytes: number;
   max_files: number;
   max_bytes: number;
+  policy_max_files: number;
+  policy_max_bytes: number;
+  retention_options_hours: number[];
   has_password: boolean;
   revoked: boolean;
   files: MyRequestFileItem[];

@@ -23,6 +23,7 @@ from app.api.v1.admin import (
     doubao,
     emails,
     mailbox,
+    quota_policies,
     reports,
     shares,
     sources,
@@ -39,6 +40,7 @@ router.include_router(reports.router)
 router.include_router(emails.router)
 router.include_router(mailbox.router)
 router.include_router(config.router)
+router.include_router(quota_policies.router)
 router.include_router(audit.router)
 router.include_router(archive.router)
 router.include_router(doubao.router)

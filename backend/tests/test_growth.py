@@ -779,14 +779,6 @@ async def test_coupon_consumption_is_atomic_concurrent_and_forces_90_days(client
             ),
         )
 
-    fixed_quota = {
-        "guest_max_file_bytes": 1024 * 1024 * 1024,
-        "guest_max_active_shares": 9999,
-        "guest_ttl_hours": 24,
-        "user_max_file_bytes": 1024 * 1024 * 1024,
-        "user_max_active_shares": 9999,
-        "user_ttl_hours": 720,
-    }
     auth_headers = {
         "Authorization": f"Bearer {create_access_token(str(referred.id), referred.email)}"
     }
@@ -796,10 +788,6 @@ async def test_coupon_consumption_is_atomic_concurrent_and_forces_90_days(client
         success=True,
     )
     with patch(
-        "app.api.v1.uploads.get_quota_config",
-        new_callable=AsyncMock,
-        return_value=fixed_quota,
-    ), patch(
         "app.api.v1.uploads._count_active_shares",
         new_callable=AsyncMock,
         return_value=0,

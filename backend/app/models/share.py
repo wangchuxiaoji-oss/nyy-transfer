@@ -62,6 +62,17 @@ class Share(Base, TimestampMixin):
     stored_object_count: Mapped[int] = mapped_column(
         Integer, default=0, server_default="0", nullable=False
     )
+    policy_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    quota_scope: Mapped[str | None] = mapped_column(String(16))
+    quota_identity: Mapped[str | None] = mapped_column(String(128))
+    quota_reservation_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    quota_batch_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    quota_legacy_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
+    quota_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     files: Mapped[list[ShareFile]] = relationship(
@@ -80,7 +91,20 @@ class Share(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_shares_owner_created", "owner_id", "created_at"),
         Index("ix_shares_guest_created", "guest_id", "created_at"),
-        Index("ix_shares_upload_batch_id", "upload_batch_id", unique=True),
+        Index(
+            "ix_shares_owner_upload_batch_id",
+            "owner_id",
+            "upload_batch_id",
+            unique=True,
+            postgresql_where=text("owner_id IS NOT NULL AND upload_batch_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_shares_guest_upload_batch_id",
+            "guest_id",
+            "upload_batch_id",
+            unique=True,
+            postgresql_where=text("owner_id IS NULL AND guest_id IS NOT NULL AND upload_batch_id IS NOT NULL"),
+        ),
         Index("ix_shares_created_id", "created_at", "id"),
         Index("ix_shares_total_bytes_id", "total_bytes", "id"),
         Index("ix_shares_download_count_id", "download_count", "id"),
