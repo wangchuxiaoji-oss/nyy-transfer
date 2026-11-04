@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 
 from app import __version__
 from app.api.v1 import api_v1_router
@@ -16,6 +17,18 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 
 log = logging.getLogger(__name__)
+
+
+async def _restore_redis(app: FastAPI, client: Redis, url: str, retry_interval: float = 5) -> None:
+    while True:
+        await asyncio.sleep(retry_interval)
+        try:
+            await client.ping()
+        except Exception:
+            continue
+        app.state.redis = client
+        get_logger("nyy.startup").info("redis reconnected", url=url)
+        return
 
 
 @asynccontextmanager
@@ -31,34 +44,31 @@ async def lifespan(app: FastAPI):
     )
 
     # --- Redis ---
-    redis_client = None
+    redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    app.state.redis = None
+    reconnect_task = None
     try:
-        import redis.asyncio as aioredis
-        redis_client = aioredis.from_url(
-            settings.redis_url, decode_responses=True
-        )
         await redis_client.ping()
+        app.state.redis = redis_client
         slog.info("redis connected", url=settings.redis_url)
-    except Exception as e:
-        slog.warning("redis unavailable, quota/token disabled", error=str(e))
-        redis_client = None
-    app.state.redis = redis_client
+    except Exception as exc:
+        slog.warning("redis unavailable, retrying in background", error=str(exc))
+        reconnect_task = asyncio.create_task(_restore_redis(app, redis_client, settings.redis_url))
 
-    reconciliation_task = None
-    if redis_client is not None:
-        async def reconcile_loop() -> None:
-            from app.services.quota_reconciliation import reconcile_quota_settlements
+    async def reconcile_loop() -> None:
+        from app.services.quota_reconciliation import reconcile_quota_settlements
 
-            while True:
+        while True:
+            if app.state.redis is not None:
                 try:
                     settled = await reconcile_quota_settlements(redis_client)
                     if settled:
                         slog.info("quota settlements reconciled", count=settled)
                 except Exception as exc:
                     slog.warning("quota settlement reconciliation failed", error=str(exc))
-                await asyncio.sleep(60)
+            await asyncio.sleep(60)
 
-        reconciliation_task = asyncio.create_task(reconcile_loop())
+    reconciliation_task = asyncio.create_task(reconcile_loop())
 
     # --- Doubao client / auto verify ---
     from app.services.doubao_auto_verify import (
@@ -72,12 +82,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
-    if reconciliation_task:
-        reconciliation_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await reconciliation_task
-    if redis_client:
-        await redis_client.aclose()
+    for task in (reconnect_task, reconciliation_task):
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+    await redis_client.aclose()
     await shutdown_doubao_auto_verifier()
     await shutdown_doubao_client()
     slog.info("nyy stopped")

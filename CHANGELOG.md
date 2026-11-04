@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-04
+
+### 新增
+
+- 分享页图片画廊、文件筛选与预览元数据展示。
+- 媒体处理任务及版本化播放资源，完善视频与音频预览支持。
+- 批量上传和断点重试相关交互优化。
+
+### 修复
+
+- 视频预览控制栏在无操作时自动收起。
+- Redis 晚于后端启动时自动重新连接，避免上传持续返回缓存服务 503。
+
 ## [1.0.0] - 2026-07-26
 
 ### 新增
@@ -20,5 +33,6 @@
 - 数据库迁移基线为 `20260726_1200`。
 - 初始生产配额策略版本为 `1`。
 
-[Unreleased]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/wangchuxiaoji-oss/nyy-transfer/releases/tag/v1.0.0
