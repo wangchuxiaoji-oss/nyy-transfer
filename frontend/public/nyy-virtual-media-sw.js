@@ -219,14 +219,35 @@ async function fetchWithRetry(url, options, shouldStop) {
   throw lastError || new Error("fetch failed");
 }
 
+function responseMatchesRange(response, options) {
+  const range = options?.headers?.Range || options?.headers?.range;
+  if (!range) return response.status === 200 && response.ok;
+  if (response.status !== 206) return false;
+  const match = /^bytes=(\d+)-(\d+)$/.exec(String(range));
+  if (!match) return false;
+  const contentRange = response.headers.get("Content-Range") || "";
+  const contentLengthHeader = response.headers.get("Content-Length");
+  const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
+  const expectedStart = Number(match[1]);
+  const expectedEnd = Number(match[2]);
+  const contentMatch = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange);
+  return Boolean(
+    contentMatch
+      && Number(contentMatch[1]) === expectedStart
+      && Number(contentMatch[2]) === expectedEnd
+      && Number(contentMatch[3]) > expectedEnd
+      && (contentLength === null || (Number.isFinite(contentLength) && contentLength === expectedEnd - expectedStart + 1)),
+  );
+}
+
 async function fetchFromSources(urls, options, shouldStop) {
   let lastResponse = null;
   let lastError = null;
   for (const url of urls) {
     try {
       const response = await fetchWithRetry(url, options, shouldStop);
-      if (response.ok || response.status === 206) return response;
-      lastResponse = response;
+      if ((response.status === 200 && !options?.headers?.Range && response.ok) || responseMatchesRange(response, options)) return response;
+      lastResponse = new Response(null, { status: 502, statusText: "Invalid ranged response" });
     } catch (error) {
       lastError = error;
     }
@@ -607,6 +628,15 @@ function makeRangeStream(file, start, end, signal, targetClientId = null) {
           if (streamClosed) return;
           if (signal && signal.aborted) { closeStream(controller); return; }
           if (done) {
+            if (activeSliceMeta && !activeSliceMeta.cached && activeSliceMeta.bytesRead !== activeSliceMeta.plannedBytes) {
+              debug("slice:length-mismatch", {
+                sliceIndex: activeSliceMeta.sliceIndex,
+                bytesRead: activeSliceMeta.bytesRead,
+                plannedBytes: activeSliceMeta.plannedBytes,
+              });
+              errorStream(controller, new Error("Ranged media response was truncated"));
+              return;
+            }
             if (activeSliceMeta) {
               if (!activeSliceMeta.cached && activeSliceMeta.bytesRead > 0) {
                 if (activeSliceMeta.bytesRead === activeSliceMeta.plannedBytes) {

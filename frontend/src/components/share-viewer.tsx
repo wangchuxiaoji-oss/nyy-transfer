@@ -606,13 +606,18 @@ function NativeVideoPreview({
   }, [file]);
 
   const handlePlaybackFailure = useCallback((message: string) => {
+    const videoCodec = file.media_metadata?.video_tracks?.[0]?.codec || "";
+    const isHevc = /^(hev1|hvc1|hevc|h265)(\.|$)/i.test(videoCodec);
+    const failureMessage = isHevc
+      ? `${message} 此视频使用 HEVC/H.265 编码；若当前设备不支持，请下载后使用支持 HEVC 的播放器，或转换为 H.264。`
+      : message;
     if (onPlaybackFailure) {
-      onPlaybackFailure(message);
+      onPlaybackFailure(failureMessage);
       return;
     }
-    setErrorMessage(message);
+    setErrorMessage(failureMessage);
     setFailed(true);
-  }, [onPlaybackFailure]);
+  }, [file.media_metadata, onPlaybackFailure]);
 
   const registerVirtualPlaybackUrl = useCallback(async () => {
     const currentFile = fileRef.current;
@@ -736,8 +741,10 @@ function NativeVideoPreview({
     // 但实际仍可能播放成功；MKV 必须交给真实 video 加载结果判断。
     if (mime === "video/x-matroska") return;
     const probe = document.createElement("video");
+    // HEVC 元数据可能只有 hev1/hvc1 标签，缺少 profile/level；
+    // 不据此提前拒绝播放，由实际加载失败时提供兼容性指引。
     if (mime && probe.canPlayType(mime) === "") setFailed(true);
-  }, [playbackUrl, mime, safeUrl]);
+  }, [file.media_metadata, playbackUrl, mime, safeUrl]);
 
   if (preparingVirtualTransport) {
     return (

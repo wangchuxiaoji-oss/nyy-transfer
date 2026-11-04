@@ -1213,8 +1213,8 @@ async def test_file_request_commit_limit_is_checked_under_commit_lock(client, re
 
 
 @pytest.mark.asyncio
-async def test_upload_commit_attaches_playback_assets(client, redis, _raise_share_limit):
-    """commit 时为单对象 MP4 写入自动生成的 playback_assets。"""
+async def test_upload_commit_does_not_wait_for_playback_assets(client, redis, _raise_share_limit):
+    """分享提交不执行耗时的 sidecar 生成。"""
     logical_file_id = str(uuid.uuid4())
     token = "video-commit-token-abc"
     token_data = {
@@ -1238,18 +1238,6 @@ async def test_upload_commit_attaches_playback_assets(client, redis, _raise_shar
         "moov_size": 2048,
         "audio_tracks": [{"codec": "mp4a.40.2", "codec_tag": "mp4a"}],
     }
-    enriched_metadata = {
-        **metadata,
-        "playback_hints": {"needs_virtual_faststart": True},
-        "playback_assets": [{
-            "kind": "mp4_faststart_init",
-            "store_uri": "tos-cn-i-test/movie-init.mp4",
-            "sidecar_size": 2048,
-            "virtual_size": 1024,
-            "source_media_start": 32,
-            "source_media_end": 4096,
-        }],
-    }
     await redis.setex(f"nyy:commit:{token}", 1800, json.dumps(token_data))
 
     with patch(
@@ -1258,7 +1246,7 @@ async def test_upload_commit_attaches_playback_assets(client, redis, _raise_shar
     ) as mock_get, patch(
         "app.api.v1.uploads.attach_playback_assets_for_single_object",
         new_callable=AsyncMock,
-        return_value=enriched_metadata,
+        create=True,
     ) as mock_attach:
         mock_client = AsyncMock()
         mock_client.commit_upload.return_value = CommitResult(
@@ -1283,12 +1271,7 @@ async def test_upload_commit_attaches_playback_assets(client, redis, _raise_shar
         })
 
     assert resp.status_code == 201
-    mock_attach.assert_awaited_once()
-    attach_kwargs = mock_attach.await_args.kwargs
-    assert attach_kwargs["metadata"] == metadata
-    assert attach_kwargs["original_name"] == "movie.mp4"
-    assert attach_kwargs["size"] == 1024
-    assert attach_kwargs["tos_uri"] == "tos-cn-i-test/movie.mp4"
+    mock_attach.assert_not_called()
 
     from app.db.session import get_session_factory
     factory = get_session_factory()
@@ -1299,8 +1282,8 @@ async def test_upload_commit_attaches_playback_assets(client, redis, _raise_shar
             .where(Share.code == resp.json()["share_code"])
         )
     assert logical_file is not None
-    assert logical_file.media_metadata["playback_hints"]["needs_virtual_faststart"] is True
-    assert logical_file.media_metadata["playback_assets"][0]["kind"] == "mp4_faststart_init"
+    assert logical_file.media_metadata["probe_status"] == "ok"
+    assert "playback_assets" not in logical_file.media_metadata
 
 
 @pytest.mark.asyncio

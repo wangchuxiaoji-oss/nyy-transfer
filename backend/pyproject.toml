@@ -1,6 +1,6 @@
 [project]
 name = "nyy"
-version = "1.1.0"
+version = "1.1.1"
 description = "拿呀呀 — 类奶牛快传的轻量文件中转站，文件托管在豆包 TOS"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-04
+
+### 修复
+
+- 上传提交不再同步等待逐个视频生成播放 sidecar，避免批量视频分享创建长时间阻塞。
+- 虚拟 MP4 播放严格校验上游 Range 区间和实际切片长度，拒绝忽略 Range 或截断响应。
+- 分享页检测到浏览器不支持的 MP4 编解码时，明确提示下载或转码。
+
 ## [1.1.0] - 2026-11-04
 
 ### 新增
@@ -33,6 +41,7 @@
 - 数据库迁移基线为 `20260726_1200`。
 - 初始生产配额策略版本为 `1`。
 
-[Unreleased]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/wangchuxiaoji-oss/nyy-transfer/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/wangchuxiaoji-oss/nyy-transfer/releases/tag/v1.0.0

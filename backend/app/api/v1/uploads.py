@@ -45,7 +45,6 @@ from app.services.growth import (
     consume_retention_coupon,
 )
 from app.services.media_jobs import ensure_gallery_jobs, is_gallery_eligible
-from app.services.playback_assets import attach_playback_assets_for_single_object
 from app.services.quota import QuotaGuard, QuotaService, get_quota_snapshot, quota_identity
 from app.services.quota_policy import get_effective_policy, get_policy_config_for_version
 from app.utils.client_ip import get_client_ip as _get_client_ip
@@ -1688,18 +1687,6 @@ async def upload_commit(
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "逻辑文件大小与上传分片不匹配")
             media_metadata = _sanitize_media_metadata(getattr(declared, "media_metadata", None))
             original_name = getattr(declared, "file_name", first["file_name"])
-            if len(group) == 1 and media_metadata and not first.get("is_empty"):
-                try:
-                    media_metadata = await attach_playback_assets_for_single_object(
-                        metadata=media_metadata,
-                        original_name=original_name,
-                        size=logical_size,
-                        tos_uri=first["store_uri"],
-                        client=client,
-                    )
-                    media_metadata = _sanitize_media_metadata(media_metadata)
-                except Exception as exc:
-                    log.warning("playback sidecar auto-generation skipped for %s: %s", original_name, exc)
 
             logical_file = ShareLogicalFile(
                 id=uuid.UUID(logical_id),
