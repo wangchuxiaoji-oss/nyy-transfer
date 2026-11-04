@@ -7,7 +7,7 @@ import type { PlayerActions, PlayerViewState } from "./player-types";
 // —— 常量 ——
 
 const SEEK_STEP_SECONDS = 5;
-const FULLSCREEN_IDLE_HIDE_MS = 3000;
+const CONTROLS_IDLE_HIDE_MS = 3000;
 const SINGLE_CLICK_DELAY_MS = 180;
 const DOUBLE_TAP_DELAY_MS = 280;
 const CONTROL_BUTTON_CLASS =
@@ -36,7 +36,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
   // ——— 播放/UI 状态 ———
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenChromeVisible, setFullscreenChromeVisible] = useState(true);
-  const [touchChromeVisible, setTouchChromeVisible] = useState(true);
+  const [inlineChromeVisible, setInlineChromeVisible] = useState(true);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
   const [progressHover, setProgressHover] = useState(false);
@@ -46,6 +46,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const isPlaying = view.state === "playing";
+  const autoHideControls = view.capabilities.fullscreen.enabled;
   const playable = view.duration > 0 && Number.isFinite(view.duration);
   const isWaiting = view.state === "loading" || view.buffering !== null;
   const showCenterPlay = ["idle", "ready", "paused", "ended"].includes(view.state);
@@ -82,33 +83,35 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
     }
   }, []);
 
-  const scheduleFullscreenHide = useCallback(() => {
+  const scheduleControlsHide = useCallback(() => {
     clearHideTimer();
-    if (!isFullscreen || !isPlayingRef.current || isScrubbing) return;
+    if (!autoHideControls || !isPlayingRef.current || isScrubbing || settingsOpen) return;
     hideTimerRef.current = window.setTimeout(() => {
       setFullscreenChromeVisible(false);
-    }, FULLSCREEN_IDLE_HIDE_MS);
-  }, [clearHideTimer, isFullscreen, isScrubbing]);
+      setInlineChromeVisible(false);
+    }, CONTROLS_IDLE_HIDE_MS);
+  }, [autoHideControls, clearHideTimer, isScrubbing, settingsOpen]);
 
-  const revealFullscreenChrome = useCallback(() => {
+  const revealControls = useCallback(() => {
     setFullscreenChromeVisible(true);
-    scheduleFullscreenHide();
-  }, [scheduleFullscreenHide]);
+    setInlineChromeVisible(true);
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
 
   useEffect(() => {
-    if (!isPlaying || isScrubbing) {
+    if (!isPlaying || isScrubbing || settingsOpen || !autoHideControls) {
       clearHideTimer();
       setFullscreenChromeVisible(true);
-      setTouchChromeVisible(true);
+      setInlineChromeVisible(true);
       return;
     }
-    scheduleFullscreenHide();
+    scheduleControlsHide();
     return clearHideTimer;
-  }, [clearHideTimer, isPlaying, isScrubbing, scheduleFullscreenHide]);
+  }, [autoHideControls, clearHideTimer, isPlaying, isScrubbing, settingsOpen, isFullscreen, scheduleControlsHide]);
 
   const handleActivity = useCallback(() => {
-    if (isFullscreen) revealFullscreenChrome();
-  }, [isFullscreen, revealFullscreenChrome]);
+    revealControls();
+  }, [revealControls]);
 
   const toggleFullscreen = useCallback(async () => {
     const root = rootRef.current;
@@ -147,9 +150,9 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
     [actions, isScrubbing, playable, view.duration, handleActivity],
   );
 
-  const fullscreenChromeHidden = isFullscreen && isPlaying && !fullscreenChromeVisible && !isScrubbing;
-  const touchChromeHidden = !isFullscreen && isPlaying && !touchChromeVisible && !isScrubbing;
-  const chromeHidden = fullscreenChromeHidden || touchChromeHidden;
+  const fullscreenChromeHidden = isFullscreen && autoHideControls && isPlaying && !fullscreenChromeVisible && !isScrubbing && !settingsOpen;
+  const inlineChromeHidden = !isFullscreen && autoHideControls && isPlaying && !inlineChromeVisible && !isScrubbing && !settingsOpen;
+  const chromeHidden = fullscreenChromeHidden || inlineChromeHidden;
   const thumbVisible = isScrubbing || progressHover || (isPointerInside && !chromeHidden);
   const bubbleVisible = playable && (progressHover || isScrubbing) && !chromeHidden;
   const bubblePct = isScrubbing ? progressPct : hoverPct;
@@ -224,7 +227,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
         ignoreNextClickRef.current = false;
       }, 320);
       rootRef.current?.focus({ preventScroll: true });
-      revealFullscreenChrome();
+      revealControls();
       const now = Date.now();
       const previous = lastTapRef.current;
       const rect = event.currentTarget.getBoundingClientRect();
@@ -240,18 +243,17 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
         lastTapRef.current = null;
         const delta = event.clientX < rect.left + rect.width / 2 ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS;
         void actions.seekBy(delta);
-        setTouchChromeVisible(true);
+        setInlineChromeVisible(true);
         return;
       }
       lastTapRef.current = { at: now, x: event.clientX };
       if (tapTimerRef.current !== null) window.clearTimeout(tapTimerRef.current);
       tapTimerRef.current = window.setTimeout(() => {
         tapTimerRef.current = null;
-        if (isPlayingRef.current) setTouchChromeVisible((v) => !v);
-        else setTouchChromeVisible(true);
+        setInlineChromeVisible(true);
       }, DOUBLE_TAP_DELAY_MS);
     },
-    [actions, revealFullscreenChrome],
+    [actions, revealControls],
   );
 
   // ===== 清理 =====
@@ -275,7 +277,9 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
       onClick={handleStageClick}
       onDoubleClick={handleStageDoubleClick}
       onPointerUp={handleStagePointerUp}
-      onPointerMove={handleActivity}
+      onPointerMove={(event) => {
+        if (event.pointerType !== "touch") handleActivity();
+      }}
       onMouseEnter={() => {
         setIsPointerInside(true);
         handleActivity();
@@ -330,6 +334,7 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
       <div
         data-video-control
         data-testid="native-video-controls"
+        inert={chromeHidden}
         onClick={(event) => event.stopPropagation()}
         onDoubleClick={(event) => event.stopPropagation()}
         className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12 transition-opacity duration-300 ${chromeHidden ? "pointer-events-none opacity-0" : "opacity-100 sm:opacity-85 sm:group-hover:opacity-100"}`}
@@ -365,13 +370,13 @@ export function PlayerChrome({ view, actions, children, className = "", rootTest
               setIsScrubbing(true);
               setScrubValue(view.currentTime);
               setProgressHover(true);
-              revealFullscreenChrome();
+              revealControls();
             }}
             onTouchStart={() => {
               setIsScrubbing(true);
               setScrubValue(view.currentTime);
               setProgressHover(true);
-              revealFullscreenChrome();
+              revealControls();
             }}
             onChange={(event) => {
               const next = Number(event.target.value);

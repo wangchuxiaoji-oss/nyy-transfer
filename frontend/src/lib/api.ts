@@ -207,6 +207,43 @@ export interface ShareInfo {
   download_count: number;
   max_downloads: number;
   has_password: boolean;
+  gallery_eligible?: boolean;
+}
+
+export interface GalleryAsset {
+  kind: string;
+  format: string;
+  content_type: string;
+  width: number;
+  height: number;
+  byte_size: number;
+  download_url: string;
+  backup_download_url?: string;
+}
+
+export interface GalleryFile {
+  index: number;
+  file_name: string;
+  file_size: number;
+  content_type: string;
+  status: string;
+  width: number;
+  height: number;
+  error_code: string | null;
+  exif_summary: Record<string, unknown> | null;
+  is_animated: boolean;
+  frame_count: number;
+  assets: GalleryAsset[];
+}
+
+export interface GallerySessionResponse {
+  eligible: boolean;
+  files: GalleryFile[];
+  ready_count: number;
+  pending_count: number;
+  failed_count: number;
+  retry_after_seconds: number;
+  expires_in: number;
 }
 
 export interface ShareFileDownload {
@@ -303,6 +340,20 @@ export async function getShareInfo(code: string): Promise<ShareInfo> {
   return handleResponse(res, "分享不存在或已被删除");
 }
 
+export async function getGallerySession(
+  code: string,
+  password?: string,
+  signal?: AbortSignal,
+  knownReadyIndices: number[] = [],
+): Promise<GallerySessionResponse> {
+  const res = await authFetch(`${API_BASE}/api/v1/shares/${code}/gallery-session`, {
+    method: "POST",
+    signal,
+    body: JSON.stringify({ ...(password ? { password } : {}), known_ready_indices: knownReadyIndices }),
+  });
+  return handleResponse(res, "获取图片画廊失败");
+}
+
 export type ShareInteractionEvent = "page_rendered" | "human_interaction";
 
 export function createLinkRequestId(): string {
@@ -326,9 +377,18 @@ export async function recordShareInteraction(code: string, eventType: ShareInter
   throw error;
 }
 
-interface ShareSessionOptions {
+export interface ShareSessionOptions {
   intent?: "preview" | "download";
   delivery?: "direct" | "same_origin";
+  fileIndices?: number[];
+}
+
+export async function unlockShare(code: string, password: string): Promise<ShareInfo> {
+  const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/unlock`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  return handleResponse(response, "提取码验证失败");
 }
 
 export async function verifyShare(
@@ -340,10 +400,11 @@ export async function verifyShare(
   const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
     method: "POST",
     headers: { "X-NYY-Link-Request-ID": requestId },
-    body: JSON.stringify({ password, request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct" }),
+    body: JSON.stringify({ password, request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct", file_indices: options.fileIndices }),
   });
   if (response.ok) return response.json();
   const error = await createHttpError(response, { fallback: "提取码验证失败" });
+  if (options.fileIndices?.length) throw error;
   if (!isHttpStatusError(error, 404) && !isHttpStatusError(error, 405)) throw error;
   const legacyResponse = await authFetch(`${API_BASE}/api/v1/shares/${code}/verify`, {
     method: "POST",
@@ -361,10 +422,11 @@ export async function downloadShare(
   const response = await authFetch(`${API_BASE}/api/v1/shares/${code}/download-session`, {
     method: "POST",
     headers: { "X-NYY-Link-Request-ID": requestId },
-    body: JSON.stringify({ request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct" }),
+    body: JSON.stringify({ request_id: requestId, intent: options.intent || "download", delivery: options.delivery || "direct", file_indices: options.fileIndices }),
   });
   if (response.ok) return response.json();
   const error = await createHttpError(response, { fallback: "获取下载链接失败" });
+  if (options.fileIndices?.length) throw error;
   if (!isHttpStatusError(error, 404) && !isHttpStatusError(error, 405)) throw error;
   const legacyResponse = await authFetch(`${API_BASE}/api/v1/shares/${code}/download`, {
     headers: { "X-NYY-Link-Request-ID": requestId },

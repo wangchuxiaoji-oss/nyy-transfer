@@ -4,17 +4,19 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { CheckCircle2, Download, Clock, AlertCircle, Package, Flag, X, Play, Pause, Volume2, VolumeX } from "lucide-react";
+import { CheckCircle2, Download, Clock, AlertCircle, Package, Flag, X, Play, Pause, Volume2, VolumeX, ChevronDown, ChevronUp, MoreHorizontal, FolderDown } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { ShareFileBrowser } from "@/components/share-file-browser";
+import { ShareImageGallery } from "@/components/share-image-gallery";
+import { ShareGalleryOtherFiles, type ShareGalleryOtherFile } from "@/components/share-gallery-other-files";
 import { SelfDevelopPlayer, supportsSelfDevelopPlayback } from "@/components/self-develop-player";
 import { NativeVideoPlayer, type NativeVideoErrorInfo, type NativeVideoResumeRequest } from "@/components/native-video-player";
 import { Ac3VideoPreview } from "@/components/ac3-video-preview";
 import { PdfPreview } from "@/components/pdf-preview";
 import {
-  createLinkRequestId, getShareInfo, verifyShare, downloadShare, reportShare, getPublicDownloadConfig, recordShareInteraction,
-  type ShareInfo, type ShareFileDownload,
+  createLinkRequestId, getShareInfo, getGallerySession, unlockShare, verifyShare, downloadShare, reportShare, getPublicDownloadConfig, recordShareInteraction,
+  type GallerySessionResponse, type ShareInfo, type ShareFileDownload,
 } from "@/lib/api";
 import { getAdminShareContent, getAdminShareView, type AdminShareView } from "@/lib/admin";
 import {
@@ -23,6 +25,7 @@ import {
   downloadSmart,
   pickDownloadDirectory,
   supportsDirectoryPicker,
+  type BatchDownloadProgress,
   type DownloadConfig,
   type SmartDownloadProgress,
 } from "@/lib/smart-download";
@@ -43,7 +46,7 @@ type PageState = "loading" | "locked" | "ready" | "not_found" | "expired" | "una
 type FileType = "video" | "image" | "pdf" | "audio" | "text" | "document" | "spreadsheet" | "presentation" | "other";
 type DownloadLinksState = "idle" | "loading" | "ready" | "error";
 type MobilePanel = "files" | "overview" | "scan";
-type DownloadTaskState = "idle" | "running" | "completed";
+type DownloadTaskState = "idle" | "running" | "completed" | "failed";
 type WeChatEnvironment = "wechat" | "wecom";
 
 interface ShareViewerProps {
@@ -67,8 +70,8 @@ function getPublicShareUrl(code: string): string {
 // 分类文件类型（用于选择图标 + 预览策略）
 function classifyFile(name: string): FileType {
   const ext = name.split(".").pop()?.toLowerCase() || "";
-  if (["mp4", "mkv", "wmv", "mov", "webm"].includes(ext)) return "video";
-  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext)) return "image";
+  if (["mp4", "m4v", "mkv", "wmv", "mov", "webm"].includes(ext)) return "video";
+  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif", "heic", "heif", "dng", "cr3", "cr2", "nef", "arw", "raf", "rw2", "orf", "pef"].includes(ext)) return "image";
   if (ext === "pdf") return "pdf";
   if (["mp3", "aac", "wav", "flac", "m4a", "ogg"].includes(ext)) return "audio";
   if (["txt", "md", "json", "csv", "log", "ini", "yml", "yaml", "xml"].includes(ext)) return "text";
@@ -124,6 +127,10 @@ function detectWeChatEnvironment(userAgent: string): WeChatEnvironment | null {
   if (/\bwxwork\//i.test(userAgent)) return "wecom";
   if (/MicroMessenger/i.test(userAgent)) return "wechat";
   return null;
+}
+
+function isMobileBrowser(userAgent: string): boolean {
+  return /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(userAgent);
 }
 
 function hasSafeAudioSource(file: ShareFileDownload): boolean {
@@ -1304,15 +1311,19 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const reportDialogRef = useRef<HTMLDivElement>(null);
   const reportCloseRef = useRef<HTMLButtonElement>(null);
   const reportTriggerRef = useRef<HTMLButtonElement>(null);
+  const galleryDetailsCloseRef = useRef<HTMLButtonElement>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<SmartDownloadProgress | null>(null);
+  const [downloadBatchProgress, setDownloadBatchProgress] = useState<BatchDownloadProgress | null>(null);
   const [downloadProgressFile, setDownloadProgressFile] = useState<ShareFileDownload | null>(null);
   const [downloadTaskState, setDownloadTaskState] = useState<DownloadTaskState>("idle");
+  const [downloadHudExpanded, setDownloadHudExpanded] = useState(false);
   const [downloadCancelArmed, setDownloadCancelArmed] = useState(false);
   const [downloadPreviewSuspended, setDownloadPreviewSuspended] = useState(false);
   const [downloadConfig, setDownloadConfig] = useState<DownloadConfig>(() => defaultDownloadConfig());
   const [directoryDownloadSupported, setDirectoryDownloadSupported] = useState(false);
   const [liVehicleBrowser, setLiVehicleBrowser] = useState(false);
+  const [mobileBrowser, setMobileBrowser] = useState(false);
   const [weChatEnvironment, setWeChatEnvironment] = useState<WeChatEnvironment | null>(null);
   const [weChatNoticeDismissed, setWeChatNoticeDismissed] = useState(false);
   const [qr, setQr] = useState("");
@@ -1323,8 +1334,15 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("files");
   const [previewErrorKey, setPreviewErrorKey] = useState<string | null>(null);
   const [adminStatus, setAdminStatus] = useState<AdminShareView["status"] | null>(null);
+  const [galleryDetailsOpen, setGalleryDetailsOpen] = useState(false);
+  const [galleryState, setGalleryState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [gallerySession, setGallerySession] = useState<GallerySessionResponse | null>(null);
+  const [galleryRequest, setGalleryRequest] = useState<{ password?: string } | null>(null);
+  const [selectedGalleryIndices, setSelectedGalleryIndices] = useState<Set<number>>(() => new Set());
+  const [currentGalleryIndex, setCurrentGalleryIndex] = useState<number | null>(null);
 
   const downloadAbortRef = useRef<AbortController | null>(null);
+  const galleryDownloadInFlightRef = useRef(false);
   const humanInteractionRecordedRef = useRef(false);
   const autoFetchStartedRef = useRef(false);
 
@@ -1342,13 +1360,17 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     const request = isAdminPreview ? getAdminShareView(code) : getShareInfo(code);
     request
       .then((data) => {
-        const shouldAutoFetch = isAdminPreview || (!data.has_password && (
-          isLiVehicleBrowser(navigator.userAgent) || shouldAutoPrepareSingleDocument(data)
-        ));
+        const shouldUseGallery = !isAdminPreview && !data.has_password && data.gallery_eligible === true;
+        const shouldAutoFetch = !shouldUseGallery && (isAdminPreview || !data.has_password);
         setShare(data);
         if (isAdminPreview) setAdminStatus((data as AdminShareView).status);
         setMobilePanel(getDefaultMobilePanel(data));
         setDownloadState(shouldAutoFetch ? "loading" : "idle");
+        setGalleryState(shouldUseGallery ? "loading" : "idle");
+        setGalleryRequest(shouldUseGallery ? {} : null);
+        setGallerySession(null);
+        setSelectedGalleryIndices(new Set());
+        setCurrentGalleryIndex(null);
         setPageState(!isAdminPreview && data.has_password ? "locked" : "ready");
         if (!isAdminPreview) window.requestAnimationFrame(() => { void recordShareInteraction(code, "page_rendered").catch(() => {}); });
         if (shouldAutoFetch) void autoFetchDownloads();
@@ -1391,6 +1413,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   useEffect(() => {
     setDirectoryDownloadSupported(supportsDirectoryPicker());
     setLiVehicleBrowser(isLiVehicleBrowser(navigator.userAgent));
+    setMobileBrowser(isMobileBrowser(navigator.userAgent));
     const environment = detectWeChatEnvironment(navigator.userAgent);
     setWeChatEnvironment(environment);
     if (environment) {
@@ -1402,6 +1425,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     }
   }, []);
 
+  useEffect(() => {
+    if (!mobileBrowser) return;
+    setSelectedGalleryIndices(new Set());
+  }, [mobileBrowser]);
+
   const dismissWeChatNotice = () => {
     setWeChatNoticeDismissed(true);
     try {
@@ -1410,6 +1438,26 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
       return;
     }
   };
+
+  useEffect(() => {
+    if (!galleryDetailsOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => galleryDetailsCloseRef.current?.focus());
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setGalleryDetailsOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKey);
+      previousFocus?.focus();
+    };
+  }, [galleryDetailsOpen]);
 
   useEffect(() => {
     if (!reportOpen) return;
@@ -1487,6 +1535,91 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     }
   };
 
+  useEffect(() => {
+    if (!galleryRequest || isAdminPreview || !code) return;
+    let cancelled = false;
+    let pollTimer: number | null = null;
+    const abortController = new AbortController();
+    let latestSession: GallerySessionResponse | null = null;
+    let refreshAllAssetsAt = 0;
+    let consecutiveFailures = 0;
+
+    const pollGallery = async (forceAssetRefresh = false) => {
+      try {
+        const refreshAllAssets = forceAssetRefresh || latestSession === null || Date.now() >= refreshAllAssetsAt;
+        const knownReadyIndices = refreshAllAssets ? [] : (latestSession?.files || [])
+          .filter((file) => file.status === "ready" && file.assets.length > 0)
+          .map((file) => file.index);
+        const response = await getGallerySession(
+          code,
+          galleryRequest.password,
+          abortController.signal,
+          knownReadyIndices,
+        );
+        if (cancelled) return;
+        if (!response.eligible) {
+          setGallerySession(response);
+          setGalleryState("error");
+          return;
+        }
+
+        const previousFiles = new Map(latestSession?.files.map((file) => [file.index, file]) || []);
+        const mergedResponse: GallerySessionResponse = {
+          ...response,
+          files: response.files.map((file) => {
+            const previous = previousFiles.get(file.index);
+            return {
+              ...file,
+              assets: file.assets.length === 0 && previous?.assets.length ? previous.assets : file.assets,
+            };
+          }),
+        };
+        latestSession = mergedResponse;
+        consecutiveFailures = 0;
+        if (refreshAllAssets) {
+          refreshAllAssetsAt = Date.now() + Math.max(60, (response.expires_in || 3600) - 60) * 1000;
+        }
+        setGallerySession(mergedResponse);
+        setGalleryState("ready");
+        setSelectedGalleryIndices((current) => {
+          const available = new Set(mergedResponse.files.map((file) => file.index));
+          return new Set(Array.from(current).filter((index) => available.has(index)));
+        });
+        setCurrentGalleryIndex((current) => {
+          if (current !== null && mergedResponse.files.some((file) => file.index === current)) return current;
+          return mergedResponse.files.find((file) => file.status === "ready")?.index ?? mergedResponse.files[0]?.index ?? null;
+        });
+        if (response.pending_count > 0) {
+          const retryDelay = Math.max(0.1, response.retry_after_seconds || 1) * 1000;
+          pollTimer = window.setTimeout(() => { void pollGallery(); }, retryDelay);
+        } else {
+          const refreshDelay = Math.max(1000, refreshAllAssetsAt - Date.now());
+          pollTimer = window.setTimeout(() => { void pollGallery(true); }, refreshDelay);
+        }
+      } catch (error) {
+        if (cancelled || (error instanceof DOMException && error.name === "AbortError")) return;
+        if (latestSession?.eligible) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures === 1) {
+            showToast({ title: "图片画廊更新暂时失败，正在自动重试", type: "warning" });
+          }
+          const retryDelay = Math.min(30, 2 ** consecutiveFailures) * 1000;
+          pollTimer = window.setTimeout(() => { void pollGallery(); }, retryDelay);
+          return;
+        }
+        setGalleryState("error");
+        showToast({ title: getErrorMessage(error, "图片画廊加载失败，已回退到普通分享页"), type: "warning" });
+      }
+    };
+
+    void pollGallery();
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      if (pollTimer !== null) window.clearTimeout(pollTimer);
+    };
+  }, [code, galleryRequest, isAdminPreview]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 同步 ref 与 state（handleVerify 通过 ref 读取最新值，避免闭包陷阱）
   useEffect(() => { pwLatestRef.current = pwInput; }, [pwInput]);
 
@@ -1505,26 +1638,21 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     setPwVerifying(true);
     setPwError("");
     try {
-      const res = await verifyShare(code, latestPw, createLinkRequestId(), { intent: "preview" });
-      setDownloads(res.files);
-      setShare((current) => current ? {
-        ...current,
-        files: res.files.map((file, index) => ({
-          file_name: file.file_name,
-          file_size: file.file_size,
-          file_ext: file.file_name.split(".").pop()?.toLowerCase() || "",
-          content_type: file.content_type,
-          index,
-          is_chunked: file.is_chunked,
-          chunk_count: file.chunks.length,
-          media_metadata: file.media_metadata,
-        })),
-        empty_dirs: res.empty_dirs,
-        total_bytes: res.files.reduce((total, file) => total + file.file_size, 0),
-      } : current);
-      setDownloadState("ready");
+      const unlocked = await unlockShare(code, latestPw);
+      const shouldUseGallery = unlocked.gallery_eligible === true;
+      setShare(unlocked);
+      if (shouldUseGallery) {
+        setDownloads([]);
+        setDownloadState("idle");
+      } else {
+        const res = await verifyShare(code, latestPw, createLinkRequestId(), { intent: "preview" });
+        setDownloads(res.files);
+        setDownloadState("ready");
+      }
+      setGalleryState(shouldUseGallery ? "loading" : "idle");
+      setGalleryRequest(shouldUseGallery ? { password: latestPw } : null);
       setPageState("ready");
-      appendDebugLog("page", "verify:ok", { files: res.files.length });
+      appendDebugLog("page", "verify:ok", { files: unlocked.files.length });
     } catch (err) {
       if (pwLatestRef.current !== latestPw) return;
       appendDebugLog("page", "verify:fail", { error: getErrorMessage(err) });
@@ -1576,6 +1704,7 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   // ===== 获取下载 URL（密码已验证或无密码时） =====
   const fetchDownloadUrls = async (
     intent: "preview" | "download" = "preview",
+    fileIndices?: number[],
   ): Promise<{ files: ShareFileDownload[]; emptyDirs: string[] } | null> => {
     const requestId = createLinkRequestId();
     const updatePreviewState = intent === "preview";
@@ -1591,11 +1720,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
         if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else if (share?.has_password) {
-        const res = await verifyShare(code, pwLatestRef.current, requestId, { intent, delivery });
+        const res = await verifyShare(code, pwLatestRef.current, requestId, { intent, delivery, fileIndices });
         if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       } else {
-        const res = await downloadShare(code, requestId, { intent, delivery });
+        const res = await downloadShare(code, requestId, { intent, delivery, fileIndices });
         if (updatePreviewState) setDownloadState("ready");
         return { files: res.files, emptyDirs: res.empty_dirs };
       }
@@ -1613,15 +1742,19 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     if (!share) return;
     setDownloading(true);
     setPwError("");
-    const res = await fetchDownloadUrls("preview");
+    const intent = galleryState === "error" ? "download" : "preview";
+    const res = await fetchDownloadUrls(intent);
     if (!res) { setDownloading(false); return; }
     setDownloads(res.files);
+    if (intent === "download" && !isAdminPreview) {
+      setShare((current) => current ? { ...current, download_count: current.download_count + 1 } : current);
+    }
     setDownloading(false);
   };
 
   const handleDownloadAll = async () => {
     if (!share) return;
-    if (downloads.length === 0 && share.empty_dirs.length === 0) return;
+    if (share.files.length === 0 && share.empty_dirs.length === 0) return;
     if (!downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled || !directoryDownloadSupported) {
       showToast({
         title: !downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled
@@ -1655,10 +1788,13 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     const abortController = new AbortController();
     downloadAbortRef.current = abortController;
     let lastProgress: SmartDownloadProgress | null = null;
+    let lastBatchProgress: BatchDownloadProgress | null = null;
     setDownloading(true);
     setPwError("");
     setDownloadCancelArmed(false);
     setDownloadProgress(null);
+    setDownloadBatchProgress(null);
+    setDownloadHudExpanded(false);
     setDownloadProgressFile(filesToDownload[0] || null);
     setDownloadTaskState(filesToDownload.length > 0 ? "running" : "idle");
     setDownloadPreviewSuspended(filesToDownload.some(shouldSuspendPreviewForDownload));
@@ -1677,6 +1813,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
           lastProgress = progress;
           setDownloadProgress(progress);
         },
+        onBatchProgress: (progress) => {
+          lastBatchProgress = progress;
+          setDownloadBatchProgress(progress);
+        },
+        concurrency: 3,
       });
       const completedProgress = lastProgress as SmartDownloadProgress | null;
       if (completedProgress) {
@@ -1689,18 +1830,150 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
         showToast({ title: "空文件夹已保存", type: "success" });
       }
     } catch (err) {
-      setDownloadProgress(null);
-      setDownloadProgressFile(null);
-      setDownloadTaskState("idle");
       if (err instanceof DOMException && err.name === "AbortError") {
+        setDownloadProgress(null);
+        setDownloadBatchProgress(null);
+        setDownloadProgressFile(null);
+        setDownloadTaskState("idle");
         showToast({ title: "下载已取消", type: "info" });
       } else {
+        if (lastBatchProgress) {
+          setDownloadBatchProgress(lastBatchProgress);
+          setDownloadTaskState("failed");
+        } else {
+          setDownloadProgress(null);
+          setDownloadProgressFile(null);
+          setDownloadTaskState("idle");
+        }
         showToast({ title: getErrorMessage(err, "批量保存失败"), type: "error" });
       }
     } finally {
       if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
       setDownloadPreviewSuspended(false);
       setDownloading(false);
+    }
+  };
+
+  const handleGalleryDownload = async (requestedIndices: number[]) => {
+    if (!share || requestedIndices.length === 0) return;
+    const availableIndices = new Set(share.files.map((file) => file.index));
+    const fileIndices = Array.from(new Set(requestedIndices)).filter((index) => availableIndices.has(index));
+    if (fileIndices.length === 0) return;
+    if (galleryDownloadInFlightRef.current || downloading) return;
+    galleryDownloadInFlightRef.current = true;
+
+    const isBatch = fileIndices.length > 1;
+    if (isBatch && (!downloadConfig.smart_download_enabled || !downloadConfig.filesystem_access_enabled || !directoryDownloadSupported)) {
+      showToast({
+        title: "当前浏览器不支持将多个文件一次保存到文件夹，请在下方逐个下载原文件。不会生成 ZIP，也不会自动弹出多个下载。",
+        type: "warning",
+        duration: 9000,
+      });
+      galleryDownloadInFlightRef.current = false;
+      return;
+    }
+
+    let directory;
+    if (isBatch) {
+      try {
+        directory = await pickDownloadDirectory();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          galleryDownloadInFlightRef.current = false;
+          return;
+        }
+        showToast({ title: getErrorMessage(error, "无法选择保存文件夹"), type: "error" });
+        galleryDownloadInFlightRef.current = false;
+        return;
+      }
+    }
+
+    setDownloading(true);
+    setPwError("");
+    const response = await fetchDownloadUrls("download", fileIndices);
+    if (!response) {
+      setDownloading(false);
+      galleryDownloadInFlightRef.current = false;
+      return;
+    }
+
+    const files = response.files.map((file) => file.proxy_download_url ? {
+      ...file,
+      download_url: new URL(file.proxy_download_url, window.location.origin).toString(),
+      backup_download_url: "",
+    } : file);
+    setShare((current) => current ? { ...current, download_count: current.download_count + 1 } : current);
+
+    downloadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    downloadAbortRef.current = abortController;
+    let lastProgress: SmartDownloadProgress | null = null;
+    let lastBatchProgress: BatchDownloadProgress | null = null;
+    setDownloadCancelArmed(false);
+    setDownloadProgress(null);
+    setDownloadBatchProgress(null);
+    setDownloadHudExpanded(false);
+    setDownloadProgressFile(files[0] || null);
+    setDownloadTaskState(files.length > 0 ? "running" : "idle");
+    try {
+      const progressOptions = {
+        config: downloadConfig,
+        signal: abortController.signal,
+        debugLog: appendDebugLog,
+        onProgress: (progress: SmartDownloadProgress | null) => {
+          if (!progress) return;
+          lastProgress = progress;
+          setDownloadProgress(progress);
+        },
+        onBatchProgress: (progress: BatchDownloadProgress) => {
+          lastBatchProgress = progress;
+          setDownloadBatchProgress(progress);
+        },
+      };
+      if (isBatch && directory) {
+        await downloadFilesToDirectoryHandle(directory, files, {
+          ...progressOptions,
+          onFileStart: (file) => setDownloadProgressFile(file),
+          concurrency: 3,
+        });
+      } else if (files[0]) {
+        await downloadSmart(files[0], {
+          ...progressOptions,
+          onUnsupported: (message) => showToast({ title: message, type: "warning", duration: 6000 }),
+        });
+      }
+
+      const completedProgress = lastProgress as SmartDownloadProgress | null;
+      if (completedProgress) {
+        setDownloadProgress({ ...completedProgress, downloadedBytes: completedProgress.totalBytes, bytesPerSecond: 0 });
+        setDownloadTaskState("completed");
+      } else {
+        setDownloadProgress(null);
+        setDownloadProgressFile(null);
+        setDownloadTaskState("idle");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setDownloadProgress(null);
+        setDownloadBatchProgress(null);
+        setDownloadProgressFile(null);
+        setDownloadTaskState("idle");
+        showToast({ title: "下载已取消", type: "info" });
+      } else {
+        if (lastBatchProgress) {
+          setDownloadBatchProgress(lastBatchProgress);
+          setDownloadTaskState("failed");
+        } else {
+          setDownloadProgress(null);
+          setDownloadProgressFile(null);
+          setDownloadTaskState("idle");
+        }
+        showToast({ title: getErrorMessage(error, isBatch ? "批量保存失败" : "下载失败"), type: "error" });
+      }
+    } finally {
+      if (downloadAbortRef.current === abortController) downloadAbortRef.current = null;
+      setDownloading(false);
+      galleryDownloadInFlightRef.current = false;
     }
   };
 
@@ -1761,6 +2034,8 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
     downloadAbortRef.current = abortController;
     let lastProgress: SmartDownloadProgress | null = null;
     setDownloadProgress(null);
+    setDownloadBatchProgress(null);
+    setDownloadHudExpanded(false);
     setDownloadProgressFile(downloadFile);
     setDownloadTaskState("running");
     setDownloadPreviewSuspended(shouldSuspendPreviewForDownload(downloadFile));
@@ -1812,9 +2087,11 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
 
   const handleDismissDownloadHud = () => {
     setDownloadProgress(null);
+    setDownloadBatchProgress(null);
     setDownloadProgressFile(null);
     setDownloadTaskState("idle");
     setDownloadCancelArmed(false);
+    setDownloadHudExpanded(false);
   };
 
   useEffect(() => {
@@ -1854,23 +2131,27 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const downloadProgressRatio = downloadProgress ? getProgressRatio(downloadProgress) : 0;
   const downloadProgressPercentLabel = downloadProgress ? getDownloadPercentLabel(downloadProgress, downloadTaskState) : "0%";
   const downloadProgressName = downloadProgress?.currentFileName || downloadProgressFile?.file_name || selectedMeta?.file_name || "正在下载的文件";
-  const downloadSpeedLabel = downloadTaskState === "completed" ? "已完成" : downloadProgress ? formatSpeed(downloadProgress.bytesPerSecond) : "计算中";
+  const downloadSpeedLabel = downloadTaskState === "completed" ? "已完成" : downloadTaskState === "failed" ? "部分失败" : downloadProgress ? formatSpeed(downloadProgress.bytesPerSecond) : "计算中";
   const downloadEtaLabel = downloadProgress && downloadProgress.bytesPerSecond > 0
     ? formatDuration((Math.max(0, downloadProgress.totalBytes - downloadProgress.downloadedBytes)) / downloadProgress.bytesPerSecond)
     : "计算中";
-  const downloadBatchLabel = downloadProgress?.totalFiles && downloadProgress.totalFiles > 1
-    ? `第 ${downloadProgress.currentFileIndex || 1} / ${downloadProgress.totalFiles} 个 · `
-    : "";
-  const downloadStatusLabel = downloadTaskState === "completed" ? "已保存到本地" : "请保持页面打开";
-  const downloadHintLabel = downloadTaskState === "completed" ? "可以关闭此提示" : `${downloadBatchLabel}预计剩余 ${downloadEtaLabel}`;
-  const showDownloadHud = Boolean(downloadProgress && downloadProgressFile && downloadTaskState !== "idle");
-  const downloadActionLabel = downloadTaskState === "completed" ? "关闭" : "取消下载";
+  const downloadBatchLabel = downloadBatchProgress && downloadBatchProgress.files.length > 1
+    ? `并行 ${downloadBatchProgress.activeFiles} 项 · 已完成 ${downloadBatchProgress.completedFiles} / ${downloadBatchProgress.files.length} · `
+    : downloadProgress?.totalFiles && downloadProgress.totalFiles > 1
+      ? `第 ${downloadProgress.currentFileIndex || 1} / ${downloadProgress.totalFiles} 个 · `
+      : "";
+  const downloadStatusLabel = downloadTaskState === "completed" ? "已保存到本地" : downloadTaskState === "failed" ? "部分文件保存失败" : "请保持页面打开";
+  const downloadHintLabel = downloadTaskState === "completed" || downloadTaskState === "failed" ? "可以展开查看各文件结果" : `${downloadBatchLabel}预计剩余 ${downloadEtaLabel}`;
+  const showDownloadHud = Boolean(downloadTaskState !== "idle" && ((downloadProgress && downloadProgressFile) || downloadBatchProgress));
+  const downloadActionLabel = downloadTaskState === "completed" || downloadTaskState === "failed" ? "关闭" : "取消下载";
+  const batchDownloadFiles = downloadBatchProgress?.files || [];
+  const showDownloadStack = batchDownloadFiles.length > 1;
   useEffect(() => {
     if (selectedPreviewKey && previewErrorKey === selectedPreviewKey) return;
     setPreviewErrorKey(null);
   }, [previewErrorKey, selectedPreviewKey]);
   const handleDownloadRailAction = () => {
-    if (downloadTaskState === "completed") {
+    if (downloadTaskState === "completed" || downloadTaskState === "failed") {
       handleDismissDownloadHud();
       return;
     }
@@ -2166,6 +2447,22 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
   const mobileTabs: Array<{ id: MobilePanel; label: string }> = isSingle
     ? [{ id: "overview", label: "概览" }, { id: "scan", label: "扫码" }]
     : [{ id: "files", label: "文件" }, { id: "overview", label: "概览" }, { id: "scan", label: "扫码" }];
+  const showGalleryView = galleryState === "ready" || gallerySession?.eligible === true;
+
+  const galleryFiles = gallerySession?.eligible ? gallerySession.files : [];
+  const galleryFileMap = new Map(galleryFiles.map((file) => [file.index, file]));
+  const otherGalleryFiles: ShareGalleryOtherFile[] = gallerySession?.eligible ? share.files.flatMap((file) => {
+    const galleryFile = galleryFileMap.get(file.index);
+    if (galleryFile && galleryFile.status !== "failed") return [];
+    const failed = galleryFile?.status === "failed";
+    return [{
+      file,
+      failed,
+      reason: failed
+        ? "预览处理失败"
+        : classifyFile(file.file_name) === "image" ? "当前格式不支持画廊预览" : "非图片文件",
+    }];
+  }) : [];
 
   const renderFileListContent = (variant: "desktop" | "mobile") => (
     <ShareFileBrowser
@@ -2232,6 +2529,137 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
 
   return (
     <main className={`nyy-product-shell ${s.tPrimary}`}>
+      {showGalleryView ? (
+        <div className="nyy-product-content mx-auto max-w-[1840px] px-2.5 py-2.5 sm:px-4 sm:py-3 lg:px-6 lg:py-4" data-testid="gallery-view">
+          <header className={s.galleryTopBar} aria-label="画廊分享状态与操作" data-testid="gallery-top-bar">
+            <div className={s.galleryTopBrand}>
+              <BrandLogo href="/" className={s.galleryTopLogo} />
+              <div className={s.galleryTopCopy}>
+                <p className={s.galleryTopTitle}>有人通过{BRAND_NAME}分享给你</p>
+                <p className={s.galleryTopMeta}>{gallerySession ? `${gallerySession.ready_count} 张可浏览 · ` : "正在准备图片 · "}{contentSummary}</p>
+              </div>
+            </div>
+
+            <dl className={s.galleryTopStats} aria-label="分享状态">
+              <div className={s.galleryTopStat}>
+                <dt>图片</dt>
+                <dd>{gallerySession ? `${gallerySession.ready_count} / ${gallerySession.files.length}` : "--"}</dd>
+              </div>
+              <div className={s.galleryTopStat}>
+                <dt>到期</dt>
+                <dd>{expiryLabel}</dd>
+              </div>
+              <div className={s.galleryTopStat}>
+                <dt>下载</dt>
+                <dd>{downloadLabel}</dd>
+              </div>
+            </dl>
+
+            <div className={s.galleryTopActions}>
+              {!weChatEnvironment && (
+                <button type="button" onClick={() => { void handleDownloadAll(); }} disabled={downloading} className={s.gallerySaveAll} data-testid="gallery-download-all" title={canBatchSaveToDirectory ? "选择文件夹并保留原目录结构" : "当前浏览器不支持批量保存时会给出说明"}>
+                  <FolderDown aria-hidden="true" />
+                  <span>{downloading ? "保存中…" : "保存全部"}</span>
+                </button>
+              )}
+              <CopyLinkButton onCopy={handleCopyLink} label="复制链接" copiedLabel="已复制" className={s.galleryCopyAction} iconClassName="h-4 w-4" />
+              <ThemeToggle className={s.galleryThemeAction} />
+              <button type="button" onClick={() => setGalleryDetailsOpen(true)} aria-label="查看分享详情" className={s.galleryDetailsAction} data-testid="gallery-details-trigger">
+                <MoreHorizontal aria-hidden="true" />
+              </button>
+            </div>
+          </header>
+
+          {gallerySession && (gallerySession.pending_count > 0 || gallerySession.failed_count > 0) && (
+            <p className={s.galleryStatusNotice} role="status">
+              {gallerySession.pending_count > 0 && `${gallerySession.pending_count} 张预览处理中`}
+              {gallerySession.pending_count > 0 && gallerySession.failed_count > 0 && " · "}
+              {gallerySession.failed_count > 0 && `${gallerySession.failed_count} 个失败文件已移至下方原文件区`}
+            </p>
+          )}
+
+          <ShareImageGallery
+            files={galleryFiles}
+            loading={galleryState === "loading"}
+            downloading={downloading}
+            selectedIndices={selectedGalleryIndices}
+            currentIndex={currentGalleryIndex}
+            wechatMode={Boolean(weChatEnvironment)}
+            selectionEnabled={!mobileBrowser}
+            formatSize={formatSize}
+            onCurrentChange={setCurrentGalleryIndex}
+            onToggleSelection={(index) => setSelectedGalleryIndices((current) => {
+              const next = new Set(current);
+              if (next.has(index)) next.delete(index);
+              else next.add(index);
+              return next;
+            })}
+            onClearSelection={() => setSelectedGalleryIndices(new Set())}
+            onDownloadFiles={(indices) => { void handleGalleryDownload(indices); }}
+          />
+
+          <ShareGalleryOtherFiles
+            files={otherGalleryFiles}
+            downloading={downloading}
+            formatSize={formatSize}
+            onDownloadFile={(index) => { void handleGalleryDownload([index]); }}
+          />
+
+          <div className={`mt-8 flex items-center justify-center gap-5 text-xs ${s.tMuted}`}>
+            <button ref={reportTriggerRef} onClick={() => setReportOpen(true)} disabled={reported} className="retro-text-button retro-text-button-danger min-h-[44px] px-2 py-1 text-xs"><Flag className="h-3 w-3" /> {reported ? "已举报" : "举报"}</button>
+            <Link href="/" className="inline-flex min-h-[44px] items-center transition-colors hover:text-yc-accent">返回首页</Link>
+          </div>
+          <FooterSlogan />
+
+          {galleryDetailsOpen && (
+            <div className="fixed inset-0 z-[48] sm:hidden" role="dialog" aria-modal="true" aria-labelledby="gallery-details-title" data-testid="gallery-details-sheet">
+              <button type="button" className="absolute inset-0 h-full w-full bg-black/55 backdrop-blur-sm" aria-label="关闭详情遮罩" onClick={() => setGalleryDetailsOpen(false)} />
+              <section className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-[28px] border border-b-0 border-white/15 bg-[color-mix(in_srgb,var(--yc-bg,#0a0418)_94%,white_3%)] px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3 shadow-[0_-24px_70px_rgba(0,0,0,0.38)]">
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" aria-hidden="true" />
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="retro-kicker">分享信息</p>
+                    <h2 id="gallery-details-title" className={`mt-1 font-tech text-base font-black tracking-[0.04em] ${s.tPrimary}`}>图片分享详情</h2>
+                  </div>
+                  <button ref={galleryDetailsCloseRef} type="button" onClick={() => setGalleryDetailsOpen(false)} aria-label="关闭分享详情" className="retro-close-button"><X className="h-4 w-4" /></button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <div className="min-w-0 rounded-xl border border-white/10 bg-white/5 px-2.5 py-3">
+                    <span className={`block text-[9px] ${s.tMuted}`}>图片</span>
+                    <strong className="mt-1 block truncate font-tech text-[11px]">{gallerySession ? `${gallerySession.ready_count} / ${gallerySession.files.length} 张` : "准备中"}</strong>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-white/10 bg-white/5 px-2.5 py-3">
+                    <span className={`block text-[9px] ${s.tMuted}`}>到期</span>
+                    <strong className="mt-1 block truncate font-tech text-[11px]">{expiryLabel}</strong>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-white/10 bg-white/5 px-2.5 py-3">
+                    <span className={`block text-[9px] ${s.tMuted}`}>下载</span>
+                    <strong className="mt-1 block truncate font-tech text-[11px]">{downloadLabel}</strong>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-white/10 bg-white/4 px-3 py-3">
+                  <p className={`font-tech text-[9px] tracking-[0.08em] ${s.tMuted}`}>全部内容</p>
+                  <p className={`mt-1 break-words text-xs leading-5 ${s.tPrimary}`}>{contentSummary}</p>
+                </div>
+
+                {weChatEnvironment && (
+                  <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/8 px-3 py-3">
+                    <p className="font-tech text-[10px] font-bold text-amber-700 dark:text-amber-300">微信浏览提示</p>
+                    <p className={`mt-1 text-[10px] leading-5 ${s.tMuted}`}>普通图片可在灯箱中长按保存或转发；RAW 显示的是预览图，请使用下载按钮获取原文件。</p>
+                  </div>
+                )}
+
+                <div className="mt-4 flex items-center gap-2">
+                  <CopyLinkButton onCopy={handleCopyLink} label="复制分享链接" copiedLabel="链接已复制" className={`${s.ghostBtn} flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-2 px-3 font-tech text-xs`} iconClassName="h-4 w-4" />
+                  <ThemeToggle className="shrink-0" />
+                </div>
+              </section>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="nyy-product-content max-w-[1320px] mx-auto px-4 py-6 lg:px-10">
         {isAdminPreview && adminStatus && (
           <div data-testid="admin-preview-banner" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-400/10 px-4 py-3 text-amber-900 dark:border-amber-400/30 dark:text-amber-100">
@@ -2587,14 +3015,22 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
         {/* 底部品牌 */}
         <FooterSlogan />
       </div>
+      )}
 
       {/* 智能下载进度：固定在视口，避免长文件列表把进度挤到页面底部 */}
       {showDownloadHud && downloadProgress && (
         <div
-          className={`${s.downloadHud} ${downloadTaskState === "completed" ? s.downloadHudComplete : ""}`}
+          className={`${s.downloadHud} ${downloadTaskState === "completed" ? s.downloadHudComplete : ""} ${downloadTaskState === "failed" ? s.downloadHudFailed : ""} ${showDownloadStack ? s.downloadHudStacked : ""} ${downloadHudExpanded ? s.downloadHudExpanded : ""}`}
           role="status"
           aria-live="polite"
+          data-testid="download-progress-hud"
         >
+          {showDownloadStack && !downloadHudExpanded && (
+            <>
+              <span className={`${s.downloadStackCard} ${s.downloadStackCardFirst}`} aria-hidden="true" />
+              <span className={`${s.downloadStackCard} ${s.downloadStackCardSecond}`} aria-hidden="true" />
+            </>
+          )}
           <div className={s.downloadHudVeil} />
           <div className="relative grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <div className="min-w-0">
@@ -2603,6 +3039,19 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
                 <p className={`min-w-0 flex-1 truncate font-tech text-sm font-black tracking-wide ${s.tPrimary}`} title={downloadProgressName}>
                   {downloadProgressName}
                 </p>
+                {showDownloadStack && (
+                  <button
+                    type="button"
+                    className={s.downloadExpandButton}
+                    onClick={() => setDownloadHudExpanded((current) => !current)}
+                    aria-expanded={downloadHudExpanded}
+                    aria-controls="download-file-progress-list"
+                    data-testid="download-progress-toggle"
+                  >
+                    {batchDownloadFiles.length} 个文件
+                    {downloadHudExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+                  </button>
+                )}
               </div>
               <div className={s.downloadProgressTrack} aria-hidden="true">
                 <div
@@ -2629,6 +3078,32 @@ export function ShareViewer({ code, mode = "public" }: ShareViewerProps) {
               <span className={s.downloadCancelLabel}>{downloadActionLabel}</span>
             </button>
           </div>
+          {showDownloadStack && downloadHudExpanded && (
+            <div id="download-file-progress-list" className={s.downloadFileList} data-testid="download-file-progress-list">
+              {batchDownloadFiles.map((item) => {
+                const ratio = Math.min(1, Math.max(0, item.downloadedBytes / Math.max(1, item.totalBytes)));
+                const itemStatus = item.status === "completed" ? "完成" : item.status === "failed" ? "失败" : item.status === "cancelled" ? "已取消" : item.status === "running" ? "下载中" : "等待中";
+                return (
+                  <div key={`${item.index}-${item.fileName}`} className={s.downloadFileRow} data-status={item.status} data-testid="download-file-progress-row">
+                    <div className={s.downloadFileRowHeader}>
+                      <span className={s.downloadFileStateIcon} aria-hidden="true">
+                        {item.status === "completed" ? <CheckCircle2 /> : item.status === "failed" ? <AlertCircle /> : <Clock />}
+                      </span>
+                      <span className={s.downloadFileName} title={item.savedPath || item.fileName}>{item.savedPath || item.fileName}</span>
+                      <span className={s.downloadFileStatus}>{itemStatus}</span>
+                    </div>
+                    <div className={s.downloadFileTrack} aria-label={`${item.fileName} ${Math.floor(ratio * 100)}%`}>
+                      <span style={{ width: `${item.status === "completed" ? 100 : ratio * 100}%` }} />
+                    </div>
+                    <div className={s.downloadFileMeta}>
+                      <span>{formatSize(item.downloadedBytes)} / {formatSize(item.totalBytes)}</span>
+                      <span>{item.status === "running" ? formatSpeed(item.bytesPerSecond) : item.error || itemStatus}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

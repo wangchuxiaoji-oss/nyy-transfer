@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import sys
 import threading
 import types
@@ -470,7 +471,7 @@ async def test_admin_share_sources_and_ip_relations(client):
     assert list_response.status_code == 200
     item = next(item for item in list_response.json()["shares"] if item["code"] == code)
     assert item["source"]["ip"] == "8.8.8.8"
-    assert item["guest_label"].startswith("访客 #")
+    assert re.fullmatch(r"访客 #[A-F0-9]{8}", item["guest_label"])
     assert item["access_event_count"] == 1
     assert sources_response.status_code == 200
     assert sources_response.json()["events"][0]["event_type"] == "view"

@@ -36,6 +36,14 @@ class QuotaCheckResult:
 
 
 @dataclass(frozen=True)
+class QuotaGuard:
+    scope: str
+    identity: str
+    limit_bytes: int
+    exceeded_reason: str
+
+
+@dataclass(frozen=True)
 class QuotaPeriod:
     period_id: str
     reset_at: datetime
@@ -188,6 +196,7 @@ class QuotaService:
         batch_id: str,
         reservation_id: str,
         size: int,
+        guard: QuotaGuard | None = None,
     ) -> QuotaCheckResult:
         period = resolve_period(policy.period_kind)
         key = usage_key(scope, identity, period.period_id)
@@ -195,21 +204,37 @@ class QuotaService:
         active_batches = batches_key(scope, identity)
         reservation_index = reservations_key(scope, identity)
         cancelled_batch = cancelled_batch_key(scope, identity, batch_id)
+        guard_usage = usage_key(guard.scope, guard.identity, period.period_id) if guard else None
         now = datetime.now(UTC)
         usage_ttl = max(1, int((period.reset_at - now).total_seconds())) + USAGE_RETENTION_SECONDS
         batch_expires_at = int(now.timestamp()) + RESERVATION_TTL_SECONDS
         await self._cleanup_expired_reservations(scope, identity)
         await _lazy_migrate_legacy(self.redis, scope, identity, key, usage_ttl)
+        if guard and guard_usage:
+            await _lazy_migrate_legacy(
+                self.redis,
+                guard.scope,
+                guard.identity,
+                guard_usage,
+                usage_ttl,
+            )
 
         for _ in range(8):
             try:
                 async with self.redis.pipeline(transaction=True) as pipe:
                     await pipe.watch(key, reservation, active_batches, cancelled_batch)
+                    if guard_usage:
+                        await pipe.watch(guard_usage)
                     if await pipe.exists(cancelled_batch):
                         await pipe.unwatch()
                         return QuotaCheckResult(allowed=False, reason="上传批次已取消，请重新选择文件")
                     existing = await pipe.get(reservation)
                     used, reserved = await _usage_values(pipe, key)
+                    guard_used, guard_reserved = (
+                        await _usage_values(pipe, guard_usage)
+                        if guard_usage
+                        else (0, 0)
+                    )
                     if existing:
                         payload = json.loads(existing)
                         await pipe.unwatch()
@@ -255,6 +280,17 @@ class QuotaService:
                             remaining_bytes=max(0, policy.period_limit_bytes - used - reserved),
                             reset_at=period.reset_at,
                         )
+                    if guard and guard_used + guard_reserved + size > guard.limit_bytes:
+                        await pipe.unwatch()
+                        return QuotaCheckResult(
+                            allowed=False,
+                            reason=guard.exceeded_reason,
+                            used_bytes=used,
+                            reserved_bytes=reserved,
+                            limit_bytes=policy.period_limit_bytes,
+                            remaining_bytes=max(0, policy.period_limit_bytes - used - reserved),
+                            reset_at=period.reset_at,
+                        )
                     payload = json.dumps({
                         "usage_key": key,
                         "size": size,
@@ -264,10 +300,18 @@ class QuotaService:
                         "policy_version": policy_version,
                         "period_id": period.period_id,
                         "expires_at": batch_expires_at,
+                        "guard": {
+                            "usage_key": guard_usage,
+                            "scope": guard.scope,
+                            "identity": guard.identity,
+                        } if guard and guard_usage else None,
                     }, separators=(",", ":"))
                     pipe.multi()
                     pipe.hincrby(key, "reserved", size)
                     pipe.expire(key, usage_ttl)
+                    if guard_usage:
+                        pipe.hincrby(guard_usage, "reserved", size)
+                        pipe.expire(guard_usage, usage_ttl)
                     pipe.set(reservation, payload, ex=usage_ttl)
                     pipe.zadd(reservation_index, {reservation_id: batch_expires_at})
                     pipe.expire(reservation_index, usage_ttl)
@@ -304,12 +348,18 @@ class QuotaService:
                         raise RuntimeError("上传预留不存在或已释放")
                     payload = json.loads(raw)
                     usage = payload["usage_key"]
+                    guard_usage = (payload.get("guard") or {}).get("usage_key")
                     size = int(payload["size"])
                     index = reservations_key(payload["scope"], payload["identity"])
                     await pipe.watch(usage)
+                    if guard_usage:
+                        await pipe.watch(guard_usage)
                     pipe.multi()
                     pipe.hincrby(usage, "reserved", -size)
                     pipe.hincrby(usage, "used", size)
+                    if guard_usage:
+                        pipe.hincrby(guard_usage, "reserved", -size)
+                        pipe.hincrby(guard_usage, "used", size)
                     pipe.delete(key)
                     pipe.zrem(index, reservation_id)
                     pipe.set(consumed_key, "1", ex=SETTLEMENT_MARKER_TTL_SECONDS)
@@ -331,11 +381,16 @@ class QuotaService:
                         return
                     payload = json.loads(raw)
                     usage = payload["usage_key"]
+                    guard_usage = (payload.get("guard") or {}).get("usage_key")
                     size = int(payload["size"])
                     index = reservations_key(payload["scope"], payload["identity"])
                     await pipe.watch(usage)
+                    if guard_usage:
+                        await pipe.watch(guard_usage)
                     pipe.multi()
                     pipe.hincrby(usage, "reserved", -size)
+                    if guard_usage:
+                        pipe.hincrby(guard_usage, "reserved", -size)
                     pipe.delete(key)
                     pipe.zrem(index, reservation_id)
                     await pipe.execute()

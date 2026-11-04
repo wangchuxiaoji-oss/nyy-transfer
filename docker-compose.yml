@@ -29,3 +29,44 @@ services:
       - "127.0.0.1:8081:8080"
     volumes:
       - ./barkdata:/data
+
+  media-worker:
+    build:
+      context: ./backend
+      dockerfile: deploy/media-worker.Dockerfile
+    container_name: nyy-media-worker
+    restart: unless-stopped
+    user: "${MEDIA_WORKER_UID:-993}:${MEDIA_WORKER_GID:-985}"
+    environment:
+      APP_ENV: dev
+      DATABASE_URL: "${MEDIA_WORKER_DATABASE_URL:-postgresql+asyncpg://nyy:nyy@postgres:5432/nyy}"
+      DOUBAO_SESSION_FILE: /run/nyy/.doubao_session.json
+      DOUBAO_DOWNLOAD_FALLBACK_SESSION_FILES: ""
+      DOUBAO_AUTO_VERIFY_ENABLED: "false"
+      IMAGEX_ACCESS_KEY: "${IMAGEX_ACCESS_KEY:-}"
+      IMAGEX_SECRET_KEY: "${IMAGEX_SECRET_KEY:-}"
+      IMAGEX_SESSION_TOKEN: "${IMAGEX_SESSION_TOKEN:-}"
+      IMAGEX_SERVICE_ID: "${IMAGEX_SERVICE_ID:-}"
+      HOME: /tmp
+    volumes:
+      - ./runtime/doubao-session:/run/nyy
+      - media-worker-tmp:/tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 256
+    stop_grace_period: 20m
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    depends_on:
+      - postgres
+
+volumes:
+  media-worker-tmp:

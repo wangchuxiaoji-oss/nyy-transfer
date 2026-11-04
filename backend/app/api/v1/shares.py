@@ -28,12 +28,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user_optional
+from app.models.media import MediaProcessingJob, ShareMediaAsset
 from app.models.share import DownloadLog, DownloadSession, Share, ShareLogicalFile
 from app.models.system import Report
 from app.models.user import User
 from app.schemas.admin import DownloadConfigResponse
 from app.schemas.share import (
     ChunkDownloadInfo,
+    GalleryAssetInfo,
+    GalleryFileInfo,
+    GallerySessionRequest,
+    GallerySessionResponse,
     ShareDownloadResponse,
     ShareDownloadSessionRequest,
     ShareFileDownload,
@@ -44,12 +49,25 @@ from app.schemas.share import (
     ShareVerifyResponse,
 )
 from app.services.app_config import get_download_config
-from app.services.doubao_client import DoubaoDownloadUrlResolver, DownloadUrlResult
+from app.services.doubao_client import (
+    DoubaoClientError,
+    DoubaoDownloadUrlResolver,
+    DownloadUrlResult,
+)
 from app.services.growth import trigger_referral_qualification
+from app.services.media_jobs import (
+    MEDIA_PROCESSING_VERSION,
+    REQUIRED_GALLERY_ASSET_KINDS,
+    ensure_gallery_jobs,
+    is_gallery_eligible,
+    is_supported_image,
+    uses_original_jpeg_preview,
+)
 from app.services.share_access import record_share_access
 from app.services.visitor_identity import (
     INTERACTION_RATE_LIMIT,
     check_public_event_rate_limit,
+    public_event_rate_limit_key,
     resolve_visitor_identity,
 )
 from app.utils.client_ip import get_client_ip
@@ -65,19 +83,49 @@ _WECHAT_PROXY_CACHE_TTL_SECONDS = 6 * 60 * 60
 _WECHAT_PROXY_CACHE_MAX_BYTES = 10 * 1024**3
 _WECHAT_PROXY_CACHE_PRUNE_LOCK = asyncio.Lock()
 _WECHAT_PROXY_FILE_LOCKS: dict[UUID, asyncio.Lock] = {}
+_SHARE_PASSWORD_ATTEMPT_LIMIT = 10
 
 
 def _is_wechat_user_agent(user_agent: str) -> bool:
     return bool(re.search(r"MicroMessenger|\bwxwork/", user_agent, re.IGNORECASE))
 
 
+async def _enforce_share_password_rate_limit(code: str, request: Request) -> None:
+    redis = getattr(request.app.state, "redis", None)
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "服务暂时不可用")
+    key = public_event_rate_limit_key(f"share-password:{code}", get_client_ip(request))
+    failed_attempts = int(await redis.get(key) or 0)
+    if failed_attempts >= _SHARE_PASSWORD_ATTEMPT_LIMIT:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "提取码尝试过于频繁，请稍后再试")
+
+
+async def _raise_invalid_share_password(code: str, request: Request) -> None:
+    redis = getattr(request.app.state, "redis", None)
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "服务暂时不可用")
+    allowed = await check_public_event_rate_limit(
+        redis,
+        scope=f"share-password:{code}",
+        client_ip=get_client_ip(request),
+        limit=_SHARE_PASSWORD_ATTEMPT_LIMIT,
+    )
+    if not allowed:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "提取码尝试过于频繁，请稍后再试")
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "提取码错误")
+
+
 def _attach_same_origin_download_urls(
     response: ShareDownloadResponse,
     share: Share,
+    logical_files: list[ShareLogicalFile],
     request_id: str,
 ) -> None:
-    logical_files = sorted(share.logical_files, key=lambda item: item.sort_index)
-    for logical_file, download in zip(logical_files, response.files, strict=False):
+    for logical_file, download in zip(
+        sorted(logical_files, key=lambda item: item.sort_index),
+        response.files,
+        strict=False,
+    ):
         if logical_file.chunk_total != 1 or len(logical_file.files) != 1:
             continue
         download.proxy_download_url = (
@@ -562,6 +610,100 @@ def _aggregate_file_info(logical_files: list[ShareLogicalFile]) -> list[ShareFil
     return results
 
 
+def _image_metadata(logical_file: ShareLogicalFile) -> dict[str, Any]:
+    metadata = logical_file.media_metadata
+    if not isinstance(metadata, dict):
+        return {}
+    image = metadata.get("image")
+    return image if isinstance(image, dict) else {}
+
+
+def _select_download_files(
+    logical_files: list[ShareLogicalFile],
+    file_indices: list[int] | None,
+) -> list[ShareLogicalFile]:
+    sorted_files = sorted(logical_files, key=lambda item: item.sort_index)
+    if file_indices is None:
+        return sorted_files
+    unique_indices = list(dict.fromkeys(file_indices))
+    if any(index < 0 or index >= len(sorted_files) for index in unique_indices):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "所选文件不存在")
+    selected = {index for index in unique_indices}
+    return [logical_file for index, logical_file in enumerate(sorted_files) if index in selected]
+
+
+async def _sign_gallery_store_uris(store_uris: list[str]) -> dict[str, DownloadUrlResult]:
+    store_uris = sorted(set(store_uris))
+    if not store_uris:
+        return {}
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def request_batch(batch: list[str]) -> dict[str, DownloadUrlResult]:
+        resolver = DoubaoDownloadUrlResolver()
+        try:
+            async with semaphore:
+                return await resolver.get_download_urls_batch(batch, expire_seconds=3600)
+        finally:
+            await resolver.close()
+
+    async def sign_batch(batch: list[str]) -> dict[str, DownloadUrlResult]:
+        try:
+            return await request_batch(batch)
+        except DoubaoClientError as exc:
+            if len(batch) > 1:
+                midpoint = len(batch) // 2
+                left, right = await asyncio.gather(
+                    sign_batch(batch[:midpoint]),
+                    sign_batch(batch[midpoint:]),
+                )
+                return {**left, **right}
+            if len(batch) == 1:
+                log.warning("gallery asset skipped because signing failed: %s (%s)", batch[0], exc)
+                return {}
+            raise
+
+    try:
+        signed_batches = await asyncio.gather(*(
+            sign_batch(store_uris[start:start + 100])
+            for start in range(0, len(store_uris), 100)
+        ))
+    except Exception as exc:
+        log.warning("gallery asset signing failed: %s", exc)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "图片画廊暂时不可用，请稍后重试") from exc
+    return {
+        store_uri: urls
+        for signed_batch in signed_batches
+        for store_uri, urls in signed_batch.items()
+    }
+
+
+async def _sign_gallery_assets(
+    assets: list[ShareMediaAsset],
+) -> dict[str, DownloadUrlResult]:
+    return await _sign_gallery_store_uris([asset.store_uri for asset in assets])
+
+
+def _gallery_asset_kinds_complete(processing_version: int, kinds: set[str]) -> bool:
+    if processing_version >= 2:
+        return REQUIRED_GALLERY_ASSET_KINDS.issubset(kinds)
+    return "preview_2048" in kinds and bool({"thumbnail_480", "thumbnail_960"} & kinds)
+
+
+def _gallery_assets_complete(
+    assets: list[ShareMediaAsset],
+    signed_urls: dict[str, DownloadUrlResult] | None = None,
+) -> bool:
+    if not assets:
+        return False
+    kinds = {
+        asset.kind
+        for asset in assets
+        if signed_urls is None or asset.store_uri in signed_urls
+    }
+    return _gallery_asset_kinds_complete(assets[0].processing_version, kinds)
+
+
 def _guest_share_status(share: Share, now: datetime) -> str:
     if share.expires_at and share.expires_at <= now + timedelta(hours=1):
         return "expiring"
@@ -651,7 +793,325 @@ async def get_share(code: str, request: Request):
         download_count=share.download_count,
         max_downloads=share.max_downloads,
         has_password=locked,
+        gallery_eligible=not locked and is_gallery_eligible(share.logical_files),
     )
+
+
+@router.post(
+    "/{code}/gallery-session",
+    response_model=GallerySessionResponse,
+    summary="获取图片画廊会话",
+)
+async def create_gallery_session(
+    code: str,
+    body: GallerySessionRequest,
+    request: Request,
+):
+    """验证分享访问权限，按需入队历史图片并返回派生资源。"""
+    from app.db.session import get_session_factory
+
+    redis = getattr(request.app.state, "redis", None)
+    if redis is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "图片画廊暂时不可用")
+    if not await check_public_event_rate_limit(
+        redis,
+        scope=f"share-gallery:{code}",
+        client_ip=get_client_ip(request),
+        limit=60,
+    ):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试")
+
+    async with get_session_factory()() as db:
+        share = await _get_share_or_404(code, db)
+        if share.password_hash:
+            await _enforce_share_password_rate_limit(code, request)
+            if not body.password:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "该分享需要提取码")
+            if not verify_secret(body.password, share.password_hash):
+                await _raise_invalid_share_password(code, request)
+        elif body.password:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "该分享未设置提取码")
+
+        logical_files = sorted(share.logical_files, key=lambda item: item.sort_index)
+        if not is_gallery_eligible(logical_files):
+            return GallerySessionResponse(eligible=False)
+
+        gallery_files = [item for item in logical_files if is_supported_image(item.original_name)]
+        original_preview_files = {
+            logical_file.id: logical_file.files[0]
+            for logical_file in gallery_files
+            if uses_original_jpeg_preview(logical_file)
+            and len(logical_file.files) == 1
+            and logical_file.files[0].chunk_index == 0
+        }
+        processing_files = [
+            logical_file
+            for logical_file in gallery_files
+            if logical_file.id not in original_preview_files
+        ]
+        logical_file_ids = [item.id for item in processing_files]
+        jobs = list((await db.scalars(
+            select(MediaProcessingJob).where(
+                MediaProcessingJob.logical_file_id.in_(logical_file_ids),
+                MediaProcessingJob.processing_version == MEDIA_PROCESSING_VERSION,
+            )
+        )).all()) if logical_file_ids else []
+        jobs_by_file = {job.logical_file_id: job for job in jobs}
+        needs_enqueue = [
+            logical_file
+            for logical_file in processing_files
+            if logical_file.id not in jobs_by_file
+            or (
+                jobs_by_file[logical_file.id].status == "pending"
+                and jobs_by_file[logical_file.id].priority < 10
+            )
+        ]
+        if needs_enqueue:
+            await ensure_gallery_jobs(db, needs_enqueue, priority=10)
+            jobs = list((await db.scalars(
+                select(MediaProcessingJob)
+                .where(
+                    MediaProcessingJob.logical_file_id.in_(logical_file_ids),
+                    MediaProcessingJob.processing_version == MEDIA_PROCESSING_VERSION,
+                )
+                .execution_options(populate_existing=True)
+            )).all())
+        assets = list((await db.scalars(
+            select(ShareMediaAsset).where(
+                ShareMediaAsset.logical_file_id.in_(logical_file_ids),
+                ShareMediaAsset.processing_version <= MEDIA_PROCESSING_VERSION,
+            )
+        )).all()) if logical_file_ids else []
+        await db.commit()
+
+    file_indices = {item.id: index for index, item in enumerate(logical_files)}
+    known_ready_indices = {
+        index
+        for index in body.known_ready_indices
+        if 0 <= index < len(logical_files)
+    }
+    versioned_assets_by_file: dict[UUID, dict[int, list[ShareMediaAsset]]] = {}
+    for asset in assets:
+        versioned_assets_by_file.setdefault(asset.logical_file_id, {}).setdefault(
+            asset.processing_version, []
+        ).append(asset)
+    complete_versions_by_file: dict[UUID, list[list[ShareMediaAsset]]] = {}
+    for logical_file_id, versions in versioned_assets_by_file.items():
+        for processing_version in sorted(versions, reverse=True):
+            candidates = [
+                asset
+                for asset in versions[processing_version]
+                if asset.kind == "exif_json" or asset.format == "webp"
+            ]
+            if _gallery_assets_complete(candidates):
+                complete_versions_by_file.setdefault(logical_file_id, []).append(candidates)
+
+    selected_assets = [
+        asset
+        for versions in complete_versions_by_file.values()
+        for candidates in versions[:1]
+        for asset in candidates
+    ]
+    assets_to_sign = [
+        asset
+        for asset in selected_assets
+        if file_indices.get(asset.logical_file_id) not in known_ready_indices
+        and (
+            asset.kind == "exif_json"
+            or (
+                asset.format == "webp"
+                and asset.kind in {"thumbnail_480", "thumbnail_960", "preview_2048"}
+            )
+        )
+    ]
+    original_preview_uris = [
+        source_file.tos_uri
+        for logical_file_id, source_file in original_preview_files.items()
+        if file_indices.get(logical_file_id) not in known_ready_indices
+    ]
+    jobs_by_file: dict[UUID, MediaProcessingJob] = {
+        job.logical_file_id: job for job in jobs
+    }
+    signed_urls = await _sign_gallery_store_uris([
+        *[asset.store_uri for asset in assets_to_sign],
+        *original_preview_uris,
+    ])
+    fallback_assets: list[ShareMediaAsset] = []
+    for logical_file_id, versions in complete_versions_by_file.items():
+        logical_file_index = file_indices.get(logical_file_id)
+        if logical_file_index in known_ready_indices or len(versions) < 2:
+            continue
+        if not _gallery_assets_complete(versions[0], signed_urls):
+            fallback_assets.extend(versions[1])
+    if fallback_assets:
+        signed_urls.update(await _sign_gallery_store_uris([
+            asset.store_uri for asset in fallback_assets
+        ]))
+
+    assets_by_file: dict[UUID, list[ShareMediaAsset]] = {}
+    for logical_file_id, versions in complete_versions_by_file.items():
+        logical_file_index = file_indices.get(logical_file_id)
+        if logical_file_index in known_ready_indices:
+            assets_by_file[logical_file_id] = versions[0]
+            continue
+        assets_by_file[logical_file_id] = next(
+            (
+                candidates
+                for candidates in versions
+                if _gallery_assets_complete(candidates, signed_urls)
+            ),
+            versions[0],
+        )
+
+    response_files: list[GalleryFileInfo] = []
+    for logical_file in gallery_files:
+        logical_file_index = file_indices[logical_file.id]
+        image = _image_metadata(logical_file)
+        original_preview = original_preview_files.get(logical_file.id)
+        if original_preview is not None:
+            preview_urls = signed_urls.get(original_preview.tos_uri)
+            signed_preview_missing = (
+                logical_file_index not in known_ready_indices
+                and preview_urls is None
+            )
+            width = image.get("width") if isinstance(image.get("width"), int) else 0
+            height = image.get("height") if isinstance(image.get("height"), int) else 0
+            response_files.append(GalleryFileInfo(
+                index=logical_file_index,
+                file_name=logical_file.original_name,
+                file_size=logical_file.size,
+                content_type=logical_file.content_type or "image/jpeg",
+                status="failed" if signed_preview_missing else "ready",
+                width=width,
+                height=height,
+                error_code="asset_signing_failed" if signed_preview_missing else None,
+                exif_summary=None,
+                is_animated=False,
+                frame_count=1,
+                assets=[GalleryAssetInfo(
+                    kind="original_preview",
+                    format="jpeg",
+                    content_type=original_preview.content_type or "image/jpeg",
+                    width=width,
+                    height=height,
+                    byte_size=original_preview.size,
+                    download_url=preview_urls.main_url,
+                    backup_download_url=preview_urls.backup_url,
+                )] if preview_urls is not None else [],
+            ))
+            continue
+        file_assets = sorted(
+            assets_by_file.get(logical_file.id, []),
+            key=lambda item: (
+                item.kind,
+                0 if item.format == "webp" else 1 if item.format == "jpeg" else 2,
+            ),
+        )
+        has_preview = _gallery_assets_complete(file_assets)
+        response_assets = [
+            asset
+            for asset in file_assets
+            if asset.store_uri in signed_urls
+        ]
+        signed_preview_missing = (
+            has_preview
+            and logical_file_index not in known_ready_indices
+            and not _gallery_assets_complete(file_assets, signed_urls)
+        )
+        job = jobs_by_file.get(logical_file.id)
+        if signed_preview_missing:
+            file_status = "failed"
+        elif has_preview:
+            file_status = "ready"
+        elif job and job.status in {"failed", "unsupported"}:
+            file_status = "failed"
+        elif job and job.status == "succeeded":
+            file_status = "failed"
+        else:
+            file_status = "pending"
+
+        error_code = image.get("error_code") if isinstance(image.get("error_code"), str) else None
+        if file_status == "failed" and not error_code:
+            if signed_preview_missing:
+                error_code = "asset_signing_failed"
+            else:
+                error_code = "asset_missing" if job and job.status == "succeeded" else job.status if job else "processing_error"
+        exif_summary = image.get("exif_summary")
+        if not isinstance(exif_summary, dict):
+            exif_summary = None
+        width = image.get("width") if isinstance(image.get("width"), int) else 0
+        height = image.get("height") if isinstance(image.get("height"), int) else 0
+        response_files.append(GalleryFileInfo(
+            index=logical_file_index,
+            file_name=logical_file.original_name,
+            file_size=logical_file.size,
+            content_type=logical_file.content_type or "",
+            status=file_status,
+            width=width,
+            height=height,
+            error_code=error_code,
+            exif_summary=exif_summary,
+            is_animated=image.get("is_animated") is True,
+            frame_count=max(1, image.get("frame_count", 1))
+            if isinstance(image.get("frame_count"), int) else 1,
+            assets=[
+                GalleryAssetInfo(
+                    kind=asset.kind,
+                    format=asset.format,
+                    content_type=asset.content_type,
+                    width=asset.width or 0,
+                    height=asset.height or 0,
+                    byte_size=asset.byte_size,
+                    download_url=signed_urls[asset.store_uri].main_url,
+                    backup_download_url=signed_urls[asset.store_uri].backup_url,
+                )
+                for asset in response_assets
+            ],
+        ))
+
+    ready_count = sum(item.status == "ready" for item in response_files)
+    failed_count = sum(item.status == "failed" for item in response_files)
+    pending_count = len(response_files) - ready_count - failed_count
+    return GallerySessionResponse(
+        eligible=True,
+        files=response_files,
+        ready_count=ready_count,
+        pending_count=pending_count,
+        failed_count=failed_count,
+        retry_after_seconds=5 if pending_count else 0,
+        expires_in=3600,
+    )
+
+
+@router.post(
+    "/{code}/unlock",
+    response_model=ShareInfoResponse,
+    summary="验证提取码并获取分享元数据",
+)
+async def unlock_share(code: str, body: ShareVerifyRequest, request: Request):
+    """验证提取码，但不签发任何原文件访问地址。"""
+    from app.db.session import get_session_factory
+
+    await _enforce_share_password_rate_limit(code, request)
+
+    async with get_session_factory()() as db:
+        share = await _get_share_or_404(code, db)
+        if not share.password_hash:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "该分享未设置提取码")
+        if not verify_secret(body.password, share.password_hash):
+            await _raise_invalid_share_password(code, request)
+        return ShareInfoResponse(
+            code=share.code,
+            files=_aggregate_file_info(share.logical_files),
+            empty_dirs=share.empty_dirs or [],
+            total_bytes=share.total_bytes,
+            created_at=share.created_at,
+            expires_at=share.expires_at,
+            download_count=share.download_count,
+            max_downloads=share.max_downloads,
+            has_password=True,
+            gallery_eligible=is_gallery_eligible(share.logical_files),
+        )
 
 
 @router.post(
@@ -674,8 +1134,9 @@ async def verify_share(
         if not share.password_hash:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "该分享未设置提取码")
 
+        await _enforce_share_password_rate_limit(code, request)
         if not verify_secret(body.password, share.password_hash):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "提取码错误")
+            await _raise_invalid_share_password(code, request)
 
         if not share.files and not (share.empty_dirs or []):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
@@ -767,17 +1228,25 @@ async def create_download_session(
         if body.intent == "download" and share.max_downloads > 0 and share.download_count >= share.max_downloads:
             raise HTTPException(status.HTTP_410_GONE, "下载次数已用完")
         if share.password_hash:
+            await _enforce_share_password_rate_limit(code, request)
             if not body.password:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "该分享需要提取码")
             if not verify_secret(body.password, share.password_hash):
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "提取码错误")
+                await _raise_invalid_share_password(code, request)
         elif body.password:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "该分享未设置提取码")
+        if body.intent == "preview" and is_gallery_eligible(share.logical_files):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "图片画廊预览不提供原文件地址，请使用画廊会话",
+            )
         if not share.files and not (share.empty_dirs or []):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "分享中没有可下载文件")
 
-        downloads = await _get_download_urls(share.logical_files)
-        response = ShareDownloadResponse(files=downloads, empty_dirs=share.empty_dirs or [])
+        selected_logical_files = _select_download_files(share.logical_files, body.file_indices)
+        downloads = await _get_download_urls(selected_logical_files)
+        response_empty_dirs = [] if body.file_indices is not None else share.empty_dirs or []
+        response = ShareDownloadResponse(files=downloads, empty_dirs=response_empty_dirs)
         reserved = False
         if body.intent == "download":
             reserved = await _reserve_download_link(
@@ -787,11 +1256,19 @@ async def create_download_session(
                 request_id=normalized_request_id,
                 response_metadata={
                     "file_count": len(downloads),
-                    "empty_dir_count": len(share.empty_dirs or []),
+                    "empty_dir_count": len(response_empty_dirs),
+                    **({
+                        "logical_file_ids": [str(item.id) for item in selected_logical_files],
+                    } if body.file_indices is not None else {}),
                 },
             )
             if body.delivery == "same_origin" and _is_wechat_user_agent(request.headers.get("user-agent", "")):
-                _attach_same_origin_download_urls(response, share, normalized_request_id)
+                _attach_same_origin_download_urls(
+                    response,
+                    share,
+                    selected_logical_files,
+                    normalized_request_id,
+                )
         await db.commit()
         share_id = share.id
 
@@ -849,6 +1326,9 @@ async def proxy_share_download(
         )
         if download_session is None:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "下载授权已失效，请返回分享页重试")
+        allowed_logical_file_ids = download_session.response_payload.get("logical_file_ids")
+        if isinstance(allowed_logical_file_ids, list) and str(logical_file_id) not in allowed_logical_file_ids:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "当前下载授权不包含此文件")
         logical_file = next((item for item in share.logical_files if item.id == logical_file_id), None)
         if logical_file is None or logical_file.chunk_total != 1 or len(logical_file.files) != 1:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在或不支持同域下载")

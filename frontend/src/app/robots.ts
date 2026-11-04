@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
         allow: "/",
         disallow: [
           "/api/", "/admin", "/my", "/r/", "/prototype-preview", "/video-inspect",
-          "/file-icon-preview", "/logo-lockup-preview", "/logo-symbol-preview", "/ac3-lab", "/tmp/",
+          "/file-icon-preview", "/logo-lockup-preview", "/logo-symbol-preview", "/ac3-lab", "/design-preview", "/tmp/",
         ],
       },
     ],

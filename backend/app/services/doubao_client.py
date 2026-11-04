@@ -161,6 +161,8 @@ class UploadAuthResult:
     access_key: str
     secret_key: str
     session_token: str
+    current_time: str
+    expired_time: str
 
 
 @dataclass
@@ -176,6 +178,9 @@ class UploadInitResult:
     access_key: str
     secret_key: str
     session_token: str
+    current_time: str = ""
+    expired_time: str = ""
+    raw_result: dict | None = None
 
 
 @dataclass
@@ -183,6 +188,7 @@ class CommitResult:
     """commit_upload 返回值。"""
     store_uri: str
     success: bool
+    uri_status: int = 2000
 
 
 @dataclass(frozen=True)
@@ -200,6 +206,10 @@ _DEFAULT_DEVICE_ID = "714003710229497"
 _DEFAULT_WEB_ID = "7604137868021548590"
 _DEFAULT_FP = "verify_mlcfw5f7_TPq0YmFD_NrsC_4RuQ_BJPg_M5W7i58I7wV0"
 _BASE_URL = "https://www.doubao.com"
+_IMAGEX_API_URL = "https://imagex.volcengineapi.com/"
+_DOUBAO_IMAGE_EXTENSIONS = frozenset({
+    "avif", "bmp", "dng", "gif", "heic", "heif", "jpeg", "jpg", "png", "webp",
+})
 
 
 def record_doubao_session_status(session_file: str | None, **updates: object) -> None:
@@ -399,6 +409,8 @@ class DoubaoUploadClient:
             access_key=auth_token["access_key"],
             secret_key=auth_token["secret_key"],
             session_token=auth_token["session_token"],
+            current_time=auth_token["current_time"],
+            expired_time=auth_token["expired_time"],
         )
 
     # ------------------------------------------------------------------
@@ -406,19 +418,30 @@ class DoubaoUploadClient:
     # 返回浏览器直传所需的 upload_url 和 auth
     # ------------------------------------------------------------------
 
-    async def init_upload(self, file_size: int, file_ext: str = "") -> UploadInitResult:
+    async def init_upload(
+        self,
+        file_size: int,
+        file_ext: str = "",
+        *,
+        store_key: str = "",
+    ) -> UploadInitResult:
         """调用豆包 prepare_upload + ApplyImageUpload，返回 TOS 上传凭证。"""
         auth = await self._prepare_upload_auth()
 
         # --- ApplyImageUpload ---
-        ext_part = f".{file_ext}" if file_ext else ""
-        apply_url = (
-            f"{_BASE_URL}/top/v1?"
-            f"Action=ApplyImageUpload&Version=2018-08-01"
-            f"&ServiceId={auth.service_id}&NeedFallback=true"
-            f"&FileSize={file_size}&FileExtension={ext_part}"
-            f"&s=jdnfglwfkl"
-        )
+        apply_params = {
+            "Action": "ApplyImageUpload",
+            "Version": "2018-08-01",
+            "ServiceId": auth.service_id,
+            "NeedFallback": "true",
+            "FileSize": str(file_size),
+            "s": "jdnfglwfkl",
+        }
+        if file_ext:
+            apply_params["FileExtension"] = f".{file_ext}"
+        if store_key:
+            apply_params["StoreKeys"] = store_key
+        apply_url = f"{_BASE_URL}/top/v1?{urlencode(apply_params)}"
         sign_headers = _aws_sign_v4(
             "GET",
             apply_url,
@@ -456,6 +479,9 @@ class DoubaoUploadClient:
             access_key=auth.access_key,
             secret_key=auth.secret_key,
             session_token=auth.session_token,
+            current_time=auth.current_time,
+            expired_time=auth.expired_time,
+            raw_result=result_data,
         )
 
     # ------------------------------------------------------------------
@@ -527,6 +553,7 @@ class DoubaoUploadClient:
         secret_key: str,
         session_token: str,
         *,
+        success_oids: list[str] | None = None,
         refresh_auth: bool = True,
     ) -> CommitResult:
         """调用 CommitImageUpload 确认文件上传完成。"""
@@ -544,7 +571,10 @@ class DoubaoUploadClient:
             f"Action=CommitImageUpload&Version=2018-08-01"
             f"&ServiceId={service_id}"
         )
-        commit_body = json.dumps({"SessionKey": session_key})
+        commit_payload: dict[str, object] = {"SessionKey": session_key}
+        if success_oids:
+            commit_payload["SuccessOids"] = success_oids
+        commit_body = json.dumps(commit_payload, separators=(",", ":"))
         sign_headers = _aws_sign_v4(
             "POST", commit_url, commit_body, access_key, secret_key, session_token
         )
@@ -563,7 +593,95 @@ class DoubaoUploadClient:
 
         store_uri = results[0].get("Uri", "")
         log.info("commit_upload OK: store_uri=%s", store_uri)
-        return CommitResult(store_uri=store_uri, success=True)
+        return CommitResult(store_uri=store_uri, success=True, uri_status=status)
+
+    async def delete_upload_files(self, store_uris: list[str]) -> set[str]:
+        """通过豆包资源接口删除对象，必要时回退 ImageX 管理 API。"""
+        unique_uris = list(dict.fromkeys(uri for uri in store_uris if uri))
+        if not unique_uris:
+            return set()
+
+        confirmed: set[str] = set()
+        for start in range(0, len(unique_uris), 100):
+            batch = unique_uris[start:start + 100]
+            delete_url = (
+                f"{_BASE_URL}/alice/resource/delete_files?"
+                f"{urlencode(self._security_params())}"
+            )
+            resource_uris = [
+                {
+                    "uri": uri,
+                    "data_type": "image"
+                    if uri.rsplit(".", 1)[-1].lower() in _DOUBAO_IMAGE_EXTENSIONS
+                    else "file",
+                }
+                for uri in batch
+            ]
+            response = await self.http.post(delete_url, json={"uris": resource_uris})
+            try:
+                body = response.json()
+            except Exception as exc:
+                raise DoubaoClientError(
+                    f"豆包资源删除响应非 JSON: {response.text[:300]}"
+                ) from exc
+            if response.status_code == 200 and body.get("code") == 0:
+                confirmed.update(batch)
+                continue
+
+            settings = get_settings()
+            required_credentials = {
+                "IMAGEX_ACCESS_KEY": settings.imagex_access_key,
+                "IMAGEX_SECRET_KEY": settings.imagex_secret_key,
+                "IMAGEX_SERVICE_ID": settings.imagex_service_id,
+            }
+            missing_credentials = [
+                name for name, value in required_credentials.items() if not value
+            ]
+            if missing_credentials:
+                raise DoubaoClientError(
+                    f"豆包资源删除失败: {body}; ImageX 管理回退缺少: "
+                    + ", ".join(missing_credentials)
+                )
+
+            delete_url = (
+                f"{_IMAGEX_API_URL}?"
+                f"Action=DeleteImageUploadFiles&Version=2018-08-01"
+                f"&ServiceId={settings.imagex_service_id}"
+            )
+            delete_body = json.dumps({"StoreUris": batch}, separators=(",", ":"))
+            sign_headers = _aws_sign_v4(
+                "POST",
+                delete_url,
+                delete_body,
+                settings.imagex_access_key,
+                settings.imagex_secret_key,
+                settings.imagex_session_token,
+            )
+            sign_headers["Content-Type"] = "application/json"
+            response = await self.http.post(
+                delete_url,
+                content=delete_body,
+                headers=sign_headers,
+            )
+            try:
+                body = response.json()
+            except Exception as exc:
+                raise DoubaoClientError(
+                    f"DeleteImageUploadFiles 响应非 JSON: {response.text[:300]}"
+                ) from exc
+            response_error = body.get("ResponseMetadata", {}).get("Error")
+            if response.status_code != 200 or response_error:
+                raise DoubaoClientError(f"DeleteImageUploadFiles failed: {body}")
+            result = body.get("Result", {})
+            deleted = set(result.get("DeletedFiles") or [])
+            batch_confirmed = deleted & set(batch)
+            missing = set(batch) - batch_confirmed
+            if missing:
+                raise DoubaoClientError(
+                    f"DeleteImageUploadFiles 未确认 {len(missing)} 个对象: {sorted(missing)[:3]}"
+                )
+            confirmed.update(batch_confirmed)
+        return confirmed
 
     # ------------------------------------------------------------------
     # 下载 URL 获取
@@ -571,33 +689,56 @@ class DoubaoUploadClient:
 
     async def get_download_urls(self, uri: str, expire_seconds: int = 3600) -> DownloadUrlResult:
         """获取文件的主、备临时下载 URL。"""
+        return (await self.get_download_urls_batch([uri], expire_seconds=expire_seconds))[uri]
+
+    async def get_download_urls_batch(
+        self,
+        uris: list[str],
+        expire_seconds: int = 3600,
+    ) -> dict[str, DownloadUrlResult]:
+        """批量获取文件临时地址，按扩展名分组以匹配豆包接口约束。"""
+        unique_uris = list(dict.fromkeys(uri for uri in uris if uri))
+        if not unique_uris:
+            return {}
+
         params = self._security_params()
-        ext = uri.rsplit(".", 1)[-1] if "." in uri else ""
         url = f"{_BASE_URL}/alice/message/get_file_url?{urlencode(params)}"
-        resp = await self.http.post(
-            url,
-            json={
-                "uris": [uri],
-                "type": "file",
-                "format": ext,
-                "expire_second": expire_seconds,
-            },
-        )
-        body = resp.json()
-        if body.get("code") != 0:
-            raise DoubaoClientError(f"get_file_url error: {body.get('msg', body)}")
-        data = body.get("data", {})
-        file_urls = data.get("file_urls", []) if isinstance(data, dict) else []
-        if not file_urls:
-            raise DoubaoClientError("get_file_url returned no file_urls")
-        item = file_urls[0]
-        main_url = str(item.get("main_url") or item.get("back_url") or "")
-        backup_url = str(item.get("back_url") or "")
-        if not main_url:
-            raise DoubaoClientError("get_file_url returned an empty URL")
-        if backup_url == main_url:
-            backup_url = ""
-        return DownloadUrlResult(main_url=main_url, backup_url=backup_url)
+        grouped: dict[str, list[str]] = {}
+        for uri in unique_uris:
+            extension = uri.rsplit(".", 1)[-1] if "." in uri else ""
+            grouped.setdefault(extension, []).append(uri)
+
+        results: dict[str, DownloadUrlResult] = {}
+        for extension, extension_uris in grouped.items():
+            for start in range(0, len(extension_uris), 100):
+                batch = extension_uris[start:start + 100]
+                resp = await self.http.post(
+                    url,
+                    json={
+                        "uris": batch,
+                        "type": "file",
+                        "format": extension,
+                        "expire_second": expire_seconds,
+                    },
+                )
+                body = resp.json()
+                if body.get("code") != 0:
+                    raise DoubaoClientError(f"get_file_url error: {body.get('msg', body)}")
+                data = body.get("data", {})
+                file_urls = data.get("file_urls", []) if isinstance(data, dict) else []
+                if len(file_urls) != len(batch):
+                    raise DoubaoClientError(
+                        f"get_file_url returned {len(file_urls)} URLs for {len(batch)} files"
+                    )
+                for uri, item in zip(batch, file_urls, strict=True):
+                    main_url = str(item.get("main_url") or item.get("back_url") or "")
+                    backup_url = str(item.get("back_url") or "")
+                    if not main_url:
+                        raise DoubaoClientError("get_file_url returned an empty URL")
+                    if backup_url == main_url:
+                        backup_url = ""
+                    results[uri] = DownloadUrlResult(main_url=main_url, backup_url=backup_url)
+        return results
 
     async def get_download_url(self, uri: str, expire_seconds: int = 3600) -> str:
         """获取文件的主临时下载 URL。"""
@@ -741,6 +882,42 @@ class DoubaoDownloadUrlResolver:
 
         detail = "; ".join(errors) if errors else "no available doubao session"
         raise DoubaoClientError(f"get_download_urls failed for all sessions: {detail}")
+
+    async def get_download_urls_batch(
+        self,
+        uris: list[str],
+        expire_seconds: int = 3600,
+    ) -> dict[str, DownloadUrlResult]:
+        """批量签名；任一会话失败时整批切换到备用会话。"""
+        errors: list[str] = []
+        if "primary" not in self._failed_labels:
+            try:
+                client = await self._get_primary_client()
+                return await client.get_download_urls_batch(uris, expire_seconds=expire_seconds)
+            except Exception as exc:
+                message = str(exc)
+                object_specific_error = "returned" in message or "get_file_url error" in message
+                if len(uris) == 1 and not object_specific_error:
+                    self._failed_labels.add("primary")
+                errors.append(f"primary: {exc}")
+                log.warning("doubao primary batch download urls failed: %s", exc)
+
+        for session_file in _download_fallback_session_files():
+            label = f"fallback:{session_file}"
+            if label in self._failed_labels:
+                continue
+            try:
+                client = await self._get_fallback_client(session_file)
+                urls = await client.get_download_urls_batch(uris, expire_seconds=expire_seconds)
+                log.info("doubao fallback batch download urls OK via %s", Path(session_file).name)
+                return urls
+            except Exception as exc:
+                self._failed_labels.add(label)
+                errors.append(f"{Path(session_file).name}: {exc}")
+                log.warning("doubao fallback batch download urls failed via %s: %s", session_file, exc)
+
+        detail = "; ".join(errors) if errors else "no available doubao session"
+        raise DoubaoClientError(f"get_download_urls_batch failed for all sessions: {detail}")
 
 
 async def get_doubao_download_url(uri: str, expire_seconds: int = 3600) -> str:

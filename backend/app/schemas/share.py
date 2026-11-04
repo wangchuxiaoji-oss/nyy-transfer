@@ -54,6 +54,56 @@ class ShareInfoResponse(BaseModel):
     download_count: int = 0
     max_downloads: int = 0
     has_password: bool = False
+    gallery_eligible: bool = False
+
+
+class GallerySessionRequest(BaseModel):
+    """创建图片画廊会话；受保护分享需同时验证提取码。"""
+
+    password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+    known_ready_indices: list[int] = Field(default_factory=list, max_length=500)
+
+
+class GalleryAssetInfo(BaseModel):
+    """画廊派生资源及其临时访问地址。"""
+
+    kind: str
+    format: str
+    content_type: str
+    width: int = 0
+    height: int = 0
+    byte_size: int
+    download_url: str
+    backup_download_url: str = ""
+
+
+class GalleryFileInfo(BaseModel):
+    """画廊中的单张图片及处理状态。"""
+
+    index: int
+    file_name: str
+    file_size: int
+    content_type: str = ""
+    status: str
+    width: int = 0
+    height: int = 0
+    error_code: str | None = None
+    exif_summary: dict[str, Any] | None = None
+    is_animated: bool = False
+    frame_count: int = 1
+    assets: list[GalleryAssetInfo] = Field(default_factory=list)
+
+
+class GallerySessionResponse(BaseModel):
+    """图片画廊状态、派生资源和轮询提示。"""
+
+    eligible: bool
+    files: list[GalleryFileInfo] = Field(default_factory=list)
+    ready_count: int = 0
+    pending_count: int = 0
+    failed_count: int = 0
+    retry_after_seconds: float = 0
+    expires_in: int = 3600
 
 
 class ShareVerifyRequest(BaseModel):
@@ -81,6 +131,7 @@ class ShareDownloadSessionRequest(BaseModel):
     password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
     intent: str = Field(default="download", pattern="^(preview|download)$")
     delivery: str = Field(default="direct", pattern="^(direct|same_origin)$")
+    file_indices: list[int] | None = Field(default=None, min_length=1, max_length=500)
 
 
 class ShareInteractionRequest(BaseModel):

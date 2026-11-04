@@ -25,7 +25,7 @@ export default defineConfig({
     ? {
         command: process.env.PLAYWRIGHT_WEB_SERVER_COMMAND || "npm run dev",
         url: baseURL,
-        reuseExistingServer: false,
+        reuseExistingServer: true,
         timeout: 120000,
       }
     : undefined,

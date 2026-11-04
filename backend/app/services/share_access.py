@@ -46,7 +46,7 @@ _KNOWN_PREVIEW_UAS = (
 def guest_label(guest_id: str | None) -> str:
     if not guest_id:
         return ""
-    digest = hashlib.sha256(guest_id.encode("utf-8")).hexdigest()[:4].upper()
+    digest = hashlib.sha256(guest_id.encode("utf-8")).hexdigest()[:8].upper()
     return f"访客 #{digest}"
 
 

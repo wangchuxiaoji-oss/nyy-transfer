@@ -122,8 +122,46 @@ async function routeShare(
     if (options.downloadDelayMs) await new Promise((resolve) => setTimeout(resolve, options.downloadDelayMs));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
   });
+  await page.route(`**/api/v1/shares/download-config`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      smart_download_enabled: true,
+      target_video: true,
+      target_audio: true,
+      target_pdf: true,
+      target_image: true,
+      target_other: true,
+      filesystem_access_enabled: true,
+      leave_warning_enabled: true,
+    }) });
+  });
+  await page.route(`**/api/v1/shares/${MOCK_CODE}/gallery-session`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ eligible: false }) });
+  });
   await page.route(`**/api/v1/shares/${MOCK_CODE}/verify`, async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(download) });
+  });
+  await page.route(`**/api/v1/shares/${MOCK_CODE}/unlock`, async (route) => {
+    const files = download.files.map((file, index) => ({
+      file_name: file.file_name,
+      file_size: file.file_size,
+      file_ext: file.file_name.split(".").pop()?.toLowerCase() || "",
+      content_type: file.content_type,
+      index,
+      is_chunked: file.is_chunked,
+      chunk_count: file.chunks.length,
+      media_metadata: file.media_metadata,
+    }));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...info,
+        files,
+        total_bytes: files.reduce((sum, file) => sum + file.file_size, 0),
+        has_password: true,
+        gallery_eligible: false,
+      }),
+    });
   });
 }
 
@@ -142,11 +180,17 @@ async function openMockShare(page: Page, info = shareInfo(), download = download
   await routeShare(page, info, download);
   await routeExternal(page);
   await page.goto(`/${MOCK_CODE}`);
-  await page.getByRole("button", { name: "获取下载链接" }).click();
+  await waitForReady(page);
+  const fetchButton = page.getByRole("button", { name: "获取下载链接" });
+  if (await fetchButton.isVisible()) {
+    await fetchButton.click();
+  } else if (info.files.length > 0) {
+    await expect(page.getByTestId("share-actions").getByRole("button", { name: /下载(?:当前文件|此文件)/ }).first()).toBeVisible({ timeout: 10000 });
+  }
 }
 
 async function waitForReady(page: Page) {
-  await expect(page.locator("aside").getByText("分享概览")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("share-actions").locator("button, a").first()).toBeVisible({ timeout: 10000 });
 }
 
 async function installMockNativeVideo(page: Page) {
@@ -419,7 +463,6 @@ test.describe("分享页布局回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto(`/${MOCK_CODE}`);
     await expect(page.locator("aside").getByRole("tab", { name: "文件" })).toBeVisible({ timeout: 5000 });
-    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const asideTop = () => page.evaluate(() => {
       const aside = document.querySelector("aside");
@@ -450,7 +493,6 @@ test.describe("播放器代表性回归", () => {
     await routeExternal(page, "audio/ogg");
 
     await page.goto(`/${MOCK_CODE}`);
-    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("audio-element")).toBeAttached();
@@ -494,7 +536,6 @@ test.describe("播放器代表性回归", () => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     await page.goto(`/${MOCK_CODE}`);
-    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     await expect(page.getByTestId("audio-preview")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("audio-controls")).toBeVisible();
@@ -543,6 +584,47 @@ test.describe("播放器代表性回归", () => {
     await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
   });
 
+  test("视频播放闲置时隐藏控制栏，操作时恢复，暂停时保持可见", async ({ page }) => {
+    await installMockNativeVideo(page);
+    // 测试资源是伪造字节；屏蔽其原生解码错误，专注验证控制栏状态。
+    await page.addInitScript(() => {
+      const addEventListener = HTMLMediaElement.prototype.addEventListener;
+      HTMLMediaElement.prototype.addEventListener = function (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) {
+        if (type === "error") return;
+        return addEventListener.call(this, type, listener, options);
+      };
+    });
+    await openMockShare(page);
+
+    const preview = page.getByTestId("native-video-preview").first();
+    const controls = preview.getByTestId("native-video-controls");
+    await preview.getByTestId("native-video-center-toggle").click();
+    await expect(controls).toHaveCSS("opacity", "0", { timeout: 5000 });
+    await expect(controls).toHaveAttribute("inert", "");
+
+    await preview.hover({ position: { x: 120, y: 100 } });
+    await expect(controls).toHaveCSS("opacity", "1");
+    await expect(controls).not.toHaveAttribute("inert", "");
+
+    await controls.getByRole("button", { name: "设置" }).click();
+    await page.waitForTimeout(3200);
+    await expect(controls).toHaveCSS("opacity", "1");
+    await controls.getByRole("button", { name: "设置" }).click();
+    await controls.getByRole("button", { name: "暂停" }).click();
+    await page.waitForTimeout(3200);
+    await expect(controls).toHaveCSS("opacity", "1");
+
+    await page.setViewportSize({ width: 375, height: 667 });
+    await controls.getByRole("button", { name: "播放" }).click();
+    await expect(controls).toHaveAttribute("inert", "", { timeout: 5000 });
+    await preview.dispatchEvent("pointerup", { pointerType: "touch", clientX: 120, bubbles: true });
+    await expect(controls).not.toHaveAttribute("inert", "");
+  });
+
   test("播放后缓冲态不重新显示中心播放按钮", async ({ page }) => {
     await installMockNativeVideo(page);
     await page.addInitScript(() => {
@@ -582,7 +664,6 @@ test.describe("播放器代表性回归", () => {
     await routeShare(page, shareInfo([file]), dl);
     await routeExternal(page, "video/mp4");
     await page.goto(`/${MOCK_CODE}`);
-    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const preview = page.getByTestId("ac3-video-preview").first();
     await expect(preview).toBeVisible({ timeout: 10000 });
@@ -659,7 +740,6 @@ test.describe("播放器代表性回归", () => {
     await routeExternal(page, "video/mp4");
 
     await page.goto(`/${MOCK_CODE}`);
-    await page.getByRole("button", { name: "获取下载链接" }).click();
     const video = page.locator('[data-testid="native-video-preview"] video').first();
     await expect(video).toHaveAttribute("src", /\/__nyy_virtual_media__\//, { timeout: 10000 });
     const firstSrc = await video.getAttribute("src");
@@ -691,7 +771,6 @@ test.describe("播放器代表性回归", () => {
       await routeShare(page, shareInfo([file]), downloadResponse([file], { files: [downloadFile(file, { download_url: `https://example.com/${scenario.code}.mkv`, media_metadata: meta })] }));
       await routeExternal(page);
       await page.goto(`/${MOCK_CODE}`);
-      await page.getByRole("button", { name: "获取下载链接" }).click();
 
       if (scenario.expected === "native") {
         await expect(page.getByTestId("native-video-preview").first()).toBeVisible({ timeout: 10000 });
@@ -772,17 +851,34 @@ test.describe("骨架和文件列表回归", () => {
 
   test("文件夹分享按目录树展示", async ({ page }) => {
     const files = [
-      shareFile({ file_name: "品管圈/全套文件/会议记录1.docx", file_ext: "docx", content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", index: 0, media_metadata: null }),
-      shareFile({ file_name: "品管圈/全套文件/原始资料.xlsx", file_ext: "xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", index: 1, media_metadata: null }),
+      shareFile({ file_name: "品管圈/全套文件/现场照片.jpg", file_ext: "jpg", content_type: "image/jpeg", index: 0, media_metadata: null }),
+      shareFile({ file_name: "品管圈/全套文件/会议记录1.docx", file_ext: "docx", content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", index: 1, media_metadata: null }),
+      shareFile({ file_name: "品管圈/全套文件/原始资料.xlsx", file_ext: "xlsx", content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", index: 2, media_metadata: null }),
     ];
     const emptyDirs = ["品管圈/空文件夹/"];
-    await openMockShare(page, shareInfo(files, { empty_dirs: emptyDirs }), downloadResponse(files, { empty_dirs: emptyDirs }));
+    let previewRequests = 0;
+    await routeShare(page, shareInfo(files, { empty_dirs: emptyDirs }), downloadResponse(files, { empty_dirs: emptyDirs }), {
+      onDownloadRequest: () => { previewRequests += 1; },
+    });
+    await page.route("https://example.com/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+      });
+    });
+    await page.goto(`/${MOCK_CODE}`);
     await waitForReady(page);
+
+    await expect.poll(() => previewRequests).toBe(1);
+    await expect(page.getByRole("img", { name: "品管圈/全套文件/现场照片.jpg" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "获取下载链接" })).toHaveCount(0);
 
     const aside = page.locator("aside");
     const visibleText = (text: string) => aside.locator("p:visible").filter({ hasText: new RegExp(`^${text}$`) });
     await expect(visibleText("品管圈")).toHaveCount(1);
     await expect(visibleText("全套文件")).toHaveCount(1);
+    await expect(visibleText("现场照片.jpg")).toHaveCount(1);
     await expect(visibleText("会议记录1.docx")).toHaveCount(1);
     await expect(visibleText("原始资料.xlsx")).toHaveCount(1);
     await expect(visibleText("空文件夹").first()).toBeVisible();
@@ -898,7 +994,6 @@ test.describe("单/多文件动作区回归", () => {
     await routeExternal(page);
     await page.goto(`/${MOCK_CODE}`);
     await page.getByRole("button", { name: "复制链接" }).first().waitFor({ timeout: 10000 });
-    await page.getByRole("button", { name: "获取下载链接" }).click();
 
     const buttonArea = page.locator("aside [data-testid='share-actions']");
     await expect(buttonArea.getByText("获取中…").first()).toBeVisible();

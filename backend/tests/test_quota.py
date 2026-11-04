@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import fakeredis.aioredis
 import pytest
 
-from app.services.quota import QuotaService, resolve_period
+from app.services.quota import QuotaGuard, QuotaService, resolve_period
 from app.services.quota_policy import default_policy_config
 from app.services.quota_reconciliation import reconcile_quota_settlements
 
@@ -111,6 +111,76 @@ async def test_cancelled_batch_rejects_late_reservations_and_consumption():
     assert not late.allowed
     with pytest.raises(RuntimeError, match="预留不存在"):
         await service.consume_reservation("guest", "cancel-device", "file-a")
+
+
+@pytest.mark.asyncio
+async def test_secondary_ip_guard_is_reserved_released_and_consumed_atomically():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    service = QuotaService(redis)
+    policy = default_policy_config().guest
+    guard = QuotaGuard(
+        scope="guest_ip",
+        identity="127.0.0.1",
+        limit_bytes=150,
+        exceeded_reason="当前网络额度不足",
+    )
+
+    released = await service.reserve(
+        scope="guest",
+        identity="device-a",
+        policy=policy,
+        policy_version=1,
+        batch_id="release-batch",
+        reservation_id="release-file",
+        size=100,
+        guard=guard,
+    )
+    assert released.allowed and released.created
+    await service.release_reservation("guest", "device-a", "release-file")
+    await service.finalize_batch("guest", "device-a", "release-batch")
+
+    reserved = await service.reserve(
+        scope="guest",
+        identity="device-a",
+        policy=policy,
+        policy_version=1,
+        batch_id="consume-batch",
+        reservation_id="consume-file",
+        size=100,
+        guard=guard,
+    )
+    assert reserved.allowed and reserved.created
+    await service.consume_reservation("guest", "device-a", "consume-file")
+
+    blocked = await service.reserve(
+        scope="guest",
+        identity="device-b",
+        policy=policy,
+        policy_version=1,
+        batch_id="blocked-batch",
+        reservation_id="blocked-file",
+        size=51,
+        guard=guard,
+    )
+    assert blocked.allowed is False
+    assert blocked.reason == "当前网络额度不足"
+
+    guest_snapshot = await service.snapshot(
+        scope="guest",
+        identity="device-a",
+        policy=policy,
+        policy_version=1,
+    )
+    ip_snapshot = await service.snapshot(
+        scope="guest_ip",
+        identity="127.0.0.1",
+        policy=policy,
+        policy_version=1,
+    )
+    assert guest_snapshot["used_bytes"] == 100
+    assert guest_snapshot["reserved_bytes"] == 0
+    assert ip_snapshot["used_bytes"] == 100
+    assert ip_snapshot["reserved_bytes"] == 0
 
 
 @pytest.mark.asyncio

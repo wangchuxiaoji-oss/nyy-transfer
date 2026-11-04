@@ -48,10 +48,102 @@ async def test_download_urls_include_backup_url():
 
 
 @pytest.mark.asyncio
+async def test_download_urls_batch_preserves_uri_mapping():
+    request_bodies: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "code": 0,
+            "data": {
+                "file_urls": [
+                    {"main_url": f"https://main.test/{index}", "back_url": ""}
+                    for index, _ in enumerate(request_bodies[-1]["uris"])
+                ],
+            },
+        })
+
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    uris = ["tos-cn-i-test/first.webp", "tos-cn-i-test/second.webp"]
+    try:
+        urls = await client.get_download_urls_batch(uris, expire_seconds=3600)
+    finally:
+        await client.close()
+
+    assert request_bodies == [{
+        "uris": uris,
+        "type": "file",
+        "format": "webp",
+        "expire_second": 3600,
+    }]
+    assert urls[uris[0]].main_url == "https://main.test/0"
+    assert urls[uris[1]].main_url == "https://main.test/1"
+
+
+@pytest.mark.asyncio
+async def test_init_upload_preserves_console_apply_parameters():
+    seen_query: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/passport/token/beat/web/":
+            return httpx.Response(200, json={"data": {"error_code": 0}})
+        if request.url.path == "/alice/resource/prepare_upload":
+            return httpx.Response(200, json={
+                "code": 0,
+                "data": {
+                    "service_id": "test-service",
+                    "upload_auth_token": {
+                        "access_key": "AK_TEST",
+                        "secret_key": "SK_TEST",
+                        "session_token": "STS_TEST",
+                        "current_time": "2026-01-01T00:00:00Z",
+                        "expired_time": "2026-01-01T01:00:00Z",
+                    },
+                },
+            })
+        if request.url.path == "/top/v1":
+            seen_query.update(parse_qs(request.url.query.decode()))
+            return httpx.Response(200, json={
+                "Result": {
+                    "UploadAddress": {
+                        "StoreInfos": [{
+                            "StoreUri": "tos-cn-i-test/console.bin",
+                            "Auth": "SpaceKey/test/auth",
+                        }],
+                        "UploadHosts": ["tos-test.example.com"],
+                        "SessionKey": "console-session",
+                    },
+                },
+            })
+        return httpx.Response(404)
+
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        result = await client.init_upload(
+            file_size=16,
+            file_ext="bin",
+            store_key="console.bin",
+        )
+    finally:
+        await client.close()
+
+    assert seen_query["NeedFallback"] == ["true"]
+    assert seen_query["s"] == ["jdnfglwfkl"]
+    assert seen_query["StoreKeys"] == ["console.bin"]
+    assert seen_query["FileExtension"] == [".bin"]
+    assert result.current_time == "2026-01-01T00:00:00Z"
+    assert result.expired_time == "2026-01-01T01:00:00Z"
+    assert result.raw_result["UploadAddress"]["SessionKey"] == "console-session"
+
+
+@pytest.mark.asyncio
 async def test_commit_upload_refreshes_sts_before_signing():
     """CommitImageUpload 应刷新 STS, 避免复用 Redis 里的过期签名凭证。"""
     seen_commit_headers: list[httpx.Headers] = []
     seen_commit_service_ids: list[str] = []
+    seen_commit_bodies: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/alice/resource/prepare_upload":
@@ -65,6 +157,8 @@ async def test_commit_upload_refreshes_sts_before_signing():
                             "access_key": "FRESH_AK",
                             "secret_key": "FRESH_SK",
                             "session_token": "FRESH_TOKEN",
+                            "current_time": "2026-01-01T00:00:00Z",
+                            "expired_time": "2026-01-01T01:00:00Z",
                         },
                     },
                 },
@@ -73,6 +167,7 @@ async def test_commit_upload_refreshes_sts_before_signing():
         if request.url.path == "/top/v1":
             seen_commit_headers.append(request.headers)
             seen_commit_service_ids.append(parse_qs(request.url.query.decode()).get("ServiceId", [""])[0])
+            seen_commit_bodies.append(json.loads(request.content))
             return httpx.Response(
                 200,
                 json={
@@ -95,15 +190,131 @@ async def test_commit_upload_refreshes_sts_before_signing():
             access_key="OLD_AK",
             secret_key="OLD_SK",
             session_token="OLD_TOKEN",
+            success_oids=["tos-cn-i-test/file.mp4"],
         )
     finally:
         await client.close()
 
     assert result == CommitResult(store_uri="tos-cn-i-test/file.mp4", success=True)
     assert seen_commit_service_ids == ["fresh-service"]
+    assert seen_commit_bodies == [{
+        "SessionKey": "old-session-key",
+        "SuccessOids": ["tos-cn-i-test/file.mp4"],
+    }]
     assert seen_commit_headers[0]["X-Amz-Security-Token"] == "FRESH_TOKEN"
     assert "Credential=FRESH_AK/" in seen_commit_headers[0]["Authorization"]
     assert "OLD_AK" not in seen_commit_headers[0]["Authorization"]
+
+
+@pytest.mark.asyncio
+async def test_delete_upload_files_uses_doubao_resource_api():
+    seen_body: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/alice/resource/delete_files":
+            seen_body.update(json.loads(request.content))
+            return httpx.Response(200, json={
+                "code": 0,
+                "msg": "success",
+            })
+        return httpx.Response(404)
+
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        confirmed = await client.delete_upload_files(["tos/first.jpg", "tos/missing.jpg"])
+    finally:
+        await client.close()
+
+    assert seen_body == {
+        "uris": [
+            {"uri": "tos/first.jpg", "data_type": "image"},
+            {"uri": "tos/missing.jpg", "data_type": "image"},
+        ]
+    }
+    assert confirmed == {"tos/first.jpg", "tos/missing.jpg"}
+
+
+@pytest.mark.asyncio
+async def test_delete_upload_files_falls_back_to_management_api(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/alice/resource/delete_files":
+            return httpx.Response(200, json={"code": 710010202, "msg": "系统错误"})
+        assert request.url.host == "imagex.volcengineapi.com"
+        assert parse_qs(request.url.query.decode())["Action"] == ["DeleteImageUploadFiles"]
+        return httpx.Response(200, json={
+            "ResponseMetadata": {"RequestId": "request"},
+            "Result": {"DeletedFiles": ["tos/first.jpg", "tos/second.jpg"]},
+        })
+
+    monkeypatch.setattr(
+        "app.services.doubao_client.get_settings",
+        lambda: type("Settings", (), {
+            "imagex_access_key": "AK",
+            "imagex_secret_key": "SK",
+            "imagex_session_token": "",
+            "imagex_service_id": "service",
+        })(),
+    )
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        confirmed = await client.delete_upload_files(["tos/first.jpg", "tos/second.jpg"])
+    finally:
+        await client.close()
+
+    assert confirmed == {"tos/first.jpg", "tos/second.jpg"}
+
+
+@pytest.mark.asyncio
+async def test_management_delete_rejects_unconfirmed_objects(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/alice/resource/delete_files":
+            return httpx.Response(200, json={"code": 710010202, "msg": "系统错误"})
+        return httpx.Response(200, json={
+            "ResponseMetadata": {"RequestId": "request"},
+            "Result": {"DeletedFiles": ["tos/first.jpg"]},
+        })
+
+    monkeypatch.setattr(
+        "app.services.doubao_client.get_settings",
+        lambda: type("Settings", (), {
+            "imagex_access_key": "AK",
+            "imagex_secret_key": "SK",
+            "imagex_session_token": "",
+            "imagex_service_id": "service",
+        })(),
+    )
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(DoubaoClientError, match="未确认"):
+            await client.delete_upload_files(["tos/first.jpg", "tos/second.jpg"])
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_upload_files_requires_management_credentials(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.doubao_client.get_settings",
+        lambda: type("Settings", (), {
+            "imagex_access_key": "",
+            "imagex_secret_key": "",
+            "imagex_session_token": "",
+            "imagex_service_id": "",
+        })(),
+    )
+    client = DoubaoUploadClient(cookies={})
+    client._http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"code": 710010202, "msg": "系统错误"},
+        )
+    ))
+    with pytest.raises(DoubaoClientError, match="IMAGEX_ACCESS_KEY"):
+        await client.delete_upload_files(["tos/first.jpg"])
+    await client.close()
 
 
 @pytest.mark.asyncio

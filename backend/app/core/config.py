@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="change-me-please-32-bytes-minimum-secret", min_length=32)
     session_cookie_name: str = "nyy_session"
     csrf_cookie_name: str = "nyy_csrf"
+    guest_cookie_name: str = "__Host-nyy_guest"
+    guest_cookie_max_age_days: int = Field(default=400, ge=1, le=400)
+    guest_cookie_secure: bool = True
 
     # 短码
     short_code_length: int = 6
@@ -56,6 +59,8 @@ class Settings(BaseSettings):
     guest_max_active_shares: int = 5
     guest_max_files_per_share: int = 10
     guest_ttl_hours: int = 24
+    guest_ip_quota_multiplier: int = Field(default=4, ge=1, le=100)
+    guest_ip_active_share_multiplier: int = Field(default=4, ge=1, le=100)
     user_max_file_bytes: int = 50 * 1024 * 1024 * 1024
     user_max_file_size: int = 10 * 1024 * 1024 * 1024
     user_max_active_shares: int = 30
@@ -82,6 +87,12 @@ class Settings(BaseSettings):
     doubao_auto_verify_heartbeat_interval_seconds: int = 600
     doubao_auto_verify_probe_interval_seconds: int = 1800
     doubao_auto_verify_failure_notify_interval_seconds: int = 21600
+
+    # ImageX 管理 API，仅用于对象删除等管理操作
+    imagex_access_key: str = Field(default="", repr=False)
+    imagex_secret_key: str = Field(default="", repr=False)
+    imagex_session_token: str = Field(default="", repr=False)
+    imagex_service_id: str = ""
 
     # Bark 推送，建议填写完整地址：https://api.day.app/<key>
     bark_push_url: str = ""
@@ -159,6 +170,8 @@ class Settings(BaseSettings):
             raise ValueError("生产环境必须设置非默认豆包 API 密钥")
         if not self.auth_cookie_secure:
             raise ValueError("生产环境必须设置 AUTH_COOKIE_SECURE=true")
+        if self.guest_cookie_name != "__Host-nyy_guest" or not self.guest_cookie_secure:
+            raise ValueError("生产环境游客 Cookie 必须使用 __Host-nyy_guest 且启用 Secure")
         return self
 
     @property

@@ -283,21 +283,40 @@ async def upload_sidecar(data: bytes, *, file_ext: str = "mp4", client: Any | No
     active_client = client or await get_doubao_client()
     init = await active_client.init_upload(len(data), file_ext=file_ext)
     crc32 = f"{zlib.crc32(data) & 0xffffffff:08x}"
-    async with httpx.AsyncClient(timeout=RANGE_TIMEOUT_SECONDS) as http:
-        resp = await http.post(
-            init.upload_url,
-            content=data,
-            headers={"Authorization": init.authorization, "Content-CRC32": crc32},
+    try:
+        async with httpx.AsyncClient(timeout=RANGE_TIMEOUT_SECONDS) as http:
+            resp = await http.post(
+                init.upload_url,
+                content=data,
+                headers={"Authorization": init.authorization, "Content-CRC32": crc32},
+            )
+            if resp.status_code < 200 or resp.status_code >= 300:
+                raise RuntimeError(f"sidecar upload failed: HTTP {resp.status_code} {resp.text[:200]}")
+        commit = await active_client.commit_upload(
+            init.service_id,
+            init.session_key,
+            init.access_key,
+            init.secret_key,
+            init.session_token,
+            refresh_auth=False,
         )
-        if resp.status_code < 200 or resp.status_code >= 300:
-            raise RuntimeError(f"sidecar upload failed: HTTP {resp.status_code} {resp.text[:200]}")
-    commit = await active_client.commit_upload(
-        init.service_id,
-        init.session_key,
-        init.access_key,
-        init.secret_key,
-        init.session_token,
-    )
+    except Exception:
+        delete_upload_files = getattr(active_client, "delete_upload_files", None)
+        if callable(delete_upload_files):
+            try:
+                await delete_upload_files([init.store_uri])
+            except Exception:
+                log.exception("sidecar 上传失败后的对象清理失败: %s", init.store_uri)
+                try:
+                    from app.services.media_jobs import queue_media_object_cleanup
+
+                    await queue_media_object_cleanup(
+                        [init.store_uri],
+                        reason="sidecar_upload_failed",
+                    )
+                except Exception:
+                    log.exception("无法持久化 sidecar 对象清理任务: %s", init.store_uri)
+        raise
     return commit.store_uri or init.store_uri, crc32
 
 

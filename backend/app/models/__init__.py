@@ -13,6 +13,7 @@ from app.models.mailbox import (
     MailboxImportTombstone,
     MailboxMessage,
 )
+from app.models.media import MediaObjectCleanupJob, MediaProcessingJob, ShareMediaAsset
 from app.models.quota import QuotaPolicyVersion
 from app.models.share import (
     DownloadLog,
@@ -57,6 +58,8 @@ __all__ = [
     "MailboxImportSource",
     "MailboxImportTombstone",
     "MailboxMessage",
+    "MediaObjectCleanupJob",
+    "MediaProcessingJob",
     "QuotaPolicyVersion",
     "ReferralAttribution",
     "Report",
@@ -66,6 +69,7 @@ __all__ = [
     "ShareEventIdempotencyKey",
     "ShareFile",
     "ShareLogicalFile",
+    "ShareMediaAsset",
     "SystemAnnouncement",
     "User",
     "ViralClickEvent",

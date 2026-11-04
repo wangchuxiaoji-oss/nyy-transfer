@@ -1,4 +1,4 @@
-import { authFetch, getGuestId } from "./auth";
+import { authFetch, completeGuestIdMigration, getGuestId } from "./auth";
 import { captureGrowthAttribution, getGrowthVisitorId, updateGrowthLandingId, type GrowthAttribution } from "./growth-attribution";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -52,8 +52,11 @@ function growthHeaders(): Record<string, string> {
 async function growthRequest(path: string, init?: RequestInit, authenticated = false): Promise<Response> {
   const request = authenticated ? authFetch : fetch;
   const primary = await request(`${API_BASE}/api/v1/growth${path}`, init);
+  completeGuestIdMigration(primary);
   if (primary.status !== 404 && primary.status !== 405) return primary;
-  return request(`${API_BASE}/growth${path}`, init);
+  const fallback = await request(`${API_BASE}/growth${path}`, init);
+  completeGuestIdMigration(fallback);
+  return fallback;
 }
 
 export async function recordGrowthLanding(url: URL): Promise<void> {
@@ -106,13 +109,15 @@ export async function recordViralClick(shareCode: string): Promise<void> {
     body: payload,
     keepalive: true,
   });
+  completeGuestIdMigration(response);
   if (response.status !== 404 && response.status !== 405) return;
-  await fetch(`${API_BASE}/growth/viral-click`, {
+  const fallback = await fetch(`${API_BASE}/growth/viral-click`, {
     method: "POST",
     headers: growthHeaders(),
     body: payload,
     keepalive: true,
   });
+  completeGuestIdMigration(fallback);
 }
 
 export async function getGrowthMe(): Promise<GrowthMe> {

@@ -25,6 +25,30 @@ export interface SmartDownloadProgress {
   currentFileName?: string;
 }
 
+export type BatchDownloadFileState = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface BatchDownloadFileProgress {
+  index: number;
+  fileName: string;
+  savedPath: string;
+  downloadedBytes: number;
+  totalBytes: number;
+  bytesPerSecond: number;
+  status: BatchDownloadFileState;
+  error?: string;
+}
+
+export interface BatchDownloadProgress {
+  files: BatchDownloadFileProgress[];
+  downloadedBytes: number;
+  totalBytes: number;
+  bytesPerSecond: number;
+  completedFiles: number;
+  failedFiles: number;
+  activeFiles: number;
+  elapsedMs: number;
+}
+
 export interface SmartDownloadOptions {
   config: DownloadConfig;
   onProgress?: (progress: SmartDownloadProgress | null) => void;
@@ -48,7 +72,9 @@ export interface DirectoryDownloadOptions {
   config: DownloadConfig;
   emptyDirs?: string[];
   onProgress?: (progress: SmartDownloadProgress | null) => void;
+  onBatchProgress?: (progress: BatchDownloadProgress) => void;
   onFileStart?: (file: ShareFileDownload, index: number, total: number) => void;
+  concurrency?: number;
   debugLog?: DebugLogFn;
   signal?: AbortSignal;
 }
@@ -90,6 +116,8 @@ type ProgressState = {
 
 const PROGRESS_EMIT_INTERVAL_MS = 250;
 const FILESYSTEM_RANGE_CHUNK_BYTES = 64 * 1024 * 1024;
+const DOWNLOAD_SOURCE_MAX_ATTEMPTS = 3;
+const DOWNLOAD_RETRY_DELAYS_MS = [300, 900];
 const MAX_SAFE_DIRECTORY_SEGMENT_CHARS = 100;
 const MAX_SAFE_FILE_NAME_CHARS = 180;
 const MAX_SAFE_RELATIVE_PATH_CHARS = 240;
@@ -490,30 +518,58 @@ async function fetchPartRange(
   const urls = [part.url, part.backupUrl].filter((url, index, values) => Boolean(url) && values.indexOf(url) === index);
   let lastError = "下载链接无效";
   for (const url of urls) {
-    throwIfAborted(signal);
-    try {
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
-        signal,
-      });
-      if (response.status === 200 && part.size > FILESYSTEM_RANGE_CHUNK_BYTES) {
-        await response.body?.cancel().catch(() => undefined);
-        lastError = "下载源未按 Range 返回分段数据";
-        continue;
-      }
-      if (!response.ok && response.status !== 206) {
-        await response.body?.cancel().catch(() => undefined);
-        lastError = `下载失败：HTTP ${response.status}`;
-        continue;
-      }
-      return response;
-    } catch (error) {
+    for (let attempt = 1; attempt <= DOWNLOAD_SOURCE_MAX_ATTEMPTS; attempt += 1) {
       throwIfAborted(signal);
-      lastError = error instanceof Error ? error.message : "下载请求失败";
+      try {
+        const response = await fetch(url, {
+          cache: "no-store",
+          headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
+          signal,
+        });
+        if (response.status === 200 && part.size > FILESYSTEM_RANGE_CHUNK_BYTES) {
+          await response.body?.cancel().catch(() => undefined);
+          lastError = "下载源未按 Range 返回分段数据";
+          break;
+        }
+        if (!response.ok && response.status !== 206) {
+          await response.body?.cancel().catch(() => undefined);
+          lastError = `下载失败：HTTP ${response.status}`;
+          if (!isRetryableDownloadStatus(response.status)) break;
+        } else {
+          return response;
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        lastError = error instanceof Error ? error.message : "下载请求失败";
+      }
+      if (attempt < DOWNLOAD_SOURCE_MAX_ATTEMPTS) {
+        await waitForDownloadRetry(DOWNLOAD_RETRY_DELAYS_MS[attempt - 1] ?? DOWNLOAD_RETRY_DELAYS_MS[DOWNLOAD_RETRY_DELAYS_MS.length - 1], signal);
+      }
     }
   }
   throw new Error(lastError);
+}
+
+function isRetryableDownloadStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function waitForDownloadRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("下载已取消", "AbortError"));
+      return;
+    }
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      globalThis.clearTimeout(timer);
+      reject(new DOMException("下载已取消", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function writeRangeResponseToFile(
@@ -629,35 +685,134 @@ export async function downloadFilesToDirectoryHandle(
   }
 
   const totalBytes = files.reduce((total, file) => total + file.file_size, 0);
-  const progress = createProgressState(totalBytes, files.length, "filesystem", options.onProgress);
+  const batchStartedAt = nowMs();
+  const fileProgress: BatchDownloadFileProgress[] = files.map((file, index) => ({
+    index,
+    fileName: file.file_name,
+    savedPath: sanitizeFilePath(file.file_name).savedPath,
+    downloadedBytes: 0,
+    totalBytes: file.file_size,
+    bytesPerSecond: 0,
+    status: "pending",
+  }));
   const usedNamesByDirectory = new Map<string, Set<string>>();
+  let latestFileIndex = 0;
 
-  for (let index = 0; index < files.length; index++) {
-    const file = files[index];
-    throwIfAborted(options.signal);
-    const filePath = sanitizeFilePath(file.file_name);
-    const parentDirectory = await ensureDirectory(directory, filePath.directories);
-    const directoryKey = filePath.directories.join("/");
-    let usedNames = usedNamesByDirectory.get(directoryKey);
-    if (!usedNames) {
-      usedNames = new Set<string>();
-      usedNamesByDirectory.set(directoryKey, usedNames);
+  const batchSnapshot = (): BatchDownloadProgress => ({
+    files: fileProgress.map((item) => ({ ...item })),
+    downloadedBytes: fileProgress.reduce((total, item) => total + item.downloadedBytes, 0),
+    totalBytes,
+    bytesPerSecond: fileProgress.reduce((total, item) => total + item.bytesPerSecond, 0),
+    completedFiles: fileProgress.filter((item) => item.status === "completed").length,
+    failedFiles: fileProgress.filter((item) => item.status === "failed").length,
+    activeFiles: fileProgress.filter((item) => item.status === "running").length,
+    elapsedMs: nowMs() - batchStartedAt,
+  });
+  const emitBatchProgress = () => {
+    const snapshot = batchSnapshot();
+    options.onBatchProgress?.(snapshot);
+    const active = snapshot.files[latestFileIndex] || snapshot.files.find((item) => item.status === "running") || snapshot.files[0];
+    options.onProgress?.({
+      downloadedBytes: snapshot.downloadedBytes,
+      totalBytes: snapshot.totalBytes,
+      currentPart: snapshot.completedFiles + snapshot.failedFiles,
+      totalParts: files.length,
+      method: "filesystem",
+      bytesPerSecond: snapshot.bytesPerSecond,
+      elapsedMs: snapshot.elapsedMs,
+      currentFileIndex: active ? active.index + 1 : 1,
+      totalFiles: files.length,
+      currentFileName: active?.savedPath || active?.fileName,
+    });
+  };
+
+  let allocationTail = Promise.resolve();
+  const allocateWritable = async (file: ShareFileDownload) => {
+    let releaseAllocation = () => {};
+    const previousAllocation = allocationTail;
+    allocationTail = new Promise<void>((resolve) => { releaseAllocation = resolve; });
+    await previousAllocation;
+    try {
+      throwIfAborted(options.signal);
+      const filePath = sanitizeFilePath(file.file_name);
+      const parentDirectory = await ensureDirectory(directory, filePath.directories);
+      const directoryKey = filePath.directories.join("/");
+      let usedNames = usedNamesByDirectory.get(directoryKey);
+      if (!usedNames) {
+        usedNames = new Set<string>();
+        usedNamesByDirectory.set(directoryKey, usedNames);
+      }
+      const { fileName, writable } = await createUniqueFileWritable(parentDirectory, filePath.fileName, usedNames);
+      const savedPath = [...filePath.directories, fileName].join("/") || fileName;
+      const rewriteReasons = [...filePath.reasons];
+      if (fileName !== filePath.fileName) rewriteReasons.push("同目录重名已追加序号");
+      if (rewriteReasons.length > 0 && savedPath !== filePath.originalPath) {
+        rewriteReports.push({ originalPath: filePath.originalPath, savedPath, reasons: uniqueReasons(rewriteReasons) });
+      }
+      return { writable, savedPath };
+    } finally {
+      releaseAllocation();
     }
-    const { fileName, writable } = await createUniqueFileWritable(parentDirectory, filePath.fileName, usedNames);
-    const savedPath = [...filePath.directories, fileName].join("/") || fileName;
-    const rewriteReasons = [...filePath.reasons];
-    if (fileName !== filePath.fileName) rewriteReasons.push("同目录重名已追加序号");
-    if (rewriteReasons.length > 0 && savedPath !== filePath.originalPath) {
-      rewriteReports.push({ originalPath: filePath.originalPath, savedPath, reasons: uniqueReasons(rewriteReasons) });
+  };
+
+  let nextFileIndex = 0;
+  const worker = async () => {
+    while (nextFileIndex < files.length) {
+      const index = nextFileIndex;
+      nextFileIndex += 1;
+      const file = files[index];
+      const item = fileProgress[index];
+      if (options.signal?.aborted) {
+        item.status = "cancelled";
+        emitBatchProgress();
+        continue;
+      }
+      item.status = "running";
+      latestFileIndex = index;
+      emitBatchProgress();
+      try {
+        const { writable, savedPath } = await allocateWritable(file);
+        item.savedPath = savedPath;
+        options.onFileStart?.(file, index, files.length);
+        options.debugLog?.("download", "filesystem:file:start", { index, fileName: savedPath, size: file.file_size });
+        const progress = createProgressState(file.file_size, downloadParts(file).length, "filesystem", (current) => {
+          if (!current) return;
+          item.downloadedBytes = current.downloadedBytes;
+          item.bytesPerSecond = current.bytesPerSecond;
+          latestFileIndex = index;
+          emitBatchProgress();
+        });
+        progress.currentFileIndex = index + 1;
+        progress.totalFiles = files.length;
+        progress.currentFileName = savedPath;
+        await downloadFileToWritable(file, writable, {
+          ...options,
+          config,
+          progress,
+          setCurrentPart: (partIndex) => { progress.currentPart = partIndex; },
+        });
+        item.downloadedBytes = item.totalBytes;
+        item.bytesPerSecond = 0;
+        item.status = "completed";
+        options.debugLog?.("download", "filesystem:file:done", { index, downloadedBytes: item.downloadedBytes });
+      } catch (error) {
+        const cancelled = error instanceof DOMException && error.name === "AbortError";
+        item.status = cancelled ? "cancelled" : "failed";
+        item.bytesPerSecond = 0;
+        item.error = cancelled ? "下载已取消" : error instanceof Error ? error.message : "下载失败";
+        options.debugLog?.("download", "filesystem:file:error", { index, error: item.error });
+      }
+      emitBatchProgress();
     }
-    progress.currentPart = index + 1;
-    progress.currentFileIndex = index + 1;
-    progress.totalFiles = files.length;
-    progress.currentFileName = savedPath;
-    options.onFileStart?.(file, index, files.length);
-    options.debugLog?.("download", "filesystem:file:start", { index, fileName: progress.currentFileName, size: file.file_size });
-    await downloadFileToWritable(file, writable, { ...options, config, progress });
-    options.debugLog?.("download", "filesystem:file:done", { index, downloadedBytes: progress.downloadedBytes });
+  };
+
+  emitBatchProgress();
+  const concurrency = Math.min(files.length, Math.max(1, Math.floor(options.concurrency ?? 3)));
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+  if (options.signal?.aborted) {
+    options.onProgress?.(null);
+    throw new DOMException("下载已取消", "AbortError");
   }
 
   if (rewriteReports.length > 0) {
@@ -670,8 +825,12 @@ export async function downloadFilesToDirectoryHandle(
     }
   }
 
-  emitProgress(progress, true);
+  emitBatchProgress();
   options.onProgress?.(null);
+  const failedFiles = fileProgress.filter((item) => item.status === "failed");
+  if (failedFiles.length > 0) {
+    throw new Error(`${failedFiles.length} 个文件保存失败，其余文件已继续处理`);
+  }
 }
 
 export async function downloadFilesToDirectory(files: ShareFileDownload[], options: DirectoryDownloadOptions): Promise<void> {

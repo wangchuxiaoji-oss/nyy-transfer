@@ -97,6 +97,72 @@ class UploadCommitRequest(BaseModel):
     retention_coupon_id: uuid.UUID | None = None
 
 
+# --- TTUploader 相关 schema ---
+
+class UploadInitRequestTT(BaseModel):
+    """POST /api/v1/uploads/init-tt 请求体（与 init 语义一致，供 TTUploader 上传初始化）。"""
+    file_name: str = Field(..., min_length=1, max_length=255)
+    file_size: int = Field(..., gt=0, le=10 * 1024 * 1024 * 1024)
+    file_ext: str = Field(default="", max_length=16)
+    content_type: str = Field(default="", max_length=127)
+    logical_file_id: str = Field(..., min_length=36, max_length=36)
+    upload_batch_id: str = Field(..., min_length=1, max_length=64)
+    request_code: str = Field(default="", max_length=16)
+    request_password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+
+
+class UploadInitResponseTT(BaseModel):
+    """POST /api/v1/uploads/init-tt 响应体。
+
+    包含前端用 TTUploader 直传 TOS 所需的 STS 凭证与上传元数据。
+    STS 不持久化到前端本地存储，仅在内存中使用。
+    """
+    # --- STS 凭证（供 TTUploader STSToken） ---
+    access_key_id: str
+    secret_access_key: str
+    session_token: str
+    current_time: str  # ISO 时间，用于 STS 时钟偏移校验
+    expired_time: str  # ISO 时间，STs 过期时刻
+
+    # --- ImageX 配置（供 TTUploader addImageXFile） ---
+    service_id: str
+    store_key: str
+    store_uri: str
+    apply_result: dict[str, Any]
+
+    # --- 前端 commit 时回传 ---
+    commit_token: str
+    commit_token_expires_at: str
+
+
+class TTUploaderCommitRequest(BaseModel):
+    commit_token: str = Field(..., min_length=1, max_length=512)
+    session_key: str = Field(..., min_length=1, max_length=2048)
+    success_oids: list[str] = Field(..., min_length=1, max_length=1)
+
+
+class TTUploaderCommitResponse(BaseModel):
+    result: dict[str, Any]
+
+
+class UploadCommitRequestTT(BaseModel):
+    """POST /api/v1/uploads/commit-tt 请求体。
+
+    TTUploader 上传完成时回传，复用现有 commit 语义（share 创建、配额扣减）。
+    """
+    upload_batch_id: str = Field(..., min_length=1, max_length=64)
+    files: list[CommitFileItem] = Field(..., min_length=1, max_length=500)
+    logical_files: list[CommitLogicalFileItem] = Field(default_factory=list, max_length=500)
+    # 空目录路径（例如 "folder/empty/"），用于下载 ZIP 时恢复目录结构
+    empty_dirs: list[str] = Field(default_factory=list, max_length=500)
+    # 可选：提取码（4位数字）
+    password: str = Field(default="", max_length=4, pattern=r"^(?:[0-9]{4})?$")
+    expires_hours: int | None = Field(default=None, ge=1, le=2160)
+    max_downloads: int | None = Field(default=None, ge=0, le=1_000_000)
+    recipients: list[EmailStr] = Field(default_factory=list, max_length=5)
+    retention_coupon_id: uuid.UUID | None = None
+
+
 class UploadCommitResponse(BaseModel):
     """POST /api/v1/uploads/commit 响应体。"""
     share_code: str

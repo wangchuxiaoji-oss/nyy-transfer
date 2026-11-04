@@ -1,0 +1,63 @@
+替换问题片（兼容音频优先）
+
+1. 惊奇队长2 The Marvels
+   link_id: 79907
+   release: 惊奇队长2[国英多音轨+中文字幕].The.Marvels.2023.1080p.WEB-DL.H265.DDP5.1.2Audio-DreamHD[2.94G]
+   magnet: magnet:?xt=urn:btih:d3cf11fc56854cee5f2f3dc78338bfc402a0e59f
+
+2. 尚气与十环传奇 Shang-Chi and the Legend of the Ten Rings
+   link_id: 57744
+   release: 尚气与十环传奇(蓝光特效中英双字).Shang-Chi.and.the.Legend.of.the.Ten.Rings.2021.BD-1080p.X265.10bit.AAC5.1.CHS.ENG-UUMp4[3.28G]
+   magnet: magnet:?xt=urn:btih:48d2b0581584b295d14fd09f163226cd073c1cc6
+
+新增 10 部（热门商业片方向）
+
+1. F1：狂飙飞车 F1: The Movie
+   link_id: 2318
+   release: F1：狂飙飞车.F1.The.Movie.2025.HD1080P.X264.AAC.English.CHS-ENG.XLYS[4.13G]
+   magnet: magnet:?xt=urn:btih:004d2325d22e8866b5391093d0cd05d34f3c9093
+
+2. 复仇者联盟4：终局之战 Avengers: Endgame
+   link_id: 10350
+   release: 复仇者联盟4：终局之战.Avengers.Endgame.2019.BD1080P.X264.AAC.国英双语特效中英双字[5.68G]
+   magnet: magnet:?xt=urn:btih:b18679ff96d53194271d2dbed697761a732d6078
+
+3. 这个杀手不太冷 Léon
+   link_id: 12138
+   release: 这个杀手不太冷[国英多音轨+特效中文字幕].Leon.The.Professional.1994.1080p.Bluray.AAC.2.0.x264-DreamHD[4.09G]
+   magnet: magnet:?xt=urn:btih:1b58db477e32ae2c39f8815dfab42e13434b6876
+
+4. 西线无战事 Im Westen nichts Neues
+   link_id: 15029
+   release: 西线无战事(德语中字).All.Quiet.on.the.Western.Front.2022.WEB-1080p.X264.AAC5.1.CHS-UUMp4[3.45G]
+   magnet: magnet:?xt=urn:btih:9f188815080bdc949e300dffd89737782c3c7cbd
+
+5. 鬼灭之刃 那田蜘蛛山篇
+   link_id: 22652
+   release: 鬼灭之刃 那田蜘蛛山篇[中文字幕].Demon.Slayer：Mount.Natagumo.2020.WEB-DL.1080p.H264.AAC-SONYHD[3.64G]
+   magnet: magnet:?xt=urn:btih:f05a7e9590314928cd5c8a8e4106c474c15a6a2b
+
+6. 小丑 Joker
+   link_id: 25150
+   release: 小丑.美版中英双字.Joker.2019.HD1080P.X264.AAC.@公众号SJJ279.mp4[4.12G]
+   magnet: magnet:?xt=urn:btih:29cc3479fd9d390f367d23531eb9f75f9aeb5a6f
+
+7. 浪客剑心 最终章 追忆篇
+   link_id: 45139
+   release: 浪客剑心 最终章 追忆篇[中文字幕].Rurouni.Kenshin.The.Beginning.2021.1080p.BluRay.DD5.1.x264-OPT[8.85G]
+   magnet: magnet:?xt=urn:btih:9017f748e91d195268e4dcc551b3423d7fcc8c8f
+
+8. 哈利·波特与火焰杯 Harry Potter and the Goblet of Fire
+   link_id: 52979
+   release: 哈利波特与火焰杯[中文字幕].Harry.Potter.and.the.Goblet.of.Fire.2005.1080p.Bili.WEB-DL.H264.AAC-SONYHD[4.77G]
+   magnet: magnet:?xt=urn:btih:5ae7442a8cf4fd03765859ef99ee2ea09e652d49
+
+9. 头号玩家 Ready Player One
+   link_id: 78191
+   release: 头号玩家[国英多音轨/中文字幕].Ready.Player.One.2018.BluRay.1080p.DD5.1.2Audio.x264-DreamHD
+   magnet: magnet:?xt=urn:btih:7620e81a8ce7ffbbfac3193c3d90bc6055725fc4
+
+10. 银河护卫队3 Guardians of the Galaxy Vol. 3
+    link_id: 78432
+    release: 银河护卫队3[中文字幕+特效字幕].Guardians.of.the.Galaxy.Vol.3.2023.Bluray.1080p.AAC2.0.x264-DreamHD[4.41G]
+    magnet: magnet:?xt=urn:btih:d11d847268bd83c9fad0ac5060fbe95191e7187c

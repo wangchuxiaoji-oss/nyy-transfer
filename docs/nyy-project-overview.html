@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="拿呀² · nyy.app — 类奶牛快传的轻量文件中转站，全栈项目全景介绍：架构、技术栈、自研播放器、配额机制与生产运维。">
+<title>拿呀² · nyy.app — 全栈项目概览</title>
+<script>try{var t=localStorage.getItem('nyy-theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.setAttribute('data-theme','dark')}}catch(e){}</script>
+<style>
+:root{
+  --bg:#f7f7f4;--surface:#ffffff;--surface-alt:#f0f1ee;--surface-hover:#f3f4f1;--surface-inverse:#17191c;
+  --border:#e3e5e2;--border-subtle:#e6e8e5;--border-control:#8a8f96;
+  --text:#17191c;--text-secondary:#62676d;--text-tertiary:#6b7178;--text-inverse:#ffffff;
+  --brand:#c25d34;--accent:#9f4528;--accent-hover:#7f351f;--accent-soft:#f6e7df;
+  --primary:#17191c;--primary-hover:#2a2d31;
+  --success:#237a57;--success-soft:#e6f3ed;--error:#b42318;--error-soft:#fbe9e7;--warning:#825500;--warning-soft:#fbf0d8;--info:#315c87;--info-soft:#e7eef5;
+  --bg-rgb:247,247,244;--surface-rgb:255,255,255;--text-rgb:23,25,28;--accent-rgb:159,69,40;--brand-rgb:194,93,52;
+  --radius-compact:6px;--radius-control:10px;--radius-card:12px;--radius-panel:16px;--radius-pill:9999px;
+  --duration-fast:90ms;--duration-standard:150ms;--duration-enter:200ms;
+  --ease-productive:cubic-bezier(0.2,0,0.38,0.9);--ease-enter:cubic-bezier(0,0,0.38,0.9);
+  --font-sans:"Geist","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --font-mono:ui-monospace,"SFMono-Regular","Cascadia Mono",Consolas,"Noto Sans Mono CJK SC",monospace;
+  --shadow-subtle:0 10px 28px rgba(var(--text-rgb),.06);
+  --shadow-panel:0 18px 50px rgba(var(--text-rgb),.055);
+  --shadow-overlay:0 24px 70px rgba(var(--text-rgb),.18);
+}
+[data-theme="dark"]{
+  --bg:#111315;--surface:#181b1e;--surface-alt:#202428;--surface-hover:#252a2f;--surface-inverse:#f3f4f2;
+  --border:#30353a;--border-subtle:#2b3035;--border-control:#717981;
+  --text:#f3f4f2;--text-secondary:#b7bdc3;--text-tertiary:#949ba3;--text-inverse:#17191c;
+  --brand:#e1845e;--accent:#e1845e;--accent-hover:#f09a75;--accent-soft:#33241f;
+  --primary:#f3f4f2;--primary-hover:#ffffff;
+  --success:#62b58d;--success-soft:#17372a;--error:#ff8a80;--error-soft:#40201d;--warning:#e5b454;--warning-soft:#382d16;--info:#84add3;--info-soft:#1e3041;
+  --bg-rgb:17,19,21;--surface-rgb:24,27,30;--text-rgb:243,244,242;--accent-rgb:225,132,94;--brand-rgb:225,132,94;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);font-size:16px;line-height:1.75;letter-spacing:.01em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:var(--accent-soft);color:var(--accent)}
+a{color:var(--accent);text-decoration-line:underline;text-decoration-color:transparent;text-underline-offset:.2em;transition:color var(--duration-fast) var(--ease-productive),text-decoration-color var(--duration-fast) var(--ease-productive)}
+a:hover{color:var(--accent-hover);text-decoration-color:currentColor}
+a:focus-visible,.lbox-btn:focus-visible,button:focus-visible{outline:2px solid var(--focus,var(--accent));outline-offset:2px;border-radius:var(--radius-compact)}
+.container{width:min(100% - 2rem,75rem);margin-inline:auto}
+.eyebrow{display:inline-flex;align-items:center;gap:.5rem;font-size:.8125rem;font-weight:550;letter-spacing:.02em;color:var(--accent);margin-bottom:1rem}
+.eyebrow::before{content:"";width:1.5rem;height:2px;background:var(--brand);border-radius:1px}
+h1,h2,h3,h4{line-height:1.2;text-wrap:balance}
+h2{font-size:clamp(1.9rem,3vw,2.6rem);font-weight:620;letter-spacing:-.025em;line-height:1.18}
+h3{font-size:1.25rem;font-weight:600;letter-spacing:-.012em;line-height:1.4}
+p{text-wrap:pretty}
+.section{padding:5.5rem 0 1rem}
+.section+.section{padding-top:5.5rem}
+.section-head{max-width:56rem;margin-bottom:2.75rem}
+.section-head p{color:var(--text-secondary);margin-top:.9rem;max-width:46rem}
+.section-head .meta{font-family:var(--font-mono);font-size:.8125rem;color:var(--text-tertiary);margin-top:.6rem;font-variant-numeric:tabular-nums}
+.sep{border:none;border-top:1px solid var(--border-subtle)}
+.card{background:var(--surface);border:1px solid var(--border-subtle);border-radius:var(--radius-card)}
+.badge{display:inline-flex;align-items:center;gap:.35rem;min-height:24px;border:1px solid var(--border-subtle);border-radius:var(--radius-pill);padding:.2rem .6rem;color:var(--text-secondary);background:var(--surface-alt);font-size:.75rem;font-weight:550;line-height:1.2;white-space:nowrap}
+.badge--brand{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+.badge--success{color:var(--success);background:var(--success-soft);border-color:transparent}
+.badge--info{color:var(--info);background:var(--info-soft);border-color:transparent}
+.badge--warning{color:var(--warning);background:var(--warning-soft);border-color:transparent}
+.badge--error{color:var(--error);background:var(--error-soft);border-color:transparent}
+
+/* ============ NAV ============ */
+.nav{position:sticky;top:0;z-index:60;min-height:64px;display:flex;align-items:center;border-bottom:1px solid var(--border-subtle);background:rgba(var(--surface-rgb),.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;width:min(100% - 2rem,75rem);margin-inline:auto}
+.brand-lockup{display:inline-flex;align-items:center;gap:.625rem;color:var(--text);text-decoration:none}
+.brand-lockup:hover{color:var(--text);text-decoration:none}
+.brand-symbol{width:2rem;height:2rem;color:var(--brand);flex:none}
+.brand-name{font-size:1.0625rem;font-weight:620;letter-spacing:-.01em}
+.brand-domain{font-family:var(--font-mono);font-size:.6875rem;font-weight:500;color:var(--text-tertiary);display:block;line-height:1}
+.nav-links{display:none;align-items:center;gap:.25rem}
+.nav-link{min-height:44px;display:inline-flex;align-items:center;padding:0 .75rem;color:var(--text-secondary);font-size:.875rem;font-weight:500;text-decoration:none;border-radius:var(--radius-compact);transition:color var(--duration-fast) var(--ease-productive),background-color var(--duration-fast) var(--ease-productive)}
+.nav-link:hover{color:var(--text);background:var(--surface-hover);text-decoration:none}
+.nav-link[aria-current="true"]{color:var(--text)}
+.nav-actions{display:flex;align-items:center;gap:.5rem}
+.icon-btn{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:var(--surface);color:var(--text-secondary);cursor:pointer;transition:background-color var(--duration-fast) var(--ease-productive),color var(--duration-fast) var(--ease-productive),border-color var(--duration-fast) var(--ease-productive)}
+.icon-btn:hover{background:var(--surface-hover);color:var(--text);border-color:var(--border-control)}
+.icon-btn svg{width:18px;height:18px}
+.btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:.5rem;border:1px solid transparent;border-radius:var(--radius-control);padding:.625rem 1.125rem;font:550 .875rem/1.25 var(--font-sans);cursor:pointer;text-decoration:none;transition:background-color var(--duration-fast) var(--ease-productive),border-color var(--duration-fast) var(--ease-productive),color var(--duration-fast) var(--ease-productive),transform var(--duration-fast) var(--ease-productive)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{cursor:not-allowed;opacity:.46;transform:none}
+.btn--primary{color:var(--text-inverse);background:var(--primary);border-color:var(--primary)}
+.btn--primary:hover{background:var(--primary-hover);border-color:var(--primary-hover);text-decoration:none}
+.btn--secondary{color:var(--text);background:var(--surface);border-color:var(--border-control)}
+.btn--secondary:hover{background:var(--surface-hover);border-color:var(--border-hover);text-decoration:none}
+.btn svg{width:16px;height:16px}
+.btn--sm{min-height:36px;padding:.375rem .875rem;font-size:.8125rem}
+
+/* ============ HERO ============ */
+.hero{position:relative;padding:5.5rem 0 4.5rem;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(42rem 22rem at 85% -8%,rgba(var(--brand-rgb),.09),transparent 65%),radial-gradient(30rem 18rem at -5% 30%,rgba(var(--accent-rgb),.05),transparent 60%)}
+.hero-inner{position:relative;display:grid;gap:3rem}
+.hero-badges{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.75rem}
+.hero h1{font-size:clamp(2.75rem,5vw,4.25rem);font-weight:620;letter-spacing:-.035em;line-height:1.08;margin-bottom:1.25rem}
+.hero h1 .dot{color:var(--brand)}
+.hero p.lead{font-size:1.125rem;color:var(--text-secondary);max-width:44rem;margin-bottom:2rem}
+.hero-cta{display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:3rem}
+.hero-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;max-width:64rem}
+.stat{border:1px solid var(--border-subtle);border-radius:var(--radius-card);background:var(--surface);padding:1.125rem 1.25rem}
+.stat .num{font-size:1.625rem;font-weight:620;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--text)}
+.stat .num small{font-size:.875rem;font-weight:550;color:var(--text-tertiary);margin-left:.15rem}
+.stat .lbl{font-size:.8125rem;color:var(--text-secondary);margin-top:.25rem}
+@media(min-width:700px){.hero-stats{grid-template-columns:repeat(5,minmax(0,1fr))}.stat .num{font-size:1.375rem}}
+
+/* ============ SECTION COMMONS ============ */
+.grid-2{display:grid;gap:1.5rem}
+@media(min-width:860px){.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.grid-3{display:grid;gap:1.5rem}
+@media(min-width:860px){.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.grid-4{display:grid;gap:1.25rem}
+@media(min-width:860px){.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.card-body{padding:1.5rem}
+.card-interactive{cursor:default;transition:border-color var(--duration-standard) var(--ease-productive),box-shadow var(--duration-standard) var(--ease-productive),transform var(--duration-standard) var(--ease-productive)}
+.card-interactive:hover::after{opacity:1}
+.feature-icon{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-control);background:var(--accent-soft);color:var(--accent);margin-bottom:1.125rem}
+.feature-icon svg{width:22px;height:22px}
+.feature-icon--neutral{background:var(--surface-alt);color:var(--text-secondary)}
+.feature-icon--info{background:var(--info-soft);color:var(--info)}
+.feature-icon--success{background:var(--success-soft);color:var(--success)}
+.card h3{margin-bottom:.6rem}
+.card p{color:var(--text-secondary);font-size:.9375rem}
+.card ul{list-style:none;margin-top:.9rem;display:grid;gap:.45rem}
+.card ul li{display:flex;gap:.6rem;align-items:flex-start;font-size:.875rem;color:var(--text-secondary)}
+.card ul li::before{content:"";flex:none;width:5px;height:5px;border-radius:50%;background:var(--brand);margin-top:.55em}
+.tag-list{display:flex;flex-wrap:wrap;gap:.5rem}
+.tag{font-size:.8125rem;font-weight:500;color:var(--text-secondary);background:var(--surface-alt);border:1px solid var(--border-subtle);border-radius:var(--radius-pill);padding:.28rem .8rem;white-space:nowrap}
+.tag--hl{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+
+/* ============ PRINCIPLE BAND ============ */
+.band{border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface);box-shadow:var(--shadow-panel);padding:2rem 1.75rem;margin-top:1rem}
+.band .k{font-family:var(--font-mono);font-size:.8125rem;color:var(--brand);font-weight:600;letter-spacing:.02em;margin-bottom:.5rem}
+.band p{font-size:1.0625rem;color:var(--text-secondary)}
+.band p b{color:var(--text);font-weight:620}
+.band .arrow{color:var(--brand);font-family:var(--font-mono)}
+
+/* ============ SHOTS ============ */
+.shot-grid{display:grid;gap:1.5rem}
+.shot-card{border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface);overflow:hidden;transition:border-color var(--duration-standard) var(--ease-productive),box-shadow var(--duration-standard) var(--ease-productive),transform var(--duration-standard) var(--ease-productive)}
+.shot-card:hover{border-color:var(--border-control);box-shadow:var(--shadow-subtle);transform:translateY(-1px)}
+.shot-card .frame{position:relative;background-color:#e9eae7;cursor:zoom-in}
+[data-theme="dark"] .shot-card .frame{background-color:#14161a}
+.shot-card img{display:block;width:100%;height:auto;border-radius:0}
+.shot-card .cap{border-top:1px solid var(--border-subtle);padding:.9rem 1.125rem;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
+.shot-card .cap .t{font-size:.875rem;font-weight:600}
+.shot-card .cap .s{font-size:.75rem;color:var(--text-tertiary);font-family:var(--font-mono)}
+.shot-card .zoom-hint{position:absolute;inset:auto .75rem .75rem auto;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(23,25,28,.55);color:#fff;opacity:0;transition:opacity var(--duration-standard) var(--ease-productive)}
+.shot-card:hover .zoom-hint{opacity:1}
+.shot-card .zoom-hint svg{width:16px;height:16px}
+.shot-note{display:flex;gap:.75rem;align-items:flex-start;margin-top:1.5rem;padding:1rem 1.25rem;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:var(--surface-alt);color:var(--text-secondary);font-size:.875rem}
+.shot-note svg{flex:none;width:18px;height:18px;color:var(--info);margin-top:.2rem}
+
+/* ============ ARCHITECTURE ============ */
+.arch-wrap{background:var(--surface);border:1px solid var(--border-subtle);border-radius:var(--radius-panel);padding:1.5rem;overflow-x:auto}
+.arch{display:block;width:100%;min-width:760px;height:auto}
+.arch .box{fill:var(--surface-alt);stroke:var(--border-control);stroke-width:1.25;rx:10}
+.arch .box-accent{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.25;rx:10}
+.arch .box-dark{fill:var(--surface-inverse);stroke:var(--surface-inverse);rx:10}
+.arch .box-dash{fill:none;stroke:var(--border-control);stroke-width:1.25;stroke-dasharray:5 4;rx:10}
+.arch text{font-family:var(--font-sans);font-size:12.5px;fill:var(--text)}
+.arch .lbl{font-size:10.5px;fill:var(--text-tertiary)}
+.arch .lbl-accent{font-size:10.5px;fill:var(--accent)}
+.arch .t1{font-size:13.5px;font-weight:620;fill:var(--text)}
+.arch .t-light{fill:var(--text-inverse)}
+.arch .mono{font-family:var(--font-mono);font-size:10px;fill:var(--text-tertiary)}
+.arch .lgroup{fill:none;stroke:var(--border-subtle);stroke-width:1.5;rx:14}
+.arch .arrow{stroke:var(--border-control);stroke-width:1.5;fill:none}
+.arch .arrow-accent{stroke:var(--brand);stroke-width:1.75;fill:none}
+.arch .arrow-label{font-size:10.5px;fill:var(--text-tertiary)}
+.arch .arrow-label-accent{font-size:10.5px;fill:var(--accent);font-weight:600}
+
+/* ============ TABLES ============ */
+.table-wrap{border:1px solid var(--border-subtle);border-radius:var(--radius-card);background:var(--surface);overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.875rem}
+thead th{text-align:left;font-size:.75rem;font-weight:600;color:var(--text-tertiary);padding:.75rem 1rem;border-bottom:1px solid var(--border-subtle);background:var(--surface-alt);white-space:nowrap;letter-spacing:.02em}
+tbody td{padding:.7rem 1rem;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr{transition:background-color var(--duration-fast) var(--ease-productive)}
+tbody tr:hover{background:var(--surface-hover)}
+td code,td .mono,th code{font-family:var(--font-mono);font-size:.8125rem;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.code{font-family:var(--font-mono);font-size:.8125rem;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl-group td:first-child{font-weight:600;color:var(--text)}
+.tbl-note{margin-top:.75rem;font-size:.8125rem;color:var(--text-tertiary)}
+
+/* ============ STACK ============ */
+.stack-grid{display:grid;gap:1.5rem}
+@media(min-width:860px){.stack-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.stack-head{display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem}
+.stack-head .n{font-family:var(--font-mono);font-size:.75rem;color:var(--text-tertiary);border:1px solid var(--border-subtle);border-radius:var(--radius-compact);padding:.1rem .45rem}
+.stack-head h3{margin:0}
+.stack-body{display:flex;flex-wrap:wrap;gap:.5rem}
+.tech{display:inline-flex;align-items:center;gap:.4rem;font-size:.8125rem;font-weight:500;color:var(--text);background:var(--surface);border:1px solid var(--border-subtle);border-radius:var(--radius-compact);padding:.3rem .7rem;transition:border-color var(--duration-fast) var(--ease-productive),background-color var(--duration-fast) var(--ease-productive)}
+.tech:hover{border-color:var(--border-control);background:var(--surface-hover)}
+.tech .ver{color:var(--text-tertiary);font-family:var(--font-mono);font-size:.6875rem;font-variant-numeric:tabular-nums}
+.tech--hl{border-color:var(--accent);color:var(--accent)}
+.tech--hl .ver{color:var(--accent)}
+
+/* ============ DEEP DIVE ============ */
+.dive{border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface);box-shadow:var(--shadow-panel);padding:2rem;display:grid;gap:1.75rem}
+.dive-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:1rem}
+.dive-head h3{font-size:1.5rem;font-weight:620;letter-spacing:-.02em}
+.dive-head .k{font-family:var(--font-mono);font-size:.8125rem;color:var(--brand);font-weight:600;margin-bottom:.35rem}
+.dive-grid{display:grid;gap:1.25rem}
+@media(min-width:760px){.dive-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.dive-item{border:1px solid var(--border-subtle);border-radius:var(--radius-card);padding:1.125rem 1.25rem;background:var(--surface)}
+.dive-item h4{font-size:.9375rem;font-weight:620;margin-bottom:.5rem}
+.dive-item p{font-size:.84375rem;color:var(--text-secondary);line-height:1.65}
+.dive-item .mono{font-family:var(--font-mono);font-size:.75rem;color:var(--accent)}
+
+/* ============ TIMELINE ============ */
+.timeline{display:grid;gap:1.25rem}
+.tl-item{position:relative;padding-left:2.25rem}
+.tl-item::before{content:"";position:absolute;left:.375rem;top:.6rem;bottom:-1.25rem;width:2px;background:var(--border-subtle)}
+.tl-item:last-child::before{display:none}
+.tl-item .dot{position:absolute;left:0;top:.4rem;width:12px;height:12px;border-radius:50%;background:var(--brand);border:2px solid var(--bg)}
+.tl-item .when{font-family:var(--font-mono);font-size:.8125rem;color:var(--brand);font-weight:600;margin-bottom:.3rem}
+.tl-item h3{font-size:1.0625rem;margin-bottom:.5rem}
+.tl-item p{color:var(--text-secondary);font-size:.90625rem;max-width:52rem}
+.tl-list{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.65rem}
+
+/* ============ SECURITY ============ */
+.sec-item{display:flex;gap:1rem;align-items:flex-start}
+.sec-item .ic{flex:none;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-control);background:var(--surface-alt);color:var(--text-secondary);margin-top:.1rem}
+.sec-item .ic svg{width:20px;height:20px}
+.sec-item h4{font-size:.9375rem;font-weight:620;margin-bottom:.3rem}
+.sec-item p{font-size:.84375rem;color:var(--text-secondary);line-height:1.65}
+
+/* ============ FOOTER ============ */
+.footer{border-top:1px solid var(--border-subtle);margin-top:6rem;background:var(--surface)}
+.footer-inner{padding:3rem 0 2.5rem;display:grid;gap:1.5rem}
+.footer .brand-name{display:block;margin-bottom:.35rem}
+.footer p{font-size:.84375rem;color:var(--text-secondary);max-width:44rem}
+.footer .row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem}
+
+/* ============ LIGHTBOX ============ */
+.lbox{position:fixed;inset:0;z-index:100;background:rgba(11,12,14,.82);display:none;align-items:center;justify-content:center;padding:1.5rem}
+.lbox.open{display:flex}
+.lbox img{max-width:min(92vw,1300px);max-height:86vh;border-radius:var(--radius-panel);box-shadow:var(--shadow-overlay);background:#fff}
+.lbox .cap{position:absolute;bottom:1.25rem;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.92);font-size:.8125rem;background:rgba(0,0,0,.45);padding:.4rem .9rem;border-radius:var(--radius-pill);white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
+.lbox-btn{position:absolute;top:1rem;right:1rem;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;transition:background-color var(--duration-fast) var(--ease-productive)}
+.lbox-btn:hover{background:rgba(255,255,255,.28)}
+.lbox-btn svg{width:20px;height:20px}
+
+/* ============ REVEAL ============ */
+.reveal{opacity:0;transform:translateY(10px);transition:opacity var(--duration-enter) var(--ease-enter),transform var(--duration-enter) var(--ease-enter)}
+.reveal.in{opacity:1;transform:none}
+html.no-anim .reveal{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  .reveal{opacity:1;transform:none}
+}
+
+@media(min-width:1024px){
+  .nav-links{display:flex}
+  .hero-inner{grid-template-columns:1.15fr .85fr}
+}
+.proof{font-family:var(--font-mono);font-size:.8125rem;color:var(--text-tertiary);font-variant-numeric:tabular-nums}
+
+.demo-card{display:flex;gap:1.75rem;align-items:center;padding:2rem}
+.demo-info{flex:1;min-width:0}
+.demo-qr{flex:none;display:flex;flex-direction:column;align-items:center;gap:.5rem}
+.demo-qr img{width:240px;height:240px;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:#fff}
+[data-theme="dark"] .demo-qr img{border-color:var(--border-control)}
+.demo-qr .lbl{font-size:.75rem;color:var(--text-tertiary);font-weight:550}
+.demo-url{display:inline-flex;align-items:center;gap:.5rem;max-width:100%;border:1px solid var(--border-subtle);background:var(--surface-alt);border-radius:var(--radius-compact);padding:.45rem .75rem}
+.demo-url .mono{font-size:.8125rem;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:640px){.demo-card{flex-direction:column;align-items:flex-start}.demo-qr{width:100%}.demo-qr img{width:min(240px,100%)}}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand-lockup" href="#top" aria-label="返回顶部">
+      <svg class="brand-symbol" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path d="M8 12.5h24v15H8z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M8 13.5 20 23l12-9.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M20 23v9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <span>
+        <span class="brand-name">拿呀²</span>
+        <span class="brand-domain">nyy.app</span>
+      </span>
+    </a>
+    <nav class="nav-links" aria-label="章节导航">
+      <a class="nav-link" href="#overview">概览</a>
+      <a class="nav-link" href="#demos">现场演示</a>
+      <a class="nav-link" href="#features">核心功能</a>
+      <a class="nav-link" href="#deep">技术深潜</a>
+      <a class="nav-link" href="#arch">架构</a>
+      <a class="nav-link" href="#stack">技术栈</a>
+      <a class="nav-link" href="#data">数据模型</a>
+      <a class="nav-link" href="#security">安全</a>
+      <a class="nav-link" href="#quality">测试与运维</a>
+      <a class="nav-link" href="#version">版本</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="icon-btn" id="theme-btn" aria-label="切换深浅主题" title="切换深浅主题">
+        <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>
+      </button>
+      <a class="btn btn--primary btn--sm" href="https://github.com/wangchuxiaoji-oss/nyy-transfer" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.15c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 2.87-.39c.97 0 1.95.13 2.87.39 2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.66.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ============ HERO ============ -->
+<section class="hero" id="top">
+  <div class="container hero-inner">
+    <div>
+      <div class="hero-badges">
+        <span class="badge badge--success">● v1.0.0 · 已发布生产（2026-07-26）</span>
+        <span class="badge">全栈项目</span>
+        <span class="badge badge--brand">开源 · GitHub</span>
+        <span class="badge">类奶牛快传</span>
+      </div>
+      <h1>想传文件？<span class="dot">拿呀²</span>。</h1>
+      <p class="lead">拿呀²（nyy.app）是一个从零自研的轻量文件分享与收文件工具：浏览器将文件本体<strong>直接上传到豆包 TOS / 火山 CDN</strong>，VPS 只保存元信息、分享关系、权限与审计数据——不中转流量，也几乎不占磁盘。覆盖上传、分享、预览、收件、工作台、管理后台与增长 SEO 的完整全栈闭环。</p>
+      <div class="hero-cta">
+        <a class="btn btn--primary" href="https://nyy.app" target="_blank" rel="noopener">
+          打开 nyy.app
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
+        <a class="btn btn--secondary" href="#demos">查看现场演示 ↓</a>
+      </div>
+    </div>
+    <div class="hero-stats" style="grid-column:1/-1">
+      <div class="stat"><div class="num"><span class="cnt" data-target="22" data-suffix="K+">0</span></div><div class="lbl">后端 Python 代码行</div></div>
+      <div class="stat"><div class="num"><span class="cnt" data-target="33" data-suffix="K+">0</span></div><div class="lbl">前端 TS / TSX 代码行</div></div>
+      <div class="stat"><div class="num"><span class="cnt" data-target="23">0</span></div><div class="lbl">前端页面路由</div></div>
+      <div class="stat"><div class="num"><span class="cnt" data-target="41">0</span></div><div class="lbl">PostgreSQL 数据表</div></div>
+      <div class="stat"><div class="num"><span class="cnt" data-target="4">0</span></div><div class="lbl">Docker 容器化服务</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 概览 ============ -->
+<section class="section" id="overview">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">项目定位</span>
+      <h2>轻量文件中转站，<br>把「传文件」做成一等公民。</h2>
+      <p>面向自由职业者、设计师、二手交易、跨平台用户与播客主，解决「临时、大文件、免安装」的传输需求：发送方拖拽即传，接收方打开短链接即可预览、打包下载或直接收件。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M12 12v9m0 0-3.5-3.5M12 21l3.5-3.5"/></svg></span>
+          <h3>是什么</h3>
+          <p>类奶牛快传的轻量文件中转站：6 位短码直达分享落地页，支持提取码、有效期与下载次数限制、在线预览、打包下载与反向收件链接。</p>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg></span>
+          <h3>核心理念</h3>
+          <p>文件本体直传对象存储（浏览器 ↔ 豆包 TOS / 火山 CDN），VPS 只存元信息与权限关系。实测单 PUT 上限 1 GiB 内稳定直传，流量与存储成本都被推到 CDN 侧。</p>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--neutral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M17.6 14.8c2 .7 3.4 2.5 3.9 5.2"/></svg></span>
+          <h3>目标用户</h3>
+          <p>临时大文件分享场景：作业交付、摄影成片、设计稿、合同回传、视频素材跨端互传；注册用户可管理分享与收件，管理员可运营与风控。</p>
+        </div>
+      </div>
+    </div>
+    <div class="band reveal">
+      <div class="k">CORE PRINCIPLE — ARCHITECTURE</div>
+      <p>浏览器 <b>直传</b> <span class="arrow">→</span> 豆包 TOS / 火山 CDN，下载凭据按时签发；<b>VPS 不中转文件流量</b>，只承担元信息、配额、权限、审计与风控。<b>上传 1 GiB 无需经过服务器，打包下载在浏览器端流式完成。</b></p>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+
+<!-- ============ 在线演示 ============ -->
+<section class="section" id="demos">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">现场演示 · 生产实例</span>
+      <h2>视频在线看，PDF 在线翻。</h2>
+      <p>以下两个演示均为生产环境中的真实分享，无需登录直接体验；支持扫码在手机上打开。播放与预览全部走浏览器端渲染，不下载原文件即可查看。</p>
+    </div>
+    <div class="grid-2">
+      <div class="card reveal" style="overflow:hidden">
+        <div class="demo-card">
+          <div class="demo-info">
+            <div class="tag-list" style="margin-bottom:.9rem">
+              <span class="badge badge--brand">● 视频在线观看</span>
+              <span class="badge">MP4 · 241.6 MB</span>
+              <span class="badge badge--success">无次数限制</span>
+            </div>
+            <h3 style="margin-bottom:.4rem">联发纺织-宣传片（2023版）.m4v</h3>
+            <p style="margin-bottom:1.1rem">文件本体存储于豆包 TOS，由火山 CDN 分发：打开链接直接在页面上播放，无需安装播放器、不占用服务器带宽。</p>
+            <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:1.1rem">
+              <a class="btn btn--primary btn--sm" href="https://nyy.app/Oe5036" target="_blank" rel="noopener">立即观看 →</a>
+            </div>
+            <div class="demo-url"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="flex:none"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg><span class="mono">https://nyy.app/Oe5036</span></div>
+          </div>
+          <div class="demo-qr">
+            <img src="data:image/png;base64,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" alt="视频演示二维码" width="240" height="240">
+            <span class="lbl">扫码手机观看</span>
+          </div>
+        </div>
+      </div>
+      <div class="card reveal" style="overflow:hidden">
+        <div class="demo-card">
+          <div class="demo-info">
+            <div class="tag-list" style="margin-bottom:.9rem">
+              <span class="badge badge--info">● PDF 在线预览</span>
+              <span class="badge">application/pdf</span>
+              <span class="badge badge--success">无次数限制</span>
+            </div>
+            <h3 style="margin-bottom:.4rem">FU260315尺寸检查表.pdf</h3>
+            <p style="margin-bottom:1.1rem">PDF 由 pdfjs-dist 在浏览器端渲染：翻页、缩放、下载原文件均可直接操作，服务器只负责签发一次性的 CDN 下载凭据。</p>
+            <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:1.1rem">
+              <a class="btn btn--primary btn--sm" href="https://nyy.app/EMTdgz" target="_blank" rel="noopener">打开预览 →</a>
+            </div>
+            <div class="demo-url"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="flex:none"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg><span class="mono">https://nyy.app/EMTdgz</span></div>
+          </div>
+          <div class="demo-qr">
+            <img src="data:image/png;base64,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AAAAAAAAAAD4TQoAAAAAAAAAAAAAFAAAAAAAAAA4lgCg7GAAAAAAAADHEgCUHQwAAAAAE6NPGfO09d2AMAAAgMcHAABgngAAAAAAADw+AAAA8wQAAOD7AoDHBwAAAAAOHQAAAAB4fAAAAADg0AEAAACAxwcAAAAAAOC7AAAAeHwAAACOHAD4LgAAAB4fAACAIwcAAAAAAAAAAAAAjpxvAwAAYGEBAADokyPn29jBAGBhAQAA6JMj59vYwQBgYQEAAACAJezb2MEAYGEBAAAAgCXs29jBAGBhAQAAAAAA+DZ2MABYWAAAAOYJAADADgYAC8thAQDzBAAAYAcDAAA4LABgngAAAAAAAAAAALw9VV/mKQfmAGAJA4C3BwAKAAAAACxhAPD2AECZJwAAAEsYALw9pcwTAACAJQwA3p5S5gkAAMASBgBvTynzBAAAYAkDgLenAMA8AQAAWMIA4O0pADBPAAAAljAAeHsKAMwTAAAAAACAt6fMtnkCAAAAAADw9pTZNk8A4NEAAAB4ewoAzBMAeDSWBAB4ewoAzBMAeDSWBAB4ewoAAAAAPBoAsLC8PQUAAAAAHg0AWFjengIAAAAAjwYALCxvTwEAAACAJQwAFhYAKAAAAADoOiwbo0/zv+9d3xg+c/qtupAFAA6LPvm+AAAACgAAwGHRJ98XAABAAQAAiD4BAAAAgLKzAED0CQAAAACUnQUAok8AAAAAoADAYRF9AgAAAAAFAA6L6BMAAAAAKABwWESfAAAAAAAAAMBhcaD0CQAAAAAAAAAcFgdKnwAAAAAAAADAcDtQ+gQAAAAAAAAADosDpU8A4O0BAAAAgMPiQOkTAHh7AAAAAOCwAIAAAAAoAAAATQIAAQAAUAAAAJoEAL4vAACAAgAAcFj0yfcFAABQAAAAyjA5linzBADiHhwAAAAFAAAAAAIAAAAAAAAAAAAAAgAA4DACAAAAAAAIAACAAgAAAAAAAAB7DwCUQQAAAAAAAAAAAFAGAQAAAAAAAAAAQAEAAAAAAAAAAACAAgAA0G8AAAAAAAAFAACg3wAAAAAAAMpBAAAAEAAAAA1XAAAAACDuAQBouAIAAAAAcQ8AQMMVAAAAAIh7AAAargAAAABA3AMA0HAFAAAAAOIeAICGKwAAAAAQ9wAAREREZFoAQEREBABEREQEAERERAQAREREBABEREQEAERERAQAREREBABEREQEAERERAQAREREBABEREQEAERERAQAREREBABEREQEAERERAQAREREBABEREQEAERERABAREREAEBEREQAQERERABAREREAEBEREQAQERERABAREREAEBEREQAQERERABAREREAEBEREQAQERERABAREREAEBEREQAQERERABAREREfvkCe5+W0MM61JoAAAAASUVORK5CYII=" alt="PDF 演示二维码" width="240" height="240">
+            <span class="lbl">扫码手机查看</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="shot-note reveal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+      <p>两个短码均为生产环境的真实分享（系统保留路由不与其冲突）；演示链接有效期内随时可用，扫码即达。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 核心功能 ============ -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">核心功能</span>
+      <h2>从发文件到收文件，全流程闭环。</h2>
+      <p>六个模块覆盖一条完整链路：传输 → 分享 → 下载/预览 → 收件 → 工作台 → 管理与风控。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+          <h3>上传 · 浏览器直传</h3>
+          <ul>
+            <li>拖拽 / 粘贴 / 文件夹 / 手机拍照选图</li>
+            <li>3 并发队列，每文件独立进度、速度与剩余时间</li>
+            <li>失败指数退避重试；IndexedDB 断点续传</li>
+            <li>分片上传（64 MB 片，实测参数固化）</li>
+            <li>客户端流式 CRC32 + SHA256 校验</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>
+          <h3>分享 · 短码直达</h3>
+          <ul>
+            <li>6 位 base62 短码（≈568 亿组合）根路径直达</li>
+            <li>有效期 1h / 1d / 7d / 30d / 长期，下载次数分档</li>
+            <li>可选 4 位提取码、一次性下载、撤销</li>
+            <li>二维码分享、批量邮件发送收件人（≤5 人）</li>
+            <li>多文件 client-zip 浏览器端流式打包</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--neutral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m3 16 5.5-4 4 2.5L17 10l4 3.5"/><circle cx="9" cy="9" r="1.4"/></svg></span>
+          <h3>预览 · 在线直看</h3>
+          <ul>
+            <li>图片画廊 + 灯箱 + EXIF 元数据（exifr）</li>
+            <li>PDF / 纯文本 / Office（docx / xlsx / pptx 浏览器端渲染）</li>
+            <li>视频：自研播放器优先，原生 Video 兜底分流</li>
+            <li>不支持格式智能探测并提示下载</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--success"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a2 2 0 0 1 2-2h2M20 7V5a2 2 0 0 0-2-2h-2M4 17v2a2 2 0 0 0 2 2h2M20 17v2a2 2 0 0 1-2 2h-2"/><path d="M12 13V7m0 0-3 3m3-3 3 3m-5 6h4"/></svg></span>
+          <h3>收件 · 反向请求</h3>
+          <ul>
+            <li>/r/[code] 收件链接：收作业、收合同、收素材</li>
+            <li>仅注册用户可创建；访客直接向链接提交文件</li>
+            <li>访客上传计入创建者配额，访客侧仅 IP 限频</li>
+            <li>可选 4 位访问码与有效期，过期即停收</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9a3 3 0 0 0 0 6h2a3 3 0 0 1 0 6H4"/><path d="M16 5v16"/></svg></span>
+          <h3>工作台 · 我的文件</h3>
+          <ul>
+            <li>登录用户 /my：分享与收件全量管理</li>
+            <li>续期、改提取码、撤销、复制链接、扫码</li>
+            <li>游客分享存于本地（localStorage），支持自撤销</li>
+            <li>分享过期/次数耗尽状态一目了然</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card card-interactive reveal">
+        <div class="card-body">
+          <span class="feature-icon feature-icon--neutral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <h3>运营 · 管理后台</h3>
+          <ul>
+            <li>分享 / 举报 / 用户 / 邮件队列 / 收件投递箱</li>
+            <li>公告、版本化配额策略、下载配置</li>
+            <li>豆包 Session 状态与扫码维护、诊断面板</li>
+            <li>审计日志与统计总览、IP 来源分析</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 技术深潜 ============ -->
+<section class="section" id="deep">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">技术深潜 · 自研亮点</span>
+      <h2>三个别人直接抄不到的模块。</h2>
+      <p>这个项目最硬的部分不是 CRUD，而是媒体播放、配额结算与对象存储直传三条「自己长出来」的技术线。</p>
+    </div>
+
+    <div class="dive reveal">
+      <div class="dive-head">
+        <div>
+          <div class="k">SELF-DEVELOPED PLAYER</div>
+          <h3>01 · 自研 SDP 媒体播放器</h3>
+        </div>
+        <span class="badge badge--brand">frontend/src/lib/sdp/ · 8 个核心模块</span>
+      </div>
+      <p style="color:var(--text-secondary);max-width:56rem">为了让分享页能够播放浏览器原生不支持的封装/音频组合（如 MKV 容器、AC-3 / E-AC-3 音轨），团队从零实现了 WebCodecs 之上的 SDP 播放引擎：JS 解复用 → 音频主时钟同步 → 视频渲染，并配套一整套真实回归脚本。</p>
+      <div class="dive-grid">
+        <div class="dive-item"><h4>解复用与缓存</h4><p><span class="mono">demuxer.ts</span> 解析容器与分轨；<span class="mono">packet-buffer.ts</span> 管理包缓冲与背压；<span class="mono">mkv-seek-index.ts</span> 为 MKV 建立随机访问索引，拖动秒级定位。</p></div>
+        <div class="dive-item"><h4>音视频同步</h4><p>以 <span class="mono">audio-context-probe.ts</span> 探测输出能力，<span class="mono">audio-renderer.ts</span> 用 AudioContext 主时钟驱动渲染循环（sdp-audio-master-clock 方案），避免音画漂移。</p></div>
+        <div class="dive-item"><h4>分流矩阵与回退</h4><p>按容器与音轨 codec 决策：AC-3 / E-AC-3 走 sidecar 播放；MKV 原生 Video 兜底；其余走自研引擎。配套 codec-matrix / ac3 / mkv-native 三套 smoke 脚本常驻验证。</p></div>
+      </div>
+    </div>
+
+    <div class="dive reveal" style="margin-top:1.75rem">
+      <div class="dive-head">
+        <div>
+          <div class="k">VERSIONED QUOTA POLICY</div>
+          <h3>02 · 版本化配额策略与补偿结算</h3>
+        </div>
+        <span class="badge badge--info">backend/app/services/quota_policy.py · quota_reconciliation.py</span>
+      </div>
+      <p style="color:var(--text-secondary);max-width:56rem">配额不是写死的开关，而是「可版本化的策略」：管理员先编辑草稿，看到影响预览，再预约发布时间；发布后支持历史回滚。消费侧用 Redis 滑动窗口记录上传，并做上传预留与后台补偿结算。</p>
+      <div class="dive-grid">
+        <div class="dive-item"><h4>策略生命周期</h4><p>草稿 → 影响预览（预演新旧策略对配额的影响）→ 预约发布 → 历史记录 → 回滚。策略版本与产品版本独立递增，迁移基线固定。</p></div>
+        <div class="dive-item"><h4>日月周期额度</h4><p>额度统计周期支持日/月维度并适配北京时间；上传前预留额度，失败自动释放，避免并发抢占导致超发。</p></div>
+        <div class="dive-item"><h4>补偿结算</h4><p>FastAPI 启动即拉起后台循环，每 60 秒将 Redis 中的未结算额度和预留记录对账入 PostgreSQL（quota settlements reconciliation），重启后不丢账。</p></div>
+      </div>
+    </div>
+
+    <div class="dive reveal" style="margin-top:1.75rem">
+      <div class="dive-head">
+        <div>
+          <div class="k">DOUBAO TOS DIRECT-UPLOAD</div>
+          <h3>03 · 豆包 TOS / ImageX 直传链路</h3>
+        </div>
+        <span class="badge badge--success">backend/app/services/doubao_client.py · 956 行</span>
+      </div>
+      <p style="color:var(--text-secondary);max-width:56rem">对象存储是 ImageX 专有 API + 专有鉴权（非标准 S3），且上传权限依赖可失效的 Doubao Session——这部分没有现成轮子，全部自研并经受生产验证。</p>
+      <div class="dive-grid">
+        <div class="dive-item"><h4>上传与签名</h4><p>prepare → apply → commit 三段式直传 + AWS SigV4 内联签名；实测单 PUT 512 MB–1 GiB 稳定（2 GiB 全 503），据此定分片方案。</p></div>
+        <div class="dive-item"><h4>Session 保活</h4><p>心跳后把 cookies 持久化到 session 文件（heartbeat + persist），失败自动回退下载备用 Session；管理后台可视化 Session 状态并支持扫码刷新。</p></div>
+        <div class="dive-item"><h4>隔离的媒体 Worker</h4><p>独立 media-worker 容器处理媒体元数据与视频检测，只读根文件系统 + 丢弃全部 capability + 禁止提权，2 GiB / 2 CPU 限额，20 分钟优雅停机。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 架构 ============ -->
+<section class="section" id="arch">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">系统架构</span>
+      <h2>浏览器直传，服务器只管"名分"。</h2>
+      <p>一条红线贯穿整个架构：<strong>文件的字节流不经过 VPS</strong>。上传与下载都发生在浏览器与对象存储 / CDN 之间；FastAPI 只签发凭据、记账与审计。</p>
+    </div>
+    <div class="arch-wrap reveal">
+      <svg class="arch" viewBox="0 0 920 560" role="img" aria-label="系统架构图">
+        <!-- Layer groups -->
+        <rect class="lgroup" x="12" y="10" width="896" height="140" rx="14"/>
+        <rect class="lgroup" x="12" y="160" width="896" height="150" rx="14"/>
+        <rect class="lgroup" x="12" y="320" width="896" height="150" rx="14"/>
+        <rect class="lgroup" x="12" y="480" width="896" height="68" rx="14"/>
+
+        <!-- Layer titles -->
+        <text x="28" y="34" class="lbl">客户端层</text>
+        <text x="28" y="184" class="lbl">接入与网关层</text>
+        <text x="28" y="344" class="lbl">应用与数据层</text>
+        <text x="28" y="504" class="lbl">文件存储层</text>
+
+        <!-- Client -->
+        <rect class="box" x="40" y="52" width="150" height="72"/>
+        <text x="115" y="83" text-anchor="middle" class="t1">浏览器</text>
+        <text x="115" y="102" text-anchor="middle" class="lbl">桌面 / 移动 / 微信</text>
+        <rect class="box" x="80" y="110" width="70" height="30"/>
+        <text x="115" y="130" text-anchor="middle" class="mono">拖拽 / 粘贴</text>
+
+        <rect class="box" x="220" y="60" width="170" height="56"/>
+        <text x="305" y="83" text-anchor="middle" class="t1">next-server v16</text>
+        <text x="305" y="101" text-anchor="middle" class="lbl">Next.js SSR + CSR（:3000）</text>
+
+        <rect class="box" x="420" y="60" width="170" height="56"/>
+        <text x="505" y="83" text-anchor="middle" class="t1">FastAPI</text>
+        <text x="505" y="101" text-anchor="middle" class="lbl">REST /api/v1（:8000）</text>
+
+        <rect class="box-accent" x="660" y="60" width="230" height="56"/>
+        <text x="775" y="83" text-anchor="middle" class="t1" style="fill:var(--accent)">豆包 TOS / 火山 CDN</text>
+        <text x="775" y="101" text-anchor="middle" class="lbl-accent">文件本体 · 仅存 &amp; 分发，不落 VPS</text>
+
+        <!-- through Nginx -->
+        <rect class="box" x="220" y="210" width="440" height="52"/>
+        <text x="440" y="233" text-anchor="middle" class="t1">Nginx · TLS 入口</text>
+        <text x="440" y="251" text-anchor="middle" class="lbl">/api/* → FastAPI · 页面 → Next.js · 证书自动续期</text>
+
+        <rect class="box" x="700" y="210" width="190" height="52"/>
+        <text x="795" y="233" text-anchor="middle" class="t1">PM2 进程托管</text>
+        <text x="795" y="251" text-anchor="middle" class="lbl">fastapi + next · nyy 用户</text>
+
+        <!-- Data layer -->
+        <rect class="box" x="40" y="378" width="200" height="64"/>
+        <text x="140" y="402" text-anchor="middle" class="t1">PostgreSQL 16</text>
+        <text x="140" y="420" text-anchor="middle" class="lbl">元信息 / 关系 / 配额 / 审计</text>
+
+        <rect class="box" x="270" y="378" width="200" height="64"/>
+        <text x="370" y="402" text-anchor="middle" class="t1">Redis 7</text>
+        <text x="370" y="420" text-anchor="middle" class="lbl">滑动窗口配额 / 会话 / 任务</text>
+
+        <rect class="box" x="500" y="378" width="200" height="64"/>
+        <text x="600" y="402" text-anchor="middle" class="t1">media-worker</text>
+        <text x="600" y="420" text-anchor="middle" class="lbl">媒体分析 / 视频检测容器</text>
+
+        <rect class="box" x="730" y="378" width="160" height="64"/>
+        <text x="810" y="402" text-anchor="middle" class="t1">Postfix + Bark</text>
+        <text x="810" y="420" text-anchor="middle" class="lbl">邮件 / 手机告警</text>
+
+        <!-- Storage header -->
+        <rect class="box-accent" x="40" y="500" width="860" height="36"/>
+        <text x="470" y="523" text-anchor="middle" class="t1" style="fill:var(--accent)">文件只存在于对象存储：浏览器直传直下，CDN 加速，VPS 磁盘几乎不存文件</text>
+
+        <!-- Arrows -->
+        <path class="arrow" d="M140 162 v40" marker-end="url(#ah)"/>
+        <path class="arrow" d="M305 116 v88" marker-end="url(#ah)"/>
+        <path class="arrow" d="M505 116 v88" marker-end="url(#ah)"/>
+        <path class="arrow" d="M440 262 v108" marker-end="url(#ah)"/>
+        <path class="arrow" d="M140 442 v52 " marker-end="url(#ah)"/>
+        <path class="arrow" d="M370 442 v52" marker-end="url(#ah)"/>
+        <path class="arrow" d="M600 442 v52" marker-end="url(#ah)"/>
+        <path class="arrow" d="M810 442 v52" marker-end="url(#ah)"/>
+
+        <path class="arrow-accent" d="M305 116 C 305 190 660 190 660 116" marker-end="url(#ahA)"/>
+        <text x="480" y="150" text-anchor="middle" class="arrow-label-accent">浏览器直传（不中转）</text>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--border-control)"/></marker>
+          <marker id="ahA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--brand)"/></marker>
+        </defs>
+        <text x="250" y="150" text-anchor="middle" class="arrow-label-accent" style="display:none"></text>
+      </svg>
+    </div>
+    <div class="grid-3" style="margin-top:1.5rem">
+      <div class="card" style="--r:0">
+        <div class="card-body">
+          <h3 style="margin-bottom:.5rem">单文件传输模型</h3>
+          <p>浏览器 → 后端申请上传凭据 → 直传豆包 TOS → 提交 commit 生成分享 → 接收方凭短码获取 CDN 下载 URL，凭据有时效。</p>
+        </div>
+      </div>
+      <div class="card" style="--r:1">
+        <div class="card-body">
+          <h3 style="margin-bottom:.5rem">多文件 / 打包模型</h3>
+          <p>多文件分别直传后归入同一个分享；下载时浏览器端 client-zip 流式打包，或按序 Range 请求分块写盘（File System Access），全程不占服务器内存。</p>
+        </div>
+      </div>
+      <div class="card" style="--r:2">
+        <div class="card-body">
+          <h3 style="margin-bottom:.5rem">后台任务模型</h3>
+          <p>邮件出站、收件投递箱导入、Nginx 访问日志导入、GeoIP 更新、管理维护等均由 systemd timer 驱动；配额补偿结算为 FastAPI 内嵌异步循环。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 技术栈 ============ -->
+<section class="section" id="stack">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">技术栈全景</span>
+      <h2>一套不追新、但每层都扎实的栈。</h2>
+    </div>
+    <div class="stack-grid">
+      <div class="card reveal" style="grid-column:auto">
+        <div class="card-body">
+          <div class="stack-head"><span class="n">01</span><h3>前端</h3></div>
+          <div class="stack-body">
+            <span class="tech tech--hl">Next.js <span class="ver">16.2</span></span>
+            <span class="tech tech--hl">React <span class="ver">19</span></span>
+            <span class="tech">TypeScript<span class="ver">5</span></span>
+            <span class="tech">Tailwind CSS<span class="ver">3.4</span></span>
+            <span class="tech">Framer Motion</span>
+            <span class="tech">lucide-react</span>
+            <span class="tech">react-aria-components</span>
+            <span class="tech">@tanstack/react-virtual</span>
+            <span class="tech">client-zip</span>
+            <span class="tech">fflate</span>
+            <span class="tech">qrcode</span>
+            <span class="tech">pdfjs-dist<span class="ver">5.4</span></span>
+            <span class="tech">docx-preview</span>
+            <span class="tech">xlsx<span class="ver">0.20</span></span>
+            <span class="tech">@aiden0z/pptx-renderer</span>
+            <span class="tech">exifr</span>
+            <span class="tech">react-photo-album</span>
+            <span class="tech">yet-another-react-lightbox</span>
+            <span class="tech">mediabunny / ac3<span class="ver">1.45</span></span>
+            <span class="tech">mp4box</span>
+            <span class="tech">tt-uploader<span class="ver">1.6</span></span>
+            <span class="tech">altcha<span class="ver">3</span></span>
+            <span class="tech tech--hl">自研 SDP 播放器</span>
+          </div>
+        </div>
+      </div>
+      <div class="card reveal">
+        <div class="card-body">
+          <div class="stack-head"><span class="n">02</span><h3>后端</h3></div>
+          <div class="stack-body">
+            <span class="tech tech--hl">FastAPI</span>
+            <span class="tech">Python <span class="ver">3.11+</span></span>
+            <span class="tech tech--hl">SQLAlchemy 2.0 async</span>
+            <span class="tech">Pydantic v2</span>
+            <span class="tech">asyncpg</span>
+            <span class="tech">Alembic</span>
+            <span class="tech">httpx</span>
+            <span class="tech">APScheduler 任务</span>
+            <span class="tech">argon2 密码哈希</span>
+            <span class="tech">uvicorn</span>
+            <span class="tech">pytest · ruff · uv</span>
+          </div>
+        </div>
+      </div>
+      <div class="card reveal">
+        <div class="card-body">
+          <div class="stack-head"><span class="n">03</span><h3>数据 · 存储 · 基础设施</h3></div>
+          <div class="stack-body">
+            <span class="tech tech--hl">PostgreSQL 16</span>
+            <span class="tech tech--hl">Redis 7</span>
+            <span class="tech tech--hl">豆包 TOS / 火山 CDN</span>
+            <span class="tech">Docker Compose</span>
+            <span class="tech">Nginx · Certbot</span>
+            <span class="tech">PM2</span>
+            <span class="tech">Postfix + OpenDKIM</span>
+            <span class="tech">Bark 手机通知</span>
+            <span class="tech">systemd timers</span>
+            <span class="tech">GitHub Actions CI</span>
+            <span class="tech">Playwright e2e</span>
+            <span class="tech">GeoIP / MaxMind</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 数据模型 ============ -->
+<section class="section" id="data">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">API 与数据模型</span>
+      <h2>41 张表，12 组 API，各司其职。</h2>
+    </div>
+    <div class="grid-2">
+      <div class="table-wrap reveal">
+        <table>
+          <thead><tr><th style="width:22%">分组</th><th>核心端点（/api/v1）</th></tr></thead>
+          <tbody>
+            <tr class="tbl-group"><td>上传</td><td><code>POST /uploads/init</code> · <code>/uploads/multipart/*</code> · <code>POST /uploads/commit</code> · <code>GET /uploads/quota</code></td></tr>
+            <tr class="tbl-group"><td>分享</td><td><code>GET /shares/{code}</code> · <code>POST /shares/{code}/verify</code> · <code>GET /shares/{code}/download</code> · <code>POST /shares/{code}/report</code> · <code>PATCH|DELETE /shares/{id}</code> · <code>archive</code></td></tr>
+            <tr class="tbl-group"><td>收件</td><td><code>file_requests</code> 创建 / 访问 / 上传 / 关闭 · <code>GET /quota</code></td></tr>
+            <tr class="tbl-group"><td>认证</td><td><code>register / login / logout / refresh / me / send-code</code> · 密码重置 · <code>GET /captcha/challenge</code></td></tr>
+            <tr class="tbl-group"><td>工作台</td><td><code>my/shares</code> · <code>my/file-requests</code> · 配额实时展示</td></tr>
+            <tr class="tbl-group"><td>成长</td><td><code>GET /growth/landing</code> 增长落地事件 · 归因</td></tr>
+            <tr class="tbl-group"><td>系统</td><td><code>GET /announcements</code> · <code>GET /healthz</code> · <code>policy</code> 配额策略 · <code>video_inspect</code> · <code>debug_logs</code></td></tr>
+            <tr class="tbl-group"><td>管理端</td><td><code>/admin/*</code>：shares · reports · users · emails · mailbox · announcements · quota_policies · doubao · diagnostics · audit · stats · sources · archive · config</td></tr>
+          </tbody>
+        </table>
+        <p class="tbl-note">全接口走 session cookie + CSRF；OpenAPI 文档仅在开发环境暴露。</p>
+      </div>
+      <div class="table-wrap reveal">
+        <table>
+          <thead><tr><th style="width:22%">域</th><th>数据表（PostgreSQL 16）</th></tr></thead>
+          <tbody>
+            <tr class="tbl-group"><td>分享</td><td><span class="mono">shares</span> · <span class="mono">share_files</span> · <span class="mono">share_logical_files</span> · <span class="mono">share_media_assets</span> · <span class="mono">share_access_events</span> · <span class="mono">download_logs</span> · <span class="mono">download_sessions</span> · <span class="mono">archived_shares</span> · <span class="mono">archive_batches</span> · <span class="mono">share_event_idempotency_keys</span></td></tr>
+            <tr class="tbl-group"><td>用户</td><td><span class="mono">users</span> · <span class="mono">auth_sessions</span> · <span class="mono">auth_events</span></td></tr>
+            <tr class="tbl-group"><td>收件</td><td><span class="mono">file_requests</span> · <span class="mono">file_request_files</span> · <span class="mono">file_request_uploads</span></td></tr>
+            <tr class="tbl-group"><td>配额</td><td><span class="mono">quota_policy_versions</span> · <span class="mono">app_configs</span></td></tr>
+            <tr class="tbl-group"><td>风控审计</td><td><span class="mono">hash_blacklist</span> · <span class="mono">ip_quotas</span> · <span class="mono">reports</span> · <span class="mono">audit_logs</span></td></tr>
+            <tr class="tbl-group"><td>邮件</td><td><span class="mono">email_deliveries</span> · <span class="mono">mailbox_messages</span> · <span class="mono">mailbox_attachments</span> · <span class="mono">mailbox_import_sources</span> · <span class="mono">mailbox_import_tombstones</span></td></tr>
+            <tr class="tbl-group"><td>媒体</td><td><span class="mono">media_processing_jobs</span> · <span class="mono">media_object_cleanup_jobs</span></td></tr>
+            <tr class="tbl-group"><td>增长</td><td><span class="mono">viral_click_events</span> · <span class="mono">growth_landing_events</span> · <span class="mono">referral_attributions</span> · <span class="mono">retention_coupons</span></td></tr>
+            <tr class="tbl-group"><td>系统</td><td><span class="mono">system_announcements</span> · 诊断 / 调试日志存储</td></tr>
+          </tbody>
+        </table>
+        <p class="tbl-note">迁移基线 <span class="mono">20260726_1200</span>，Alembic 全程管理；UUID 主键 + UTC 时间戳 + JSONB 审计载荷。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 安全 ============ -->
+<section class="section" id="security">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">安全与风控</span>
+      <h2>传输工具的安全感，来自七层防御。</h2>
+      <p>分享类产品天然吸引滥用，因此风控从第一天就设计进架构，而非事后打补丁。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card reveal" style="grid-column:auto">
+        <div class="card-body" style="display:grid;gap:1.35rem">
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><div><h4>凭据与口令</h4><p>提取码 Argon2 哈希存储；会话 Cookie + CSRF 防护；密码重置走邮箱验证码；弱密码库拦截。</p></div></div>
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7m-10 10-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg></span><div><h4>不可枚举设计</h4><p>6 位 base62 短码（≈568 亿空间）；提取码错误指数退避 + 临时封禁；系统保留路由不与短码冲突。</p></div></div>
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z"/><path d="m9.5 12 1.8 1.8 3.2-3.6"/></svg></span><div><h4>内容安全</h4><p>SHA256 黑名单（abuse.ch MalwareBazaar 每日 feed + 举报/人工入库）在上传前快速命中；举报进后台人工处理。</p></div></div>
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span><div><h4>审计追踪</h4><p>全量 audit_logs（actor / action / target / JSONB payload）；IP 行为日志保留 180 天后硬删；分享创建来源随生命周期保留。</p></div></div>
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1M7 16H6a4 4 0 1 1 0-8h1M9 12h6"/></svg></span><div><h4>身份与限流</h4><p>游客以加密 Cookie + GeoIP 识别；上传额度按 IP / 用户双维度；访客收件仅 IP 频率限制；上传接口走 altcha 人机验证。</p></div></div>
+          <div class="sec-item"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></span><div><h4>合规与可用性</h4><p>用户协议 / 隐私政策 / DMCA 投诉全量提供；明确禁止违法、版权、CSAM 与恶意软件内容；豆包 TOS 第三方存储可见性告知。</p></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="table-wrap reveal" style="margin-bottom:1.5rem">
+          <table>
+            <thead><tr><th>加固项</th><th>实践</th></tr></thead>
+            <tbody>
+              <tr><td class="code">容器</td><td>media-worker 只读根文件系统 · cap_drop ALL · no-new-privileges · pids 上限</td></tr>
+              <tr><td class="code">网络</td><td>Postgres / Redis / Bark 仅监听 127.0.0.1；TLS 由 Nginx 终止</td></tr>
+              <tr><td class="code">生产</td><td>OpenAPI / Swagger 生产环境关闭；日志轮转限量保留</td></tr>
+              <tr><td class="code">幂等</td><td>分享事件幂等键防重放（share_event_idempotency_keys）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card reveal">
+          <div class="card-body">
+            <h3 style="margin-bottom:.6rem">邮件信誉（自建 Postfix）</h3>
+            <p style="font-size:.90625rem">SPF + DKIM（2048-bit）+ DMARC 全链路 PASS；mail-tester 评分 <strong style="color:var(--success)">8.8 / 10</strong>；主流 IPv4 黑名单零收录。支持收件投递箱导入（Maildir）与失败重试队列，后台可监控邮件状态。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 测试与运维 ============ -->
+<section class="section" id="quality">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">测试 · CI · 运维</span>
+      <h2>回归脚本伺候，容器只读部署。</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card reveal">
+        <div class="card-body">
+          <div class="stack-head"><h3>测试矩阵</h3></div>
+          <ul>
+            <li>后端 pytest：单元 + 集成 + e2e 全流程用例（quota → init → TOS 上传 → commit → 分享 → 下载 → 限流 429 → 撤销 → 多文件 + 提取码链路）</li>
+            <li>前端 Playwright e2e（生产构建后运行），含可访问性与移动端检查</li>
+            <li>媒体专项回归：<span class="mono">mkv-drift</span>（音画漂移）· <span class="mono">seek-stress</span>（patient / rapid 拖拽）· <span class="mono">sdp-ac3-stress</span> · <span class="mono">buffer-benchmark</span></li>
+            <li>smoke 脚本：share-faststart · share-ac3（含快速拖拽）· share-mkv-native · share-codec-matrix</li>
+            <li>GitHub Actions CI：后端工作流自带 Postgres 16 + Redis 7 服务容器，push / PR 双触发</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card reveal">
+        <div class="card-body">
+          <div class="stack-head"><h3>生产运维</h3></div>
+          <ul>
+            <li><strong>进程</strong>：PM2 托管 FastAPI（:8000）与 next-server（:3000），专用 <span class="mono">nyy</span> 系统用户</li>
+            <li><strong>网关</strong>：Nginx TLS 入口 + 域名站点（nyy.app / dev / s / mail / bark / ebio 等），Certbot 自动续期</li>
+            <li><strong>容器</strong>：Postgres 16 · Redis 7 · Bark 通知 · media-worker（隔离加固）</li>
+            <li><strong>定时任务</strong>（systemd timers）：邮件出站、收件投递箱导入、Nginx 访问日志导入、GeoIP 更新、管理维护</li>
+            <li><strong>告警</strong>：Bark 手机推送；URI 健康巡检按失效率统计（设定阈值 1%）；Doubao Session 自动验证 + 备用会话回退</li>
+            <li><strong>数据</strong>：PostgreSQL 为唯一不可替换资产，结构由 Alembic 迁移基线管理</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 文档与设计 ============ -->
+<section class="section" id="docs">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">文档与设计体系</span>
+      <h2>工程化不只是代码，还有文档纪律。</h2>
+      <p>仓库 docs/ 目录按主题组织：产品、品牌、设计系统、播放器、上传、增长与 UI 审计。</p>
+    </div>
+    <div class="grid-3">
+      <div class="card reveal">
+        <div class="card-body">
+          <h3>产品与设计</h3>
+          <ul>
+            <li><strong>PRD.md</strong> — 定位、配额、风控、商业化与 8 周里程碑</li>
+            <li><strong>DESIGN.md</strong> — 下一代视觉系统「温润专业」：角色化 Token、亮暗双主题、铜橙 #c25d34、交互档位 L1</li>
+            <li><strong>品牌指南</strong> — Logo 套件（符号 / 横版 / 竖版 / 单色 / 多尺寸），域名副标 nyy.app</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card reveal">
+        <div class="card-body">
+          <h3>播放器与上传</h3>
+          <ul>
+            <li><strong>sdp-audio-master-clock</strong> — 音频主时钟同步方案推导</li>
+            <li><strong>mkv-stable-baseline</strong> — AV 同步优化前的稳定基线界定</li>
+            <li><strong>missav-player-teardown</strong> — 竞品播放器逆向分析</li>
+            <li><strong>multipart-migration-plan</strong> — 分片上传迁移设计</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card reveal">
+        <div class="card-body">
+          <h3>增长与审计</h3>
+          <ul>
+            <li><strong>GROWTH_SEO_GEO_PLAYBOOK</strong> — SEO / 地理流量 / 增长策略手册</li>
+            <li><strong>GOOGLE_SEARCH_CONSOLE_GUIDE</strong> — 搜索控制台接入指南</li>
+            <li><strong>TYPOGRAPHY_AUDIT</strong> — 字体字号审计与语义化方案</li>
+            <li><strong>UI_PRODUCT_IMPROVEMENT_PLAN</strong> — UI 产品改进计划</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="card reveal" style="margin-top:1.5rem">
+      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between">
+        <div>
+          <h3 style="margin-bottom:.35rem">设计系统速览</h3>
+          <p style="font-size:.90625rem;max-width:38rem">暖白底 <span class="mono" style="font-family:var(--font-mono)">#f7f7f4</span> + 铜橙 <span class="mono" style="font-family:var(--font-mono)">#c25d34</span>；主按钮用近黑 <span class="mono" style="font-family:var(--font-mono)">#17191c</span>，品牌色只做信号不做背景噪声；44px 最小触控高度；动画一律 opacity / transform，尊重 prefers-reduced-motion。</p>
+        </div>
+        <div style="display:flex;gap:.5rem">
+          <span class="tag" style="background:#c25d34;color:#fff;border-color:#c25d34">铜橙 brand</span>
+          <span class="tag" style="background:#17191c;color:#fff;border-color:#17191c">近黑 primary</span>
+          <span class="tag" style="background:#f6e7df;color:#9f4528">暖软 accent-soft</span>
+          <span class="tag" style="background:#ffffff;border-color:#8a8f96">净白 surface</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container"><hr class="sep"></div>
+
+<!-- ============ 版本 ============ -->
+<section class="section" id="version">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">版本与里程碑</span>
+      <h2>从「一把梭」到语义化发布。</h2>
+      <p>遵循语义化版本：根目录 VERSION 为基准，版本文件一致性由 <span class="mono" style="font-family:var(--font-mono)">scripts/check-version.py</span> 强制校验；发布提交带注解标签，上线后标签不可移动。</p>
+    </div>
+    <div class="timeline">
+      <div class="tl-item reveal">
+        <span class="dot"></span>
+        <div class="when">v1.0.0 · 2026-07-26 · 正式基线</div>
+        <h3>分享、收件、工作台与配额体系完整落地</h3>
+        <p>文件分享 / 收件链接 / 游客管理 / 登录工作台全流程；直传对象存储、批量上传、断点重试、在线预览、打包下载；注册登录、密码重置、分享权限、审计与后台运营；版本化配额策略（北京时间日月周期、上传预留、后台补偿结算、草稿 / 影响预览 / 预约发布 / 回滚）；公告、SEO、结构化数据、响应式与生产部署。</p>
+        <div class="tl-list">
+          <span class="tag tag--hl">Git 标签 v1.0.0</span>
+          <span class="tag">Alembic 基线 20260726_1200</span>
+          <span class="tag">生产配额策略版本 1</span>
+        </div>
+      </div>
+      <div class="tl-item reveal">
+        <span class="dot"></span>
+        <div class="when">工程决策树（一路踩坑得来）</div>
+        <h3>关键技术抉择</h3>
+        <p>单文件 1 GiB 硬限来自「2 GiB 单 PUT 20/20 全 503」的实测；6 位 base62 短码 ≈568 亿组合、根路径直达；npm 替代 pnpm（exFAT 限制）；客户端 hash 用于黑名单快速命中；下载计数以「签发下载链接」为准，避免依赖 CDN 日志。</p>
+      </div>
+      <div class="tl-item reveal">
+        <span class="dot"></span>
+        <div class="when">已明确待办</div>
+        <h3>下一阶段</h3>
+        <p>邮件 PTR 反向解析（Gmail 进垃圾箱的要因）；断点续传与分片拼接的区域化收口；i18n（中英双语）；全局 Captcha；Sentry 监控；v2 Pro 商业化（单文件 5 GiB / 长期 / 自定义短码 / 去广告，支付从爱发电 → Lemon Squeezy → Stripe）。</p>
+        <div class="tl-list">
+          <span class="tag">PTR 记录</span>
+          <span class="tag">断点续传</span>
+          <span class="tag">i18n</span>
+          <span class="tag">监控</span>
+          <span class="tag">Pro 商业化</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="row">
+      <div class="brand-lockup" style="align-items:flex-start">
+        <svg class="brand-symbol" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <path d="M8 12.5h24v15H8z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+          <path d="M8 13.5 20 23l12-9.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M20 23v9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+        <span>
+          <span class="brand-name" style="font-size:1.25rem">拿呀²</span>
+          <span class="brand-domain" style="font-size:.75rem">想传文件？拿呀²。 · nyy.app</span>
+        </span>
+      </div>
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <a class="btn btn--secondary btn--sm" href="https://nyy.app" target="_blank" rel="noopener">访问 nyy.app</a>
+        <a class="btn btn--primary btn--sm" href="https://github.com/wangchuxiaoji-oss/nyy-transfer" target="_blank" rel="noopener">GitHub 仓库</a>
+      </div>
+    </div>
+    <p>本页为项目全景介绍（单文件自包含）。在线演示均为生产环境真实实例：「联发纺织-宣传片（2023版）.m4v」视频在线观看与「FU260315尺寸检查表.pdf」在线预览，支持扫码体验。数据规模统计基于 <span class="proof">backend ~22.4K 行 / frontend ~33.2K 行 / 23 路由 / 41 表</span>。</p>
+    <p style="color:var(--text-tertiary);font-size:.75rem">v1.0.0 · 2026-08 · 最后生成：<span id="gen-date"></span></p>
+  </div>
+</footer>
+
+<!-- ============ LIGHTBOX ============ -->
+<div class="lbox" id="lbox" role="dialog" aria-modal="true" aria-label="截图放大预览">
+  <button class="lbox-btn" id="lbox-close" aria-label="关闭预览"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  <img id="lbox-img" src="" alt="截图放大">
+  <div class="cap" id="lbox-cap"></div>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  var tb=document.getElementById('theme-btn');
+  var moon=document.getElementById('icon-moon'),sun=document.getElementById('icon-sun');
+  function sync(){
+    var dark=root.getAttribute('data-theme')==='dark';
+    moon.style.display=dark?'none':'';
+    sun.style.display=dark?'':'none';
+  }
+  sync();
+  tb.addEventListener('click',function(){
+    var dark=root.getAttribute('data-theme')==='dark';
+    root.setAttribute('data-theme',dark?'light':'dark');
+    try{localStorage.setItem('nyy-theme',dark?'light':'dark')}catch(e){}
+    sync();
+  });
+
+  /* Reveal on scroll */
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduced){root.classList.add('no-anim')}
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}});
+  },{threshold:.08,rootMargin:'0px 0px -4% 0px'});
+  document.querySelectorAll('.reveal').forEach(function(el){io.observe(el)});
+
+  /* Counters */
+  var cio=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(!e.isIntersecting)return;
+      var el=e.target,target=+el.dataset.target,suffix=el.dataset.suffix||'';
+      var t0=null,dur=1100;
+      function step(ts){
+        if(!t0)t0=ts;var p=Math.min((ts-t0)/dur,1);
+        var ease=1-Math.pow(1-p,3);
+        el.textContent=Math.round(target*ease)+suffix;
+        if(p<1)requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+      cio.unobserve(el);
+    });
+  },{threshold:.4});
+  document.querySelectorAll('.cnt').forEach(function(el){cio.observe(el)});
+
+  /* Scrollspy */
+  var links=document.querySelectorAll('.nav-link');
+  var spy=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(l){l.setAttribute('aria-current',l.getAttribute('href')==='#'+e.target.id?'true':'false')});
+      }
+    });
+  },{rootMargin:'-45% 0px -50% 0px'});
+  document.querySelectorAll('section[id]').forEach(function(s){spy.observe(s)});
+
+  /* Lightbox */
+  var lbox=document.getElementById('lbox'),limg=document.getElementById('lbox-img'),lcap=document.getElementById('lbox-cap');
+  function openLb(src,cap){limg.src=src;lcap.textContent=cap;lbox.classList.add('open');document.body.style.overflow='hidden'}
+  function closeLb(){lbox.classList.remove('open');limg.src='';document.body.style.overflow=''}
+  document.querySelectorAll('.frame[data-full]').forEach(function(f){
+    f.addEventListener('click',function(){openLb(f.dataset.full,f.dataset.cap)});
+  });
+  document.getElementById('lbox-close').addEventListener('click',closeLb);
+  lbox.addEventListener('click',function(e){if(e.target===lbox)closeLb()});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeLb()});
+
+  document.getElementById('gen-date').textContent=new Date().toISOString().slice(0,10);
+})();
+</script>
+</body>
+</html>

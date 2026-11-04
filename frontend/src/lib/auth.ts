@@ -47,22 +47,31 @@ function cleanupLegacyTokens() {
   }
 }
 
-function createGuestId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
-}
-
 export function getGuestId(): string {
   if (typeof window === "undefined") return "";
   try {
-    const existing = localStorage.getItem(GUEST_ID_STORAGE_KEY);
-    if (existing) return existing;
-    const next = createGuestId();
-    localStorage.setItem(GUEST_ID_STORAGE_KEY, next);
-    return next;
+    return localStorage.getItem(GUEST_ID_STORAGE_KEY) || "";
   } catch {
     return "";
   }
+}
+
+export function completeGuestIdMigration(response: Response): void {
+  if (
+    typeof window === "undefined" ||
+    window.location.protocol !== "https:" ||
+    response.headers.get("X-NYY-Guest-Migrated") !== "1"
+  ) return;
+  try {
+    localStorage.removeItem(GUEST_ID_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function withGuestIdMigration(headers: Record<string, string> = {}): Record<string, string> {
+  const guestId = getGuestId();
+  return guestId ? { ...headers, "X-NYY-Guest-ID": guestId } : headers;
 }
 
 // 初始化时清理旧 token
@@ -92,8 +101,9 @@ async function tryRefresh(): Promise<boolean> {
       const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "X-NYY-CSRF": "1" },
+        headers: withGuestIdMigration({ "X-NYY-CSRF": "1" }),
       });
+      completeGuestIdMigration(res);
       if (!res.ok) return false;
       const data = await res.json();
       setAccessToken(data.access_token, data.expires_in);
@@ -113,15 +123,14 @@ export async function authFetch(
 ): Promise<Response> {
   if (shouldRefreshAccessToken()) await tryRefresh();
   const token = getToken();
-  const headers: Record<string, string> = {
+  const headers = withGuestIdMigration({
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
-  };
-  const guestId = getGuestId();
-  if (guestId) headers["X-NYY-Guest-ID"] = guestId;
+  });
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   let res = await fetch(url, { ...options, headers });
+  completeGuestIdMigration(res);
 
   // 401 时尝试 refresh 一次；页面刷新后内存 token 为空也需要恢复登录
   if (res.status === 401) {
@@ -130,6 +139,7 @@ export async function authFetch(
       const newToken = getToken();
       if (newToken) headers["Authorization"] = `Bearer ${newToken}`;
       res = await fetch(url, { ...options, headers });
+      completeGuestIdMigration(res);
     }
   }
 
@@ -178,8 +188,10 @@ export async function getCaptchaChallenge(
   purpose: "email_send" | "login" = "email_send"
 ): Promise<{ challenge_id: string; challenge: unknown; expires_in: number }> {
   const res = await fetch(
-    `${API_BASE}/api/v1/captcha/challenge?purpose=${purpose}`
+    `${API_BASE}/api/v1/captcha/challenge?purpose=${purpose}`,
+    { headers: withGuestIdMigration() }
   );
+  completeGuestIdMigration(res);
   return handleResponse(res);
 }
 
@@ -191,13 +203,14 @@ export async function verifyCaptcha(
 ): Promise<{ captcha_token: string; expires_in: number }> {
   const res = await fetch(`${API_BASE}/api/v1/captcha/verify`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withGuestIdMigration({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       challenge_id: challengeId,
       purpose,
       payload,
     }),
   });
+  completeGuestIdMigration(res);
   return handleResponse(res);
 }
 
@@ -209,9 +222,10 @@ export async function sendCode(
 ): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/v1/auth/send-code`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withGuestIdMigration({ "Content-Type": "application/json" }),
     body: JSON.stringify({ email, purpose, captcha_token: captchaToken }),
   });
+  completeGuestIdMigration(res);
   return handleResponse(res);
 }
 
@@ -222,14 +236,13 @@ export async function register(
   code: string
 ): Promise<{ message: string }> {
   const referralShareCode = getReferralShareCode();
-  const guestId = getGuestId();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (guestId) headers["X-NYY-Guest-ID"] = guestId;
+  const headers = withGuestIdMigration({ "Content-Type": "application/json" });
   const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
     headers,
     body: JSON.stringify({ email, password, code, referral_share_code: referralShareCode }),
   });
+  completeGuestIdMigration(res);
   const result = await handleResponse<{ message: string }>(res);
   clearGrowthAttribution();
   return result;
@@ -246,10 +259,11 @@ export async function login(
 
   const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withGuestIdMigration({ "Content-Type": "application/json" }),
     credentials: "same-origin",
     body: JSON.stringify(body),
   });
+  completeGuestIdMigration(res);
 
   if (res.status === 428) {
     const data = await res.json();
@@ -277,14 +291,13 @@ export async function bootstrapSession(): Promise<BootstrapResponse> {
   if (bootstrapCache && now - bootstrapCache.at < BOOTSTRAP_DEDUPE_MS) return bootstrapCache.data;
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const guestId = getGuestId();
-    if (guestId) headers["X-NYY-Guest-ID"] = guestId;
+    const headers = withGuestIdMigration({ "Content-Type": "application/json" });
     const res = await fetch(`${API_BASE}/api/v1/auth/bootstrap`, {
       method: "POST",
       credentials: "same-origin",
       headers,
     });
+    completeGuestIdMigration(res);
     const data = await handleResponse<BootstrapResponse>(res);
     if (data.auth.status !== "user") clearAccessToken();
     bootstrapCache = { data, at: Date.now() };
@@ -303,20 +316,22 @@ export async function resetPassword(
 ): Promise<{ message: string }> {
   const res = await fetch(`${API_BASE}/api/v1/auth/reset-password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withGuestIdMigration({ "Content-Type": "application/json" }),
     body: JSON.stringify({ email, code, new_password: newPassword }),
   });
+  completeGuestIdMigration(res);
   return handleResponse(res);
 }
 
 /** 登出 */
 export async function logout() {
   try {
-    await fetch(`${API_BASE}/api/v1/auth/logout`, {
+    const response = await fetch(`${API_BASE}/api/v1/auth/logout`, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "X-NYY-CSRF": "1" },
+      headers: withGuestIdMigration({ "X-NYY-CSRF": "1" }),
     });
+    completeGuestIdMigration(response);
   } catch {
     // 忽略登出错误
   } finally {

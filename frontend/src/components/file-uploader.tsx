@@ -15,6 +15,7 @@ import { formatXhrStatusError, getErrorMessage, HttpStatusError, isSuccessfulHtt
 import { probeMediaMetadata, shouldProbeMediaMetadata, checkCodecCompatibility } from "@/lib/media-metadata";
 import type { DebugLogFn } from "@/lib/debug";
 import { getAvailableRetentionCoupons, getGrowthMe, type GrowthMe } from "@/lib/growth";
+import { uploadWithTTUploader } from "@/lib/tt-uploader";
 import {
   clearExpiredUploadSessions,
   createUploadSession,
@@ -111,6 +112,7 @@ export function FileUploader({
   const [uploadMetrics, setUploadMetrics] = useState({ uploadedBytes: 0, speedBps: 0, elapsedMs: 0 });
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<Map<string, XMLHttpRequest>>(new Map());
+  const sdkAbortRef = useRef<Map<string, () => void>>(new Map());
   const activeUploadBatchIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
   const fileLoadedRef = useRef<Map<string, number>>(new Map());
@@ -186,6 +188,8 @@ export function FileUploader({
     }
     abortRef.current.forEach((xhr) => xhr.abort());
     abortRef.current.clear();
+    sdkAbortRef.current.forEach((cancel) => cancel());
+    sdkAbortRef.current.clear();
     setOverall("idle");
     setFiles([]);
     setEmptyDirs([]);
@@ -381,6 +385,8 @@ export function FileUploader({
   const abortActiveUploads = () => {
     abortRef.current.forEach((xhr) => xhr.abort());
     abortRef.current.clear();
+    sdkAbortRef.current.forEach((cancel) => cancel());
+    sdkAbortRef.current.clear();
   };
 
   const updateUploadMetrics = (force = false) => {
@@ -606,6 +612,177 @@ export function FileUploader({
     throw new Error(lastError);
   };
 
+  /** 使用 TTUploader 直传 TOS，降级策略由调用方统一处理。 */
+  const uploadWithTTUploaderPrimary = async (
+    entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean,
+  ): Promise<StoredCommitItem> => {
+    const fileSize = entry.file.size;
+    const sessionFile = session.files.find((f) => f.file_key === fileKey);
+    if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
+    if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
+
+    debugLog?.("upload", "tt:start", { fileName: entry.uploadName, fileSize });
+
+    return new Promise<StoredCommitItem>((resolve, reject) => {
+      const cancel = uploadWithTTUploader(entry.file, {
+        uploadName: entry.uploadName,
+        uploadBatchId: session.upload_batch_id,
+        logicalFileId: sessionFile.logical_file_id,
+      }, {
+        onProgress: (p) => {
+          updateFile(entry.id, { progress: p.percent, state: "uploading" });
+          recordFileLoaded(entry.id, p.loaded);
+        },
+        onError: (err) => {
+          sdkAbortRef.current.delete(entry.id);
+          debugLog?.("upload", "tt:error", { fileName: entry.uploadName, error: err.message });
+          reject(err);
+        },
+        onComplete: (result) => {
+          sdkAbortRef.current.delete(entry.id);
+          debugLog?.("upload", "tt:complete", { fileName: entry.uploadName, commitToken: result.commitToken.slice(0, 8) });
+          updateFile(entry.id, {
+            state: "done",
+            progress: 100,
+            commitToken: result.commitToken,
+            storeUri: result.storeUri,
+          });
+          recordFileLoaded(entry.id, fileSize, true);
+          const storedItem = makeStoredCommitItem({
+            commit_token: result.commitToken,
+            store_uri: result.storeUri,
+            logical_file_id: sessionFile.logical_file_id,
+            chunk_index: 0,
+            chunk_total: 1,
+          }, result.commitTokenExpiresAt);
+          sessionFile.commit_items[0] = storedItem;
+          if (persistSession) {
+            markUploadChunkComplete(session.upload_batch_id, fileKey, 0, storedItem)
+              .catch((err) => {
+                setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
+              })
+              .finally(() => resolve(storedItem));
+          } else {
+            resolve(storedItem);
+          }
+        },
+        onCancel: () => {
+          sdkAbortRef.current.delete(entry.id);
+          reject(new Error("上传已取消"));
+        },
+      }, debugLog);
+      sdkAbortRef.current.set(entry.id, cancel);
+    });
+  };
+
+  /** 小文件上传（旧 XHR 路径）— 仅供 TTUploader 失败时降级使用。 */
+  const uploadSingleFileLegacy = async (
+    entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean,
+  ): Promise<StoredCommitItem> => {
+    const sessionFile = session.files.find((f) => f.file_key === fileKey);
+    if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
+    if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
+
+    let lastError = "";
+    let crc32 = "";
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        updateFile(entry.id, { state: "hashing", progress: 0, retries: attempt });
+        if (!crc32) {
+          crc32 = await computeCRC32(entry.file);
+        }
+        updateFile(entry.id, { state: "uploading", progress: 0 });
+        const uploadName = entry.uploadName;
+        const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
+        const initRes = await uploadInit({
+          file_name: uploadName,
+          file_size: entry.file.size,
+          file_ext: ext,
+          content_type: entry.file.type || "",
+          chunk_index: 0,
+          chunk_total: 1,
+          logical_file_id: sessionFile.logical_file_id,
+          logical_file_size: entry.file.size,
+          upload_batch_id: session.upload_batch_id,
+        });
+        if (entry.file.size > 0 && initRes.upload_url) {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            abortRef.current.set(entry.id, xhr);
+            xhr.open("POST", initRes.upload_url);
+            xhr.timeout = SMALL_FILE_XHR_TIMEOUT;
+            xhr.setRequestHeader("Authorization", initRes.authorization);
+            xhr.setRequestHeader("Content-CRC32", crc32);
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                updateFile(entry.id, { progress: Math.round((e.loaded / e.total) * 100) });
+                recordFileLoaded(entry.id, e.loaded);
+              }
+            };
+            xhr.onload = () => {
+              abortRef.current.delete(entry.id);
+              if (!isSuccessfulHttpStatus(xhr.status)) {
+                reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
+                return;
+              }
+              try {
+                const body = JSON.parse(xhr.responseText);
+                if (body.code && body.code !== 2000) {
+                  reject(new Error(body.message || `TOS error: ${body.code}`));
+                  return;
+                }
+              } catch {
+                // TOS 成功响应可能没有 JSON body。
+              }
+              resolve();
+            };
+            xhr.onerror = () => {
+              abortRef.current.delete(entry.id);
+              reject(new Error(formatXhrStatusError(0, "网络错误")));
+            };
+            xhr.ontimeout = () => {
+              abortRef.current.delete(entry.id);
+              reject(new Error("上传超时，正在重试"));
+            };
+            xhr.onabort = () => {
+              abortRef.current.delete(entry.id);
+              reject(new Error("上传已取消"));
+            };
+            xhr.send(entry.file);
+          });
+        }
+        const storedItem = makeStoredCommitItem({
+          commit_token: initRes.commit_token,
+          store_uri: initRes.store_uri,
+          logical_file_id: sessionFile.logical_file_id,
+          chunk_index: 0,
+          chunk_total: 1,
+        }, initRes.commit_token_expires_at);
+        sessionFile.commit_items[0] = storedItem;
+        if (persistSession) {
+          await markUploadChunkComplete(session.upload_batch_id, fileKey, 0, storedItem).catch((err) => {
+            setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
+          });
+        }
+        updateFile(entry.id, {
+          state: "done",
+          progress: 100,
+          commitToken: initRes.commit_token,
+          storeUri: initRes.store_uri,
+        });
+        recordFileLoaded(entry.id, entry.file.size, true);
+        return storedItem;
+      } catch (err) {
+        lastError = getErrorMessage(err, "上传失败");
+        debugLog?.("upload", "legacy:error", { fileName: entry.uploadName, attempt, error: lastError });
+        if (cancelledRef.current) throw new Error("上传已取消");
+        if (!isRetryableUploadError(err)) throw new Error(lastError);
+        if (attempt < MAX_RETRIES) await delay(2000 * 2 ** attempt);
+      }
+    }
+    throw new Error(lastError);
+  };
+
   /** 大文件 multipart 上传：init → 并发传 part → merge。返回 commit 用的 StoredCommitItem。 */
   const uploadMultipartFile = async (
     entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean,
@@ -715,7 +892,6 @@ export function FileUploader({
   const uploadSingleFile = async (entry: FileEntry, fileKey: string, session: UploadSession, persistSession: boolean): Promise<StoredCommitItem[]> => {
     const fileSize = entry.file.size;
     const isMultipart = fileSize > MULTIPART_THRESHOLD;
-    const contentType = entry.file.type || "";
     const sessionFile = session.files.find((candidate) => candidate.file_key === fileKey);
     if (!sessionFile) throw new Error("断点续传状态异常，请重新选择文件上传");
     if (!sessionFile.logical_file_id) sessionFile.logical_file_id = generateUUID();
@@ -726,150 +902,40 @@ export function FileUploader({
       logicalFileId: sessionFile.logical_file_id,
     });
 
-    if (isMultipart) {
-      const item = await uploadMultipartFile(entry, fileKey, session, persistSession);
-      return [item];
+    const existing = sessionFile.commit_items[0];
+    if (isStoredCommitItemFresh(existing)) {
+      const normalizedExisting = existing.logical_file_id ? existing : {
+        ...existing,
+        logical_file_id: sessionFile.logical_file_id,
+        chunk_index: 0,
+        chunk_total: 1,
+      };
+      sessionFile.commit_items[0] = normalizedExisting;
+      updateFile(entry.id, { state: "done", progress: 100, commitToken: normalizedExisting.commit_token, storeUri: normalizedExisting.store_uri });
+      recordFileLoaded(entry.id, entry.file.size, true);
+      debugLog?.("upload", "file:resume-hit", { fileName: entry.uploadName, chunkIndex: 0, chunkTotal: 1 });
+      return [normalizedExisting];
     }
 
-    // 小文件：单次直传
-    {
-      const existing = sessionFile.commit_items[0];
-      if (isStoredCommitItemFresh(existing)) {
-        const normalizedExisting = existing.logical_file_id ? existing : {
-          ...existing,
-          logical_file_id: sessionFile.logical_file_id,
-          chunk_index: 0,
-          chunk_total: 1,
-        };
-        sessionFile.commit_items[0] = normalizedExisting;
-        updateFile(entry.id, { state: "done", progress: 100, commitToken: normalizedExisting.commit_token, storeUri: normalizedExisting.store_uri });
-        recordFileLoaded(entry.id, entry.file.size, true);
-        debugLog?.("upload", "file:resume-hit", { fileName: entry.uploadName, chunkIndex: 0, chunkTotal: 1 });
-        return [normalizedExisting];
-      }
+    if (fileSize === 0) {
+      const storedItem = await uploadSingleFileLegacy(entry, fileKey, session, persistSession);
+      return [storedItem];
+    }
 
-      // Small file: single upload (original logic)
-      let lastError = "";
-      let crc32 = "";
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          updateFile(entry.id, { state: "hashing", progress: 0, retries: attempt });
-          if (!crc32) {
-            const hashStartedAt = performance.now();
-            debugLog?.("upload", "file:hash:start", { fileName: entry.uploadName, fileSize, attempt });
-            crc32 = await computeCRC32(entry.file);
-            debugLog?.("upload", "file:hash:done", { fileName: entry.uploadName, hashMs: Math.round(performance.now() - hashStartedAt) });
-          }
-
-          updateFile(entry.id, { state: "uploading", progress: 0 });
-          const uploadName = entry.uploadName;
-          const ext = uploadName.includes(".") ? uploadName.split(".").pop() || "" : "";
-          const initStartedAt = performance.now();
-          debugLog?.("upload", "file:init:start", { fileName: uploadName, fileSize, attempt });
-          const initRes = await uploadInit({
-            file_name: uploadName,
-            file_size: entry.file.size,
-            file_ext: ext,
-            content_type: contentType,
-            chunk_index: 0,
-            chunk_total: 1,
-            logical_file_id: sessionFile.logical_file_id,
-            logical_file_size: fileSize,
-            upload_batch_id: session.upload_batch_id,
-          });
-          debugLog?.("upload", "file:init:done", {
-            fileName: uploadName,
-            initMs: Math.round(performance.now() - initStartedAt),
-            commitTokenExpiresAt: initRes.commit_token_expires_at,
-          });
-
-          if (entry.file.size > 0 && initRes.upload_url) {
-            const uploadStartedAt = performance.now();
-            debugLog?.("upload", "file:xhr:start", { fileName: uploadName, fileSize, attempt });
-            await new Promise<void>((resolve, reject) => {
-              const xhr = new XMLHttpRequest();
-              abortRef.current.set(entry.id, xhr);
-              xhr.open("POST", initRes.upload_url);
-              xhr.timeout = SMALL_FILE_XHR_TIMEOUT;
-              xhr.setRequestHeader("Authorization", initRes.authorization);
-              xhr.setRequestHeader("Content-CRC32", crc32);
-              xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                  updateFile(entry.id, { progress: Math.round((e.loaded / e.total) * 100) });
-                  recordFileLoaded(entry.id, e.loaded);
-                }
-              };
-              xhr.onload = () => {
-                abortRef.current.delete(entry.id);
-                if (!isSuccessfulHttpStatus(xhr.status)) {
-                  reject(new Error(formatXhrStatusError(xhr.status, "上传到存储服务失败")));
-                  return;
-                }
-                try {
-                  const body = JSON.parse(xhr.responseText);
-                  if (body.code && body.code !== 2000) {
-                    reject(new Error(body.message || `TOS error: ${body.code}`));
-                    return;
-                }
-              } catch { /* non-JSON response is OK */ }
-                debugLog?.("upload", "file:xhr:done", { fileName: uploadName, status: xhr.status, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-                resolve();
-              };
-              xhr.onerror = () => {
-                abortRef.current.delete(entry.id);
-                debugLog?.("upload", "file:xhr:error", { fileName: uploadName, status: 0, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-                reject(new Error(formatXhrStatusError(0, "网络错误")));
-              };
-              xhr.ontimeout = () => {
-                abortRef.current.delete(entry.id);
-                debugLog?.("upload", "file:xhr:timeout", { fileName: uploadName, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-                reject(new Error("上传超时，正在重试"));
-              };
-              xhr.onabort = () => {
-                abortRef.current.delete(entry.id);
-                debugLog?.("upload", "file:xhr:abort", { fileName: uploadName, uploadMs: Math.round(performance.now() - uploadStartedAt) });
-                reject(new Error("上传已取消"));
-              };
-              xhr.send(entry.file);
-            });
-          }
-
-          const storedItem = makeStoredCommitItem({
-            commit_token: initRes.commit_token,
-            store_uri: initRes.store_uri,
-            logical_file_id: sessionFile.logical_file_id,
-            chunk_index: 0,
-            chunk_total: 1,
-          }, initRes.commit_token_expires_at);
-          sessionFile.commit_items[0] = storedItem;
-          if (persistSession) {
-            await markUploadChunkComplete(session.upload_batch_id, fileKey, 0, storedItem).catch((err) => {
-              setResumeMessage(`断点续传状态保存失败：${getErrorMessage(err, "无法保存本地上传进度")}`);
-            });
-          }
-          updateFile(entry.id, { state: "done", progress: 100, commitToken: initRes.commit_token, storeUri: initRes.store_uri });
-          recordFileLoaded(entry.id, entry.file.size, true);
-          debugLog?.("upload", "file:done", { fileName: entry.uploadName, fileSize, chunkTotal: 1 });
-          return [storedItem];
-        } catch (err) {
-          lastError = getErrorMessage(err, "上传失败");
-          debugLog?.("upload", "file:error", { fileName: entry.uploadName, attempt, error: lastError, retryable: isRetryableUploadError(err) });
-          if (cancelledRef.current) {
-            updateFile(entry.id, { state: "error", error: "上传已取消" });
-            throw new Error("上传已取消");
-          }
-          if (!isRetryableUploadError(err)) {
-            abortActiveUploads();
-            updateFile(entry.id, { state: "error", error: lastError });
-            throw new Error(lastError);
-          }
-          if (attempt < MAX_RETRIES) {
-            await delay(2000 * 2 ** attempt);
-          }
-        }
-      }
-      updateFile(entry.id, { state: "error", error: lastError });
-      throw new Error(lastError);
+    try {
+      const storedItem = await uploadWithTTUploaderPrimary(entry, fileKey, session, persistSession);
+      return [storedItem];
+    } catch (err) {
+      if (cancelledRef.current) throw new Error("上传已取消");
+      debugLog?.("upload", "tt:fallback", {
+        fileName: entry.uploadName,
+        fallback: isMultipart ? "multipart" : "xhr",
+        error: getErrorMessage(err, "TTUploader 上传失败"),
+      });
+      const storedItem = isMultipart
+        ? await uploadMultipartFile(entry, fileKey, session, persistSession)
+        : await uploadSingleFileLegacy(entry, fileKey, session, persistSession);
+      return [storedItem];
     }
   };
 

@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+.doubao_session*.json
+tests
+var

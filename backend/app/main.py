@@ -6,7 +6,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
@@ -99,6 +99,24 @@ def create_app() -> FastAPI:
     # 版本化 API
     app.include_router(api_v1_router, prefix="/api/v1")
 
+    @app.middleware("http")
+    async def guest_identity_middleware(request: Request, call_next):
+        from app.services.visitor_identity import (
+            resolve_request_guest_identity,
+            set_guest_cookie,
+        )
+
+        if not request.url.path.startswith("/api/v1/"):
+            return await call_next(request)
+        guest_id, should_set_cookie, migrated_legacy_header = resolve_request_guest_identity(request)
+        request.state.guest_id = guest_id
+        response = await call_next(request)
+        if should_set_cookie:
+            set_guest_cookie(response, guest_id)
+        if migrated_legacy_header:
+            response.headers["X-NYY-Guest-Migrated"] = "1"
+        return response
+
     if settings.is_dev:
         app.add_middleware(
             CORSMiddleware,
@@ -106,6 +124,7 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["X-NYY-Guest-Migrated"],
         )
 
     return app

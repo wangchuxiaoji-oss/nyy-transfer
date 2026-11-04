@@ -79,6 +79,26 @@ GET http://127.0.0.1:8000/api/v1/healthz
 GET http://127.0.0.1:8000/api/docs
 ```
 
+图片画廊的 RAW / HEIC 派生任务由独立 Docker Worker 处理。完成数据库迁移后，在仓库根目录启动：
+
+```bash
+cd /data/nyy
+docker compose build media-worker
+docker compose up -d media-worker
+docker compose logs -f media-worker
+```
+
+Worker 只接收 `MEDIA_WORKER_DATABASE_URL` 和专用豆包会话，不注入后端完整 `.env`。首次启动前需把共享会话迁移到专用目录，并让后端 `DOUBAO_SESSION_FILE` 指向同一文件：
+
+```bash
+install -d -m 700 -o nyy -g nyy /data/nyy/runtime/doubao-session
+mv /data/nyy/backend/.doubao_session.json /data/nyy/runtime/doubao-session/.doubao_session.json
+chown nyy:nyy /data/nyy/runtime/doubao-session/.doubao_session.json
+chmod 600 /data/nyy/runtime/doubao-session/.doubao_session.json
+```
+
+生产服务器默认使用 `MEDIA_WORKER_UID=993`、`MEDIA_WORKER_GID=985`；其他环境需将这两个 Compose 变量设为会话目录所有者的 UID/GID。启动 Compose 时通过环境变量或 `--env-file backend/.env` 提供 `MEDIA_WORKER_DATABASE_URL`。Worker 使用只读根文件系统、独立临时卷和普通 Compose 网络；派生对象当前只做数据库级逻辑清理，撤销或过期分享不会再暴露其访问地址。
+
 ### 4.3 启动前端
 
 ```bash
@@ -150,12 +170,19 @@ PLAYWRIGHT_WEB_SERVER=1 PLAYWRIGHT_WEB_SERVER_COMMAND="npm run start" npx playwr
 | `TEST_DATABASE_SYNC_URL` | `postgresql+psycopg://nyy:nyy@127.0.0.1:5432/nyy_test` | Pytest 专用同步 DB |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis |
 | `SECRET_KEY` | 至少 32 字节 | 应用密钥 |
+| `GUEST_COOKIE_NAME` | `__Host-nyy_guest` | 服务端签名游客身份 Cookie；生产环境不可改名 |
+| `GUEST_COOKIE_MAX_AGE_DAYS` | `400` | 游客身份 Cookie 最长保留天数 |
+| `GUEST_IP_QUOTA_MULTIPLIER` | `4` | 同一 IP 游客周期总额度相对单游客的宽松倍数 |
+| `GUEST_IP_ACTIVE_SHARE_MULTIPLIER` | `4` | 同一 IP 游客活跃分享上限相对单游客的宽松倍数 |
 | `JWT_SECRET` | 至少 32 字节 | JWT 密钥 |
 | `DOUBAO_SESSION_FILE` | `/data/nyy/backend/.doubao_session.json` | 豆包会话文件 |
 | `DOUBAO_AUTO_VERIFY_ENABLED` | `true` | 是否启动豆包 A/B Session 自动验证 |
 | `DOUBAO_AUTO_VERIFY_HEARTBEAT_INTERVAL_SECONDS` | `600` | 豆包登录心跳间隔 |
 | `DOUBAO_AUTO_VERIFY_PROBE_INTERVAL_SECONDS` | `1800` | 豆包上传授权探活间隔 |
 | `DOUBAO_AUTO_VERIFY_FAILURE_NOTIFY_INTERVAL_SECONDS` | `21600` | 同一失败 Bark 重复推送最小间隔 |
+| `IMAGEX_ACCESS_KEY` / `IMAGEX_SECRET_KEY` | 留空 | 可选 ImageX 管理 API 回退凭据；豆包资源删除失败时需要 `ImageX:DeleteImageUploadFiles` 权限 |
+| `IMAGEX_SESSION_TOKEN` | 留空 | 使用临时管理凭据时对应的会话令牌；永久 AK/SK 留空 |
+| `IMAGEX_SERVICE_ID` | 留空 | 待管理的 ImageX 服务 ID |
 | `BARK_PUSH_URL` | `https://api.day.app/<key>` | Bark 完整推送地址，留空则只写日志 |
 | `SMTP_HOST` | `127.0.0.1` | 邮件发送 SMTP |
 | `SMTP_PORT` | `25` | 邮件发送 SMTP 端口 |
@@ -220,11 +247,13 @@ IP 来源依赖 Nginx 覆盖传入的转发头：`X-Real-IP` 和 `X-Forwarded-Fo
 
 游客身份与额度：
 
-- 前端为未登录游客生成 `localStorage.nyy_guest_id`，并随 API 请求发送 `X-NYY-Guest-ID`。
-- 游客上传额度和活跃分享数量按 `guest_id` 隔离，Redis key 为 `nyy:quota:guest:{guest_id}:bytes`。
+- 服务端为未登录游客签发 HMAC 签名的 `__Host-nyy_guest` Cookie，使用 `Secure`、`HttpOnly`、`SameSite=Lax` 和 `Path=/`，浏览器脚本不能读取或改写身份。
+- 旧版 `localStorage.nyy_guest_id` 仅在首次 HTTPS 请求中通过 `X-NYY-Guest-ID` 迁移；服务端确认后前端删除旧值，后续以签名 Cookie 为准。
+- 游客上传额度和活跃分享数量按 `guest_id` 隔离，同时按创建 IP 应用默认 4 倍的宽松总额度与活跃分享上限，防止清 Cookie 或轮换身份绕过限制。
 - iOS / iPadOS 主屏 Web App 与 Safari 标签页使用互相隔离的本地存储；同一网站添加到主屏后，看不到 Safari 中保存的 `nyy_guest_shares`。
 - 因此 Safari 创建的游客分享不会自动出现在主屏 Web App 的游客列表；主屏 Web App 自己上传的新分享会在主屏 Web App 内展示。
-- 缺失 `X-NYY-Guest-ID` 的旧客户端按 `ip:{ip}` 回退，只作为兼容路径，不作为新浏览器游客身份。
+- 新客户端不再生成本地游客 ID；无有效 Cookie 时由服务端生成新的随机身份。
+- 推荐归因继续使用独立的服务端随机 `nyy_visitor` Cookie，不接受旧游客请求头作为可信增长身份，避免迁移兼容削弱防作弊边界。
 
 关键注意：`guest-mine` 必须注册在 `/{code}` 路由之前，否则 FastAPI 会把 `guest-mine` 当成短码。
 
